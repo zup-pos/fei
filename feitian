@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 3.7
+-- Version: 3.9
 
 -- Instances:
 local main = Instance.new("ScreenGui")
@@ -192,7 +192,6 @@ onof.MouseButton1Click:Connect(function()
         nowe = true
         onof.Text = "飞天(开启)"
         stopTpwalking()
-        startTpwalking()
 
         local char = player.Character
         if not char then return end
@@ -213,9 +212,10 @@ onof.MouseButton1Click:Connect(function()
         local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
         if not torso then return end
 
+        startTpwalking()
+
         local ctrl = {f = 0, b = 0, l = 0, r = 0}
         local lastctrl = {f = 0, b = 0, l = 0, r = 0}
-        local maxspeed = 50
         local flyspeed = 0
 
         local bg = Instance.new("BodyGyro")
@@ -235,6 +235,8 @@ onof.MouseButton1Click:Connect(function()
 
                 local camera = workspace.CurrentCamera
                 if not camera then continue end
+
+                local maxspeed = 50 * speeds
 
                 if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
                     flyspeed = flyspeed + 0.5 + (flyspeed / maxspeed)
@@ -296,6 +298,7 @@ plus.MouseButton1Click:Connect(function()
     speeds = speeds + 1
     speed.Text = tostring(speeds)
     if nowe then
+    else
         stopTpwalking()
         startTpwalking()
     end
@@ -310,6 +313,7 @@ mine.MouseButton1Click:Connect(function()
         speeds = speeds - 1
         speed.Text = tostring(speeds)
         if nowe then
+        else
             stopTpwalking()
             startTpwalking()
         end
