@@ -1,0 +1,569 @@
+-- Gui to Lua
+-- Version: 4.0
+
+-- Instances:
+local main = Instance.new("ScreenGui")
+local Frame = Instance.new("Frame")
+local up = Instance.new("TextButton")
+local down = Instance.new("TextButton")
+local onof = Instance.new("TextButton")
+local TextLabel = Instance.new("TextLabel")
+local plus = Instance.new("TextButton")
+local speed = Instance.new("TextLabel")
+local mine = Instance.new("TextButton")
+local hide = Instance.new("TextButton")
+
+-- Properties:
+main.Name = "main"
+main.Parent = game.CoreGui
+main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+main.ResetOnSpawn = false
+
+Frame.Parent = main
+Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
+Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
+Frame.Position = UDim2.new(0.100320168, 0, 0.379746825, 0)
+Frame.Size = UDim2.new(0, 190, 0, 56)
+Frame.Active = true
+Frame.Draggable = true
+
+
+up.Name = "up"
+up.Parent = Frame
+up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
+up.Position = UDim2.new(0, 0, 0, 0)
+up.Size = UDim2.new(0, 44, 0, 28)
+up.Font = Enum.Font.SourceSans
+up.Text = "上升"
+up.TextColor3 = Color3.fromRGB(0, 0, 0)
+up.TextScaled = true
+up.TextSize = 14.000
+
+plus.Name = "plus"
+plus.Parent = Frame
+plus.BackgroundColor3 = Color3.fromRGB(133, 145, 255)
+plus.Position = UDim2.new(0, 44, 0, 0)
+plus.Size = UDim2.new(0, 44, 0, 28)
+plus.Font = Enum.Font.SourceSans
+plus.Text = "加速"
+plus.TextColor3 = Color3.fromRGB(0, 0, 0)
+plus.TextScaled = true
+plus.TextSize = 14.000
+
+TextLabel.Parent = Frame
+TextLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+TextLabel.Position = UDim2.new(0, 88, 0, 0)
+TextLabel.Size = UDim2.new(0, 44, 0, 28)
+TextLabel.Font = Enum.Font.SourceSans
+TextLabel.Text = "UI"
+TextLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+TextLabel.TextScaled = true
+TextLabel.TextSize = 14.000
+
+hide.Name = "hide"
+hide.Parent = Frame
+hide.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+hide.Position = UDim2.new(0, 132, 0, 0)
+hide.Size = UDim2.new(0, 58, 0, 28)
+hide.Font = Enum.Font.SourceSans
+hide.Text = "隐藏"
+hide.TextColor3 = Color3.fromRGB(0, 0, 0)
+hide.TextScaled = true
+hide.TextSize = 14.000
+
+
+down.Name = "down"
+down.Parent = Frame
+down.BackgroundColor3 = Color3.fromRGB(215, 255, 121)
+down.Position = UDim2.new(0, 0, 0, 28)
+down.Size = UDim2.new(0, 44, 0, 28)
+down.Font = Enum.Font.SourceSans
+down.Text = "下降"
+down.TextColor3 = Color3.fromRGB(0, 0, 0)
+down.TextScaled = true
+down.TextSize = 14.000
+
+mine.Name = "mine"
+mine.Parent = Frame
+mine.BackgroundColor3 = Color3.fromRGB(123, 255, 247)
+mine.Position = UDim2.new(0, 44, 0, 28)
+mine.Size = UDim2.new(0, 44, 0, 28)
+mine.Font = Enum.Font.SourceSans
+mine.Text = "减速"
+mine.TextColor3 = Color3.fromRGB(0, 0, 0)
+mine.TextScaled = true
+mine.TextSize = 14.000
+
+speed.Name = "speed"
+speed.Parent = Frame
+speed.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
+speed.Position = UDim2.new(0, 88, 0, 28)
+speed.Size = UDim2.new(0, 44, 0, 28)
+speed.Font = Enum.Font.SourceSans
+speed.Text = "1"
+speed.TextColor3 = Color3.fromRGB(0, 0, 0)
+speed.TextScaled = true
+speed.TextSize = 14.000
+
+onof.Name = "onof"
+onof.Parent = Frame
+onof.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
+onof.Position = UDim2.new(0, 132, 0, 28)
+onof.Size = UDim2.new(0, 58, 0, 28)
+onof.Font = Enum.Font.SourceSans
+onof.Text = "飞天(关闭)"
+onof.TextColor3 = Color3.fromRGB(0, 0, 0)
+onof.TextScaled = true
+onof.TextSize = 14.000
+
+
+local speeds = 1
+local nowe = false
+local tpwalking = false
+
+local player = game:GetService("Players").LocalPlayer
+local RunService = game:GetService("RunService")
+
+
+local playerGui = player:WaitForChild("PlayerGui")
+local tween = game:GetService("TweenService")
+local textSvc = game:GetService("TextService")
+
+local notifs = {}
+local spacing, startY = 5, 20
+local readyQueue = {}
+
+local function reposition()
+    local y = startY
+    for _, n in ipairs(notifs) do
+        local f = n.frame
+        tween:Create(f, TweenInfo.new(0.2), {Position = UDim2.new(1, -f.Size.X.Offset-10, 0, y)}):Play()
+        y = y + n.height + spacing
+    end
+end
+
+local function remove(f)
+    for i, n in ipairs(notifs) do
+        if n.frame == f then
+            table.remove(notifs, i)
+            break
+        end
+    end
+end
+
+local function processReady()
+    while #readyQueue > 0 do
+        local n = table.remove(readyQueue)
+        if n and n.frame and n.frame.Parent then
+            local f, sg = n.frame, n.sg
+            local fadeOut = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            
+            local t1 = tween:Create(f, fadeOut, {BackgroundTransparency = 1})
+            tween:Create(n.title, fadeOut, {TextTransparency = 1}):Play()
+            tween:Create(n.line, fadeOut, {BackgroundTransparency = 1}):Play()
+            tween:Create(n.msg, fadeOut, {TextTransparency = 1}):Play()
+            
+            t1:Play()
+            t1.Completed:Wait()
+            
+            remove(f)
+            sg:Destroy()
+        end
+    end
+end
+
+function tanchuangxiaoxi(msg, title)
+    title = title or "弹窗消息"
+    msg = msg or "空消息"
+    
+    local p, tp, bp, th, lh = 2, 2, 2, 16, 1
+    local maxW, fTitle, fMsg = 400, Enum.Font.GothamBold, Enum.Font.Gotham
+    local fsT, fsM, bgC, bgT = 12, 11, Color3.fromRGB(30,30,30), 0.65
+    
+    local function getSize(txt, font, size, w)
+        return textSvc:GetTextSize(txt, size, font, Vector2.new(w or 1000, 1000))
+    end
+    
+    local titleW = getSize(title, fTitle, fsT).X
+    local msgW = getSize(msg, fMsg, fsM).X
+    local frameW = math.min(math.max(titleW, msgW) + 2*p, maxW)
+    local msgH = getSize(msg, fMsg, fsM, frameW-2*p).Y
+    local frameH = tp + th + lh + bp + msgH
+    
+    local sg = Instance.new("ScreenGui")
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+    
+    local f = Instance.new("Frame")
+    f.Parent = sg
+    f.Size = UDim2.new(0, frameW, 0, frameH)
+    f.Position = UDim2.new(1, -frameW-10, 0, -frameH)
+    f.BackgroundColor3 = bgC
+    f.BackgroundTransparency = bgT
+    f.BorderSizePixel = 0
+    f.ClipsDescendants = true
+    
+    local corner = Instance.new("UICorner")
+    corner.Parent = f
+    corner.CornerRadius = UDim.new(0, 6)
+    
+    local titleL = Instance.new("TextLabel")
+    titleL.Parent = f
+    titleL.Size = UDim2.new(1, -2*p, 0, th)
+    titleL.Position = UDim2.new(0, p, 0, tp)
+    titleL.BackgroundTransparency = 1
+    titleL.Text = title
+    titleL.TextColor3 = Color3.new(1, 1, 1)
+    titleL.Font = fTitle
+    titleL.TextSize = fsT
+    titleL.TextXAlignment = Enum.TextXAlignment.Center
+    titleL.TextYAlignment = Enum.TextYAlignment.Center
+    titleL.TextWrapped = false
+    titleL.TextTransparency = 0
+    
+    local line = Instance.new("Frame")
+    line.Parent = f
+    line.Size = UDim2.new(1, -2*p, 0, lh)
+    line.Position = UDim2.new(0, p, 0, tp+th)
+    line.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    line.BackgroundTransparency = 0.3
+    line.BorderSizePixel = 0
+    
+    local msgL = Instance.new("TextLabel")
+    msgL.Parent = f
+    msgL.Size = UDim2.new(1, -2*p, 0, msgH)
+    msgL.Position = UDim2.new(0, p, 0, tp+th+lh)
+    msgL.BackgroundTransparency = 1
+    msgL.Text = msg
+    msgL.TextColor3 = Color3.fromRGB(220, 220, 220)
+    msgL.Font = fMsg
+    msgL.TextSize = fsM
+    msgL.TextXAlignment = Enum.TextXAlignment.Center
+    msgL.TextYAlignment = Enum.TextYAlignment.Top
+    msgL.TextWrapped = true
+    msgL.TextTransparency = 0
+    
+    local notif = {
+        frame = f,
+        sg = sg,
+        title = titleL,
+        line = line,
+        msg = msgL,
+        height = frameH
+    }
+    
+    table.insert(notifs, 1, notif)
+    reposition()
+    
+    task.delay(3, function()
+        if notif.frame and notif.frame.Parent then
+            table.insert(readyQueue, notif)
+            processReady()
+        end
+    end)
+end
+
+
+local function stopTpwalking()
+    tpwalking = false
+end
+
+local function startTpwalking()
+    if tpwalking then return end
+    tpwalking = true
+    spawn(function()
+        local hb = RunService.Heartbeat
+        local chr, hum
+        while tpwalking do
+            hb:Wait()
+            chr = player.Character
+            if chr then
+                hum = chr:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    chr:TranslateBy(hum.MoveDirection * speeds)
+                end
+            end
+        end
+    end)
+end
+
+local function onCharacterAdded(char)
+    task.wait(0.7)
+    if nowe then
+        nowe = false
+        onof.Text = "飞天(关闭)"
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+                hum:SetStateEnabled(state, true)
+            end
+            hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+            hum.PlatformStand = false
+        end
+        char.Animate.Disabled = false
+        stopTpwalking()
+    end
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then
+    onCharacterAdded(player.Character)
+end
+
+onof.MouseButton1Click:Connect(function()
+    if nowe then
+        nowe = false
+        onof.Text = "飞天(关闭)"
+        stopTpwalking()
+        tanchuangxiaoxi("已关闭飞天", "飞天")
+
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+                    hum:SetStateEnabled(state, true)
+                end
+                hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+                hum.PlatformStand = false
+            end
+            char.Animate.Disabled = false
+        end
+    else
+        nowe = true
+        onof.Text = "飞天(开启)"
+        stopTpwalking()
+        tanchuangxiaoxi("已开启飞天", "飞天")
+
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if not hum then return end
+
+        char.Animate.Disabled = true
+        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+            track:AdjustSpeed(0)
+        end
+
+        for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+            hum:SetStateEnabled(state, false)
+        end
+        hum:ChangeState(Enum.HumanoidStateType.Swimming)
+        hum.PlatformStand = true
+
+        local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+        if not torso then return end
+
+        startTpwalking()
+
+        local ctrl = {f = 0, b = 0, l = 0, r = 0}
+        local lastctrl = {f = 0, b = 0, l = 0, r = 0}
+        local flyspeed = 0
+
+        local bg = Instance.new("BodyGyro")
+        bg.P = 9e4
+        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.CFrame = torso.CFrame
+        bg.Parent = torso
+
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0, 0.1, 0)
+        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.Parent = torso
+
+        pcall(function()
+            while nowe and player.Character and hum and hum.Parent and hum.Health > 0 do
+                RunService.Heartbeat:Wait()
+
+                local camera = workspace.CurrentCamera
+                if not camera then continue end
+
+                local maxspeed = 50 * speeds
+
+                if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
+                    flyspeed = flyspeed + 0.5 + (flyspeed / maxspeed)
+                    if flyspeed > maxspeed then flyspeed = maxspeed end
+                elseif not (ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0) and flyspeed ~= 0 then
+                    flyspeed = flyspeed - 1
+                    if flyspeed < 0 then flyspeed = 0 end
+                end
+
+                if (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0 then
+                    local moveDir = (camera.CFrame.LookVector * (ctrl.f + ctrl.b) + camera.CFrame.RightVector * (ctrl.l + ctrl.r)) * flyspeed
+                    bv.Velocity = moveDir
+                    lastctrl = {f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r}
+                elseif flyspeed ~= 0 then
+                    local moveDir = (camera.CFrame.LookVector * (lastctrl.f + lastctrl.b) + camera.CFrame.RightVector * (lastctrl.l + lastctrl.r)) * flyspeed
+                    bv.Velocity = moveDir
+                else
+                    bv.Velocity = Vector3.new(0, 0, 0)
+                end
+
+                bg.CFrame = camera.CFrame * CFrame.Angles(-math.rad((ctrl.f + ctrl.b) * 50 * flyspeed / maxspeed), 0, 0)
+            end
+        end)
+
+        bg:Destroy()
+        bv:Destroy()
+
+        if nowe then
+            nowe = false
+            onof.Text = "飞天(关闭)"
+            stopTpwalking()
+            if hum then
+                for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
+                    hum:SetStateEnabled(state, true)
+                end
+                hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+                hum.PlatformStand = false
+            end
+            if char then char.Animate.Disabled = false end
+        end
+    end
+end)
+
+up.MouseButton1Click:Connect(function()
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, 2, 0)
+    end
+end)
+
+down.MouseButton1Click:Connect(function()
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, -2, 0)
+    end
+end)
+
+
+plus.MouseButton1Click:Connect(function()
+    speeds = speeds + 1
+    speed.Text = tostring(speeds)
+end)
+
+mine.MouseButton1Click:Connect(function()
+    if speeds == 1 then
+        speed.Text = "速度不能少于1"
+        task.wait(1)
+        speed.Text = tostring(speeds)
+    else
+        speeds = speeds - 1
+        speed.Text = tostring(speeds)
+    end
+end)
+
+
+local miniWindow = nil
+local dragging = false
+local dragStartPos = nil
+local miniWindowStartPos = nil
+local frameWidth, frameHeight = 190, 56
+local hideOffsetX = 132
+local hideOffsetY = 0
+
+local function getScreenSize()
+    local camera = workspace.CurrentCamera
+    if camera and camera.ViewportSize then
+        return camera.ViewportSize
+    else
+        local success, result = pcall(function()
+            return game:GetService("GuiService"):GetScreenResolution()
+        end)
+        if success then
+            return result
+        else
+            return Vector2.new(1920, 1080)
+        end
+    end
+end
+
+hide.MouseButton1Click:Connect(function()
+    local absPos = hide.AbsolutePosition
+    Frame.Visible = false
+
+    miniWindow = Instance.new("Frame")
+    miniWindow.Name = "MiniUI"
+    miniWindow.Parent = main
+    miniWindow.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
+    miniWindow.BorderColor3 = Color3.fromRGB(103, 221, 213)
+    miniWindow.Size = UDim2.new(0, 58, 0, 28)
+    miniWindow.Position = UDim2.fromOffset(absPos.X, absPos.Y)
+    miniWindow.Active = true
+    miniWindow.Draggable = false
+
+    local miniButton = Instance.new("TextButton")
+    miniButton.Name = "MiniButton"
+    miniButton.Parent = miniWindow
+    miniButton.Size = UDim2.new(1, 0, 1, 0)
+    miniButton.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
+    miniButton.Text = "UI"
+    miniButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+    miniButton.TextScaled = true
+    miniButton.Font = Enum.Font.SourceSans
+    miniButton.Active = true
+    miniButton.Selectable = false
+
+    local function onInputBegan(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+            dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            miniWindowStartPos = miniWindow.AbsolutePosition
+        end
+    end
+
+    local function onInputChanged(input)
+        if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and dragStartPos then
+            local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+            local delta = currentPos - dragStartPos
+            
+            if not dragging and delta.Magnitude > 5 then
+                dragging = true
+            end
+            
+            if dragging then
+                local newPos = miniWindowStartPos + delta
+                miniWindow.Position = UDim2.fromOffset(newPos.X, newPos.Y)
+            end
+        end
+    end
+
+    local function onInputEnded(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if not dragging and dragStartPos then
+                local miniAbsPos = miniWindow.AbsolutePosition
+                local miniAbsSize = miniWindow.AbsoluteSize
+                local screenSize = getScreenSize()
+
+                local newX = miniAbsPos.X - hideOffsetX
+                local newY = miniAbsPos.Y - hideOffsetY
+
+                if newX < 0 then newX = 0 end
+                if newX + frameWidth > screenSize.X then newX = screenSize.X - frameWidth end
+                if newY < 0 then newY = 0 end
+                if newY + frameHeight > screenSize.Y then newY = screenSize.Y - frameHeight end
+
+                Frame.Position = UDim2.fromOffset(newX, newY)
+                Frame.Visible = true
+                miniWindow:Destroy()
+                miniWindow = nil
+            end
+            
+            dragging = false
+            dragStartPos = nil
+            miniWindowStartPos = nil
+        end
+    end
+
+    miniButton.InputBegan:Connect(onInputBegan)
+    miniButton.InputChanged:Connect(onInputChanged)
+    miniButton.InputEnded:Connect(onInputEnded)
+end)
+
+main.Destroying:Connect(function()
+    if miniWindow then
+        miniWindow:Destroy()
+        miniWindow = nil
+    end
+end)
