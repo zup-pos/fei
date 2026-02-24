@@ -1,8 +1,2 @@
 
-
-main.Destroying:Connect(function()
-    if miniWindow then
-        miniWindow:Destroy()
-        miniWindow = nil
-    end
 end)
