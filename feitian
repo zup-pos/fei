@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 5.5 (音量键开关版 - 无注释纯净版)
+-- Version: 5.5
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -141,6 +141,7 @@ local volumeKeyConnection = nil
 local customWidth = nil
 local customHeight = nil
 local miniWindow = nil
+local longPressSpeed = 0.01  -- 长按初始间隔（秒），可自定义
 
 -- ==================== 辅助函数 ====================
 local function getScreenSize()
@@ -532,7 +533,7 @@ local function enableVolumeKey()
     local hasVolumeDown = pcall(function() return Enum.KeyCode.VolumeDown end)
     local hasVolumeUp = pcall(function() return Enum.KeyCode.VolumeUp end)
     if not hasVolumeDown or not hasVolumeUp then
-        tanchuangxiaoxi("无法检测音量键控制", "提示")
+        tanchuangxiaoxi("您的设备不支持音量键控制", "提示")
         return
     end
 
@@ -614,7 +615,8 @@ local function showMainMenu()
         "",
         "1. 修复音量键在部分设备上报错的问题",
         "2. 音量键功能现可正常开关",
-        "3. 保持原有所有功能",
+        "3. 新增长按速度自定义（设置中可调整）",
+        "4. 保持原有所有功能",
         "",
         "功能介绍：",
         "- 上升/下降：单击移动，长按连续（步长可调）",
@@ -750,7 +752,8 @@ local function showMainMenu()
         "- 功能介绍：本页面",
         "- 设置：调整弹窗透明度、",
         "  启用音量键隐藏、",
-        "  设置屏幕尺寸",
+        "  设置屏幕尺寸、",
+        "  长按速度",
         "- 结束脚本：彻底停止",
         "",
         "音量键隐藏：",
@@ -809,70 +812,89 @@ local function showMainMenu()
     end)
             end
         },
-{
-    text = "⚙️ 设置",
-    callback = function(menu)
-        menu:Destroy()
-        local function createSettingMenu()
-            createMenu("设置", {
-                {
-                    text = "🔆 调整弹窗透明度",
-                    callback = function(subMenu)
-                        showInputDialog("输入透明度 (0-1)", tostring(popupTransparency), function(val)
-                            if val >= 0 and val <= 1 then
-                                popupTransparency = val
-                                tanchuangxiaoxi("弹窗透明度已设为 " .. val, "设置")
-                            else
-                                tanchuangxiaoxi("请输入0到1之间的数字", "错误")
+        {
+            text = "⚙️ 设置",
+            callback = function(menu)
+                menu:Destroy()
+                local function createSettingMenu()
+                    createMenu("设置", {
+                        {
+                            text = "🔆 调整弹窗透明度",
+                            callback = function(subMenu)
+                                showInputDialog("输入透明度 (0-1)", tostring(popupTransparency), function(val)
+                                    if val >= 0 and val <= 1 then
+                                        popupTransparency = val
+                                        tanchuangxiaoxi("弹窗透明度已设为 " .. val, "设置")
+                                    else
+                                        tanchuangxiaoxi("请输入0到1之间的数字", "错误")
+                                    end
+                                end)
                             end
-                        end)
-                    end
-                },
-                {
-                    text = volumeKeyEnabled and "🔊 音量键隐藏: 开启" or "🔊 音量键隐藏: 关闭",
-                    callback = function(subMenu)
-                        if volumeKeyEnabled then
-                            disableVolumeKey()
-                        else
-                            enableVolumeKey()
-                        end
-                        subMenu:Destroy()
-                        -- 重新创建设置菜单，保持当前界面
-                        createSettingMenu()
-                    end
-                },
-                {
-                    text = "📏 设置屏幕宽度",
-                    callback = function(subMenu)
-                        showInputDialog("输入屏幕宽度（像素）", tostring(customWidth or getScreenSize().X), function(val)
-                            customWidth = val
-                            tanchuangxiaoxi("屏幕宽度已设为 " .. val, "自定义尺寸")
-                        end)
-                    end
-                },
-                {
-                    text = "📏 设置屏幕高度",
-                    callback = function(subMenu)
-                        showInputDialog("输入屏幕高度（像素）", tostring(customHeight or getScreenSize().Y), function(val)
-                            customHeight = val
-                            tanchuangxiaoxi("屏幕高度已设为 " .. val, "自定义尺寸")
-                        end)
-                    end
-                },
-                {
-                    text = "🔄 重置为自动检测",
-                    callback = function(subMenu)
-                        customWidth = nil
-                        customHeight = nil
-                        tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
-                    end
-                }
-            }, showMainMenu)  -- 返回上级仍然回到主菜单
-        end
-        
-        createSettingMenu()
-    end
-},
+                        },
+                        {
+                            text = volumeKeyEnabled and "🔊 音量键隐藏: 开启" or "🔊 音量键隐藏: 关闭",
+                            callback = function(subMenu)
+                                if volumeKeyEnabled then
+                                    disableVolumeKey()
+                                else
+                                    enableVolumeKey()
+                                end
+                                subMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
+                        {
+                            text = "⚡ 长按速度",
+                            callback = function(subMenu)
+                                showInputDialog("输入长按初始间隔 (秒，大于0)", tostring(longPressSpeed), function(val)
+                                    if val and val > 0 then
+                                        longPressSpeed = val
+                                        tanchuangxiaoxi("长按速度已设为 " .. val .. " 秒", "设置")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "📏 设置屏幕宽度",
+                            callback = function(subMenu)
+                                showInputDialog("输入屏幕宽度（像素）", tostring(customWidth or getScreenSize().X), function(val)
+                                    if val and val > 0 then
+                                        customWidth = val
+                                        tanchuangxiaoxi("屏幕宽度已设为 " .. val, "自定义尺寸")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "📏 设置屏幕高度",
+                            callback = function(subMenu)
+                                showInputDialog("输入屏幕高度（像素）", tostring(customHeight or getScreenSize().Y), function(val)
+                                    if val and val > 0 then
+                                        customHeight = val
+                                        tanchuangxiaoxi("屏幕高度已设为 " .. val, "自定义尺寸")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "🔄 重置为自动检测",
+                            callback = function(subMenu)
+                                customWidth = nil
+                                customHeight = nil
+                                tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
+                            end
+                        }
+                    }, showMainMenu)
+                end
+                createSettingMenu()
+            end
+        },
         {
             text = "❌ 结束脚本",
             callback = function(menu)
@@ -904,7 +926,6 @@ local function showMainMenu()
                         text = "取消",
                         callback = function(confirmMenu)
                             confirmMenu:Destroy()
-                            showMainMenu()
                         end
                     }
                 }, nil)
@@ -1058,13 +1079,15 @@ onof.MouseButton1Click:Connect(function()
 end)
 
 -- ==================== 按钮长按逻辑 ====================
+
+-- 上升按钮（使用 longPressSpeed）
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = 0.1
+        local interval = longPressSpeed  -- 使用自定义速度
         while holding do
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
@@ -1109,13 +1132,14 @@ do
     end)
 end
 
+-- 下降按钮（使用 longPressSpeed）
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = 0.1
+        local interval = longPressSpeed  -- 使用自定义速度
         while holding do
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
@@ -1160,13 +1184,14 @@ do
     end)
 end
 
+-- 加速按钮（使用 longPressSpeed）
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = 0.1
+        local interval = longPressSpeed  -- 使用自定义速度
         while holding do
             speeds = speeds + 1
             speed.Text = tostring(speeds)
@@ -1207,13 +1232,14 @@ do
     end)
 end
 
+-- 减速按钮（使用 longPressSpeed）
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = 0.1
+        local interval = longPressSpeed  -- 使用自定义速度
         while holding do
             if speeds > 1 then
                 speeds = speeds - 1
@@ -1262,6 +1288,7 @@ do
     end)
 end
 
+-- 速度标签（单击设置 speeds，长按设置 stepSize）- 使用 longPressSpeed
 do
     local holding = false
     local longPressTask = nil
