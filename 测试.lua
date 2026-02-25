@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.3.0 (恢复速度自定义 + 锁血)
+-- Version: 7.3.1 (增强锁血)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -148,6 +148,7 @@ local flyMode = "屏幕"        -- 飞天方向模式: "屏幕", "悬空", "绝�
 -- 锁血相关
 local godModeEnabled = false          -- 锁血开关
 local godModeConnections = {}         -- 存储所有锁血事件的连接
+local godModeLoop = nil               -- 循环任务
 
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
@@ -214,11 +215,15 @@ end
 -- ==================== 锁血功能 ====================
 local function applyGodMode(enable)
     if enable then
-        -- 断开之前的连接（如果有）
+        -- 断开之前的连接和循环
         for _, conn in ipairs(godModeConnections) do
             pcall(function() conn:Disconnect() end)
         end
         godModeConnections = {}
+        if godModeLoop then
+            task.cancel(godModeLoop)
+            godModeLoop = nil
+        end
 
         -- 处理当前角色的Humanoid
         local function setupHumanoid(hum)
@@ -230,6 +235,13 @@ local function applyGodMode(enable)
                 end
             end)
             table.insert(godModeConnections, conn)
+            -- 防止死亡
+            local diedConn = hum.Died:Connect(function()
+                if godModeEnabled and hum and hum.Parent then
+                    hum.Health = hum.MaxHealth
+                end
+            end)
+            table.insert(godModeConnections, diedConn)
             -- 初始设置为满血
             hum.Health = hum.MaxHealth
         end
@@ -248,13 +260,30 @@ local function applyGodMode(enable)
         end)
         table.insert(godModeConnections, charConn)
 
+        -- 持续强制恢复循环（应对持续扣血）
+        godModeLoop = task.spawn(function()
+            while godModeEnabled do
+                task.wait(0.1)  -- 每0.1秒检查一次
+                if player.Character then
+                    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
+                    if hum and hum.Health < hum.MaxHealth then
+                        hum.Health = hum.MaxHealth
+                    end
+                end
+            end
+        end)
+
         tanchuangxiaoxi("已开启锁血", "上帝模式")
     else
-        -- 断开所有连接
+        -- 断开所有连接和循环
         for _, conn in ipairs(godModeConnections) do
             pcall(function() conn:Disconnect() end)
         end
         godModeConnections = {}
+        if godModeLoop then
+            task.cancel(godModeLoop)
+            godModeLoop = nil
+        end
         tanchuangxiaoxi("已关闭锁血", "上帝模式")
     end
 end
@@ -809,11 +838,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.3.0 更新内容：",
+                    "版本 7.3.1 更新内容：",
                     "",
-                    "1. 恢复速度自定义：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
-                    "2. 新增锁血功能，可在设置中开启/关闭",
-                    "3. 移除所有自由视角相关代码",
+                    "1. 增强锁血功能：增加持续强制恢复循环，防止持续扣血",
+                    "2. 添加死亡事件处理，防止死亡",
+                    "3. 优化锁血稳定性",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -946,7 +975,7 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 锁血：开启后角色血量锁定为最大值",
+                    "🔹 锁血：开启后角色血量锁定为最大值（增强版）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
