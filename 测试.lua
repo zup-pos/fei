@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.2.0 (移除第三人称，新增锁血)
+-- Version: 7.3.0 (恢复速度自定义 + 锁血)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -143,6 +143,7 @@ local customHeight = nil
 local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"   -- 上升/下降模式
+local flyMode = "屏幕"        -- 飞天方向模式: "屏幕", "悬空", "绝对锁高"
 
 -- 锁血相关
 local godModeEnabled = false          -- 锁血开关
@@ -174,7 +175,14 @@ local MOVE_MODES = {
     "水平上下", "水平前后(屏幕)", "水平左右(屏幕)"
 }
 
+-- 可用飞行模式列表
+local FLY_MODES = { "屏幕", "悬空", "绝对锁高" }
+
 -- ==================== 辅助函数 ====================
+local function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
+end
+
 local function getScreenSize()
     if customWidth and customHeight then
         return Vector2.new(customWidth, customHeight)
@@ -185,10 +193,6 @@ local function getScreenSize()
     else
         return Vector2.new(1920, 1080)
     end
-end
-
-local function clamp(val, min, max)
-    return math.max(min, math.min(max, val))
 end
 
 local function updateButtonText()
@@ -255,7 +259,7 @@ local function applyGodMode(enable)
     end
 end
 
--- ==================== 角色重生处理（飞天相关） ====================
+-- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
     -- 处理飞天状态
@@ -545,7 +549,7 @@ local function showInputDialog(title, defaultText, callback, extraButton)
                 local input = textBox.Text
                 local num = tonumber(input)
                 if extraButton then
-                    callback(input)
+                    callback(input)  -- 传入原始输入，由调用者处理
                     close()
                 else
                     if num and num > 0 then
@@ -725,6 +729,20 @@ local function disableVolumeKey()
 end
 
 -- ==================== 快捷模式选择菜单 ====================
+local function showFlyModeSelection(currentMode, callback)
+    local buttons = {}
+    for _, mode in ipairs(FLY_MODES) do
+        table.insert(buttons, {
+            text = mode .. (mode == currentMode and " ✓" or ""),
+            callback = function(menu)
+                menu:Destroy()
+                callback(mode)
+            end
+        })
+    end
+    createMenu("选择飞行模式", buttons, nil)
+end
+
 local function showMoveModeSelection(currentMode, callback)
     local buttons = {}
     for _, mode in ipairs(MOVE_MODES) do
@@ -791,19 +809,19 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.2.0 更新内容：",
+                    "版本 7.3.0 更新内容：",
                     "",
-                    "1. 移除强制第三人称，新增锁血功能",
-                    "2. 优化锁血逻辑，支持角色重生",
-                    "3. 修复对话框关闭问题",
+                    "1. 恢复速度自定义：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
+                    "2. 新增锁血功能，可在设置中开启/关闭",
+                    "3. 移除所有自由视角相关代码",
                     "",
                     "功能介绍：",
-                    "- 上升/下降：单击移动，长按连续（方向可切换）",
-                    "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：单击设倍率，长按设步长（支持小数）",
-                    "- 飞天开关：开启/关闭飞行",
+                    "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "- 加速/减速：单击调速度，长按连续（支持小数，最小0.1）",
+                    "- 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
+                    "- 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "- 音量键控制：可在设置中开启/关闭",
+                    "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
                     "- 锁血：开启后角色血量锁定为最大值",
                     "",
                     "自定义屏幕尺寸：",
@@ -912,16 +930,22 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "🔹 上升/下降：单击移动，长按连续",
-                    "   可切换多种方向模式",
-                    "   - 角色上下/前后/左右",
-                    "   - 屏幕上下/前后/左右",
-                    "   - 水平上下/前后/左右",
-                    "🔹 加速/减速：单击速度+1/-1，长按连续",
-                    "🔹 速度标签：单击设倍率，长按设步长（支持小数）",
-                    "🔹 飞天开关：开启/关闭飞行",
+                    "🔹 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "   可切换多种方向模式（共9种）：",
+                    "   - 角色上下：沿角色自身向上方向",
+                    "   - 角色前后：基于角色朝向的前后",
+                    "   - 角色左右：基于角色朝向的左右",
+                    "   - 屏幕上下：基于相机上下方向",
+                    "   - 屏幕前后：基于相机前后方向",
+                    "   - 屏幕左右：基于相机左右方向",
+                    "   - 水平上下：世界Y轴（纯垂直）",
+                    "   - 水平前后(屏幕)：基于相机前方的水平方向",
+                    "   - 水平左右(屏幕)：基于相机右方的水平方向",
+                    "🔹 加速/减速：单击速度+1/-1，长按连续（支持小数，最小0.1）",
+                    "🔹 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
+                    "🔹 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "🔹 音量键控制：可在设置中开启/关闭",
+                    "🔹 UI按钮：纯标签，无功能",
                     "🔹 锁血：开启后角色血量锁定为最大值",
                     "",
                     "⚙️ 菜单功能：",
@@ -932,6 +956,7 @@ local function showMainMenu()
                     "  设置屏幕尺寸、",
                     "  长按速度、",
                     "  上升/下降模式、",
+                    "  飞行方向模式、",
                     "  锁血",
                     "- 结束脚本：彻底停止",
                     "",
@@ -1035,6 +1060,7 @@ local function showMainMenu()
                                 end)
                             end
                         },
+                        -- 上升/下降模式
                         {
                             text = "⬆️ 上升/下降模式: " .. moveMode,
                             callback = function(parentMenu)
@@ -1141,6 +1167,44 @@ local function showMainMenu()
                                 }, nil)
                             end
                         },
+                        -- 飞行方向模式
+                        {
+                            text = "✈️ 飞行方向模式: " .. flyMode,
+                            callback = function(parentMenu)
+                                createMenu("选择飞行模式", {
+                                    {
+                                        text = "屏幕" .. (flyMode == "屏幕" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "屏幕"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 屏幕", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "悬空" .. (flyMode == "悬空" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "悬空"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 悬空", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "绝对锁高" .. (flyMode == "绝对锁高" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "绝对锁高"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 绝对锁高", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                }, nil)
+                            end
+                        },
                         {
                             text = "📏 设置屏幕宽度",
                             callback = function(subMenu)
@@ -1201,7 +1265,6 @@ local function showMainMenu()
                             confirmMenu:Destroy()
                             isFlying = false
                             tpwalking = false
-                            -- 关闭锁血（断开所有连接）
                             applyGodMode(false)
                             if main and main.Parent then
                                 main:Destroy()
@@ -1308,6 +1371,8 @@ onof.MouseButton1Click:Connect(function()
         local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
         if not torso then return end
 
+        local startY = torso.Position.Y
+
         local bg = Instance.new("BodyGyro")
         bg.P = 9e4
         bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
@@ -1326,13 +1391,38 @@ onof.MouseButton1Click:Connect(function()
                 local moveDir = hum.MoveDirection
                 local maxspeed = 50 * speeds
 
-                bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                if moveDir.Magnitude > 0 then
-                    bv.Velocity = moveDir * maxspeed
-                else
-                    bv.Velocity = Vector3.new(0, 0, 0)
+                if flyMode == "屏幕" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    if moveDir.Magnitude > 0 then
+                        bv.Velocity = moveDir * maxspeed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+                    bg.CFrame = camera.CFrame
+
+                elseif flyMode == "悬空" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    if moveDir.Magnitude > 0 then
+                        bv.Velocity = moveDir.Unit * maxspeed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+                    bg.CFrame = camera.CFrame
+
+                elseif flyMode == "绝对锁高" then
+                    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    if moveDir.Magnitude > 0 then
+                        bv.Velocity = moveDir.Unit * maxspeed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+                    bg.CFrame = camera.CFrame
+
+                    local pos = torso.Position
+                    torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
                 end
-                bg.CFrame = camera.CFrame
             end
         end
 
@@ -1641,7 +1731,7 @@ do
     end)
 end
 
--- 速度标签
+-- 速度标签（单击和长按分别带模式选择菜单）
 do
     local holding = false
     local longPressTask = nil
@@ -1653,25 +1743,26 @@ do
 
         longPressTask = task.delay(0.3, function()
             if holding then
-                showInputDialog("设置上升/下降步长", tostring(stepSize), function(input)
-                    local num = tonumber(input)
-                    if num and num > 0 then
-                        stepSize = num
-                        tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
-                    else
-                        tanchuangxiaoxi("请输入大于0的数字", "错误")
-                    end
-                end, {
-                    text = "移动模式: " .. moveMode,
-                    callback = function(btn)
-                        showMoveModeSelection(moveMode, function(newMode)
-                            moveMode = newMode
-                            btn.Text = "移动模式: " .. moveMode
-                            updateButtonText()
-                            tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
-                        end)
-                    end
-                })
+                showInputDialog(
+                    "设置上升/下降步长",
+                    tostring(stepSize),
+                    function(newStep)
+                        stepSize = newStep
+                        tanchuangxiaoxi("步长已设为 " .. tostring(newStep), "步长设置")
+                    end,
+                    {
+                        text = "移动模式: " .. moveMode,
+                        callback = function(btn)
+                            -- 弹出移动模式选择菜单
+                            showMoveModeSelection(moveMode, function(newMode)
+                                moveMode = newMode
+                                btn.Text = "移动模式: " .. moveMode
+                                updateButtonText()
+                                tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
                 holding = false
                 longPressTask = nil
             end
@@ -1685,16 +1776,26 @@ do
                 task.cancel(longPressTask)
                 longPressTask = nil
             end
-            showInputDialog("设置速度倍率", tostring(speeds), function(input)
-                local num = tonumber(input)
-                if num and num > 0 then
-                    speeds = num
+            showInputDialog(
+                "设置速度倍率",
+                tostring(speeds),
+                function(newSpeed)
+                    speeds = newSpeed
                     speed.Text = tostring(speeds)
-                    tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
-                else
-                    tanchuangxiaoxi("请输入大于0的数字", "错误")
-                end
-            end)
+                    tanchuangxiaoxi("速度倍率已设为 " .. tostring(newSpeed), "速度设置")
+                end,
+                {
+                    text = "飞行模式: " .. flyMode,
+                    callback = function(btn)
+                        -- 弹出飞行模式选择菜单
+                        showFlyModeSelection(flyMode, function(newMode)
+                            flyMode = newMode
+                            btn.Text = "飞行模式: " .. flyMode
+                            tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                        end)
+                    end
+                }
+            )
             holding = false
         end
     end
@@ -1707,7 +1808,7 @@ do
     end)
 end
 
--- ==================== 隐藏按钮长按/单击逻辑 ====================
+-- 隐藏按钮
 do
     local holding = false
     local longPressTask = nil
