@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.6.1 (修复输入验证和按钮失效)
+-- Version: 7.6.2 (修复getMoveVector未定义错误)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -1132,11 +1132,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.6.1 更新内容：",
+                    "版本 7.6.2 更新内容：",
                     "",
-                    "1. 修复速度倍率输入验证，防止字母输入导致错误",
-                    "2. 修复上升/下降按钮失效问题",
-                    "3. 优化输入对话框逻辑",
+                    "1. 修复上升/下降按钮调用nil值错误",
+                    "2. 将getMoveVector函数提前定义",
+                    "3. 优化代码顺序",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1624,6 +1624,59 @@ local function showMainMenu()
             end
         }
     }, nil)
+end
+
+-- ==================== 辅助函数：根据当前模式获取移动向量 ====================
+-- 提前定义，确保所有按钮逻辑都能访问
+local function getMoveVector(dir, rootPart)
+    local step = dir * stepSize
+    if moveMode == "角色上下" then
+        return rootPart.CFrame.UpVector * step
+    elseif moveMode == "角色前后" then
+        return rootPart.CFrame.LookVector * step
+    elseif moveMode == "角色左右" then
+        return -rootPart.CFrame.RightVector * step
+    elseif moveMode == "屏幕上下" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.UpVector * step
+        end
+    elseif moveMode == "屏幕前后" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.LookVector * step
+        end
+    elseif moveMode == "屏幕左右" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return -camera.CFrame.RightVector * step
+        end
+    elseif moveMode == "水平上下" then
+        return Vector3.new(0, step, 0)
+    elseif moveMode == "水平前后(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local look = camera.CFrame.LookVector
+            local horizontal = Vector3.new(look.X, 0, look.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
+            end
+        end
+    elseif moveMode == "水平左右(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local right = camera.CFrame.RightVector
+            local horizontal = Vector3.new(right.X, 0, right.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
+            end
+        end
+    end
+    return Vector3.new()
 end
 
 -- ==================== 按钮长按逻辑 ====================
@@ -2117,58 +2170,6 @@ do
             onUp()
         end
     end)
-end
-
--- ==================== 辅助函数：根据当前模式获取移动向量 ====================
-local function getMoveVector(dir, rootPart)
-    local step = dir * stepSize
-    if moveMode == "角色上下" then
-        return rootPart.CFrame.UpVector * step
-    elseif moveMode == "角色前后" then
-        return rootPart.CFrame.LookVector * step
-    elseif moveMode == "角色左右" then
-        return -rootPart.CFrame.RightVector * step
-    elseif moveMode == "屏幕上下" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return camera.CFrame.UpVector * step
-        end
-    elseif moveMode == "屏幕前后" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return camera.CFrame.LookVector * step
-        end
-    elseif moveMode == "屏幕左右" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return -camera.CFrame.RightVector * step
-        end
-    elseif moveMode == "水平上下" then
-        return Vector3.new(0, step, 0)
-    elseif moveMode == "水平前后(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local look = camera.CFrame.LookVector
-            local horizontal = Vector3.new(look.X, 0, look.Z)
-            if horizontal.Magnitude > 0 then
-                return horizontal.Unit * step
-            else
-                return Vector3.new(0, 0, 0)
-            end
-        end
-    elseif moveMode == "水平左右(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local right = camera.CFrame.RightVector
-            local horizontal = Vector3.new(right.X, 0, right.Z)
-            if horizontal.Magnitude > 0 then
-                return horizontal.Unit * step
-            else
-                return Vector3.new(0, 0, 0)
-            end
-        end
-    end
-    return Vector3.new()
 end
 
 -- ==================== 清理 ====================
