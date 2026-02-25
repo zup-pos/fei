@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.9.1 (修复只读表错误)
+-- Version: 6.9.2 (修复自由视角无响应 + UI布局优化)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -144,28 +144,28 @@ local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "屏幕"
-local thirdPersonEnabled = false          -- 第三人称开关
-local originalCameraType = nil            -- 原始相机类型
-local originalCameraSubject = nil         -- 原始相机目标
+local thirdPersonEnabled = false
+local originalCameraType = nil
+local originalCameraSubject = nil
 
 -- 自由视角相关
-local freeCamEnabled = false               -- 自由视角开关
-local freeCamOffset = Vector3.new(0, 5, 10) -- 默认偏移（第三人称）
-local freeCamConnection = nil               -- RenderStepped连接
-local originalFreeCamType = nil             -- 原始相机类型（用于恢复）
+local freeCamEnabled = false
+local freeCamOffset = Vector3.new(0, 5, 10)
+local freeCamConnection = nil
+local originalFreeCamType = nil
 
 -- 自由视角触摸相关
-local rotateStartPos = nil          -- 单指旋转起始位置
-local initialAngles = nil           -- 初始偏移向量的角度 {yaw, pitch}
-local initialPinchDist = nil        -- 双指初始距离
-local initialOffsetMag = nil        -- 初始偏移长度
-local pinchConnection = nil         -- 触摸移动连接
-local touchEndedConnection = nil    -- 触摸结束连接
+local rotateStartPos = nil
+local initialAngles = nil
+local initialPinchDist = nil
+local initialOffsetMag = nil
+local pinchConnection = nil
+local touchEndedConnection = nil
 
 -- 自由视角自定义参数
-local freeCamSensitivity = 0.005          -- 滑动灵敏度
-local freeCamMinDist = 1                   -- 最小距离
-local freeCamMaxDist = 50                  -- 最大距离
+local freeCamSensitivity = 0.005
+local freeCamMinDist = 1
+local freeCamMaxDist = 50
 
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
@@ -198,7 +198,6 @@ local FLY_MODES = { "屏幕", "悬空", "绝对锁高" }
 local function clamp(val, min, max)
     return math.max(min, math.min(max, val))
 end
--- 注意：不再修改 math 表，直接使用 clamp 函数
 
 local function getScreenSize()
     if customWidth and customHeight then
@@ -234,13 +233,11 @@ local function applyFreeCam(enable)
     if not camera then return end
 
     if enable then
-        -- 保存原始相机类型
         if originalFreeCamType == nil then
             originalFreeCamType = camera.CameraType
         end
         camera.CameraType = Enum.CameraType.Scriptable
 
-        -- 连接心跳更新相机
         if freeCamConnection then freeCamConnection:Disconnect() end
         freeCamConnection = RunService.RenderStepped:Connect(function()
             local char = player.Character
@@ -251,7 +248,7 @@ local function applyFreeCam(enable)
             camera.CFrame = CFrame.lookAt(camPos, rootPart.Position)
         end)
 
-        -- 检查触摸点是否在UI区域内
+        -- 检查触摸点是否在UI区域内（实时获取Frame位置）
         local function isPointInUI(pos)
             if not Frame or not Frame.Visible then return false end
             local absPos = Frame.AbsolutePosition
@@ -260,21 +257,9 @@ local function applyFreeCam(enable)
                and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
         end
 
-        -- 触摸事件处理函数
         local function handleTouch()
             local points = UserInputService:GetTouchInputs()
-            local count = #points
-
-            -- 过滤UI区域：所有触摸点都必须在UI外才处理
-            local allOutsideUI = true
-            for _, point in ipairs(points) do
-                if isPointInUI(point.Position) then
-                    allOutsideUI = false
-                    break
-                end
-            end
-            if not allOutsideUI then
-                -- 有触摸点在UI内，重置状态并忽略
+            if #points == 0 then
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -282,8 +267,24 @@ local function applyFreeCam(enable)
                 return
             end
 
+            -- 检查所有触摸点是否都在UI外
+            local anyInUI = false
+            for _, point in ipairs(points) do
+                if isPointInUI(point.Position) then
+                    anyInUI = true
+                    break
+                end
+            end
+            if anyInUI then
+                rotateStartPos = nil
+                initialAngles = nil
+                initialPinchDist = nil
+                initialOffsetMag = nil
+                return
+            end
+
+            local count = #points
             if count == 1 then
-                -- 单指旋转
                 local pos = points[1].Position
                 if not rotateStartPos then
                     rotateStartPos = pos
@@ -306,7 +307,7 @@ local function applyFreeCam(enable)
 
                     local newYaw = initialAngles.yaw + yawDelta
                     local maxPitch = math.pi/2 - 0.1
-                    local newPitch = clamp(initialAngles.pitch + pitchDelta, -maxPitch, maxPitch)  -- 使用 clamp
+                    local newPitch = clamp(initialAngles.pitch + pitchDelta, -maxPitch, maxPitch)
 
                     local dist = initialOffsetMag
                     local dir = Vector3.new(
@@ -316,9 +317,7 @@ local function applyFreeCam(enable)
                     )
                     freeCamOffset = dir * dist
                 end
-
             elseif count == 2 then
-                -- 双指缩放
                 local p1 = points[1].Position
                 local p2 = points[2].Position
                 local currentDist = (p2 - p1).Magnitude
@@ -328,17 +327,14 @@ local function applyFreeCam(enable)
                     initialOffsetMag = freeCamOffset.Magnitude
                 else
                     local scale = currentDist / initialPinchDist
-                    local newMag = clamp(initialOffsetMag * scale, freeCamMinDist, freeCamMaxDist)  -- 使用 clamp
+                    local newMag = clamp(initialOffsetMag * scale, freeCamMinDist, freeCamMaxDist)
                     if freeCamOffset.Magnitude > 0 then
                         freeCamOffset = freeCamOffset.Unit * newMag
                     end
                 end
-                -- 双指时重置旋转状态
                 rotateStartPos = nil
                 initialAngles = nil
-
             else
-                -- 无触摸或多于双指
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -346,7 +342,6 @@ local function applyFreeCam(enable)
             end
         end
 
-        -- 连接触摸事件
         if not pinchConnection then
             pinchConnection = UserInputService.TouchMoved:Connect(handleTouch)
         end
@@ -361,9 +356,7 @@ local function applyFreeCam(enable)
                 end
             end)
         end
-
     else
-        -- 关闭自由视角，断开所有连接
         if freeCamConnection then
             freeCamConnection:Disconnect()
             freeCamConnection = nil
@@ -381,7 +374,6 @@ local function applyFreeCam(enable)
         initialPinchDist = nil
         initialOffsetMag = nil
 
-        -- 恢复原始相机类型
         if originalFreeCamType then
             camera.CameraType = originalFreeCamType
             originalFreeCamType = nil
@@ -391,7 +383,6 @@ local function applyFreeCam(enable)
     end
 end
 
--- 设置偏移向量
 local function setFreeCamOffset(x, y, z)
     freeCamOffset = Vector3.new(x, y, z)
     if freeCamEnabled then
@@ -399,19 +390,17 @@ local function setFreeCamOffset(x, y, z)
     end
 end
 
--- 设置相机距离（保持方向不变）
 local function setFreeCamDistance(dist)
     if freeCamOffset.Magnitude == 0 then
         freeCamOffset = Vector3.new(0, 5, 10)
     end
     local dir = freeCamOffset.Unit
-    freeCamOffset = dir * clamp(dist, freeCamMinDist, freeCamMaxDist)  -- 使用 clamp
+    freeCamOffset = dir * clamp(dist, freeCamMinDist, freeCamMaxDist)
     if freeCamEnabled then
         applyFreeCam(true)
     end
 end
 
--- 重置偏移为默认
 local function resetFreeCamOffset()
     freeCamOffset = Vector3.new(0, 5, 10)
     if freeCamEnabled then
@@ -877,11 +866,11 @@ local function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 相机设置对话框 ====================
+-- ==================== 相机设置对话框（优化布局） ====================
 local function showCameraSettings()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(450, screenSize.X * 0.8)
-    local dialogHeight = 520  -- 增加高度以容纳新控件
+    local dialogHeight = 580  -- 增加高度适应布局
 
     local dialog = Instance.new("ScreenGui")
     dialog.Parent = playerGui
@@ -940,9 +929,10 @@ local function showCameraSettings()
     coordLabel.TextSize = 14
     coordLabel.TextXAlignment = Enum.TextXAlignment.Left
 
+    local inputWidth = (dialogWidth - 80) / 3
     local xBox = Instance.new("TextBox")
     xBox.Parent = bg
-    xBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
+    xBox.Size = UDim2.new(0, inputWidth, 0, 35)
     xBox.Position = UDim2.new(0, 20, 0, 145)
     xBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     xBox.TextColor3 = Color3.new(1, 1, 1)
@@ -954,8 +944,8 @@ local function showCameraSettings()
 
     local yBox = Instance.new("TextBox")
     yBox.Parent = bg
-    yBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
-    yBox.Position = UDim2.new(0, 30 + (dialogWidth-80)/3, 0, 145)
+    yBox.Size = UDim2.new(0, inputWidth, 0, 35)
+    yBox.Position = UDim2.new(0, 30 + inputWidth, 0, 145)
     yBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     yBox.TextColor3 = Color3.new(1, 1, 1)
     yBox.PlaceholderText = "Y"
@@ -966,8 +956,8 @@ local function showCameraSettings()
 
     local zBox = Instance.new("TextBox")
     zBox.Parent = bg
-    zBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
-    zBox.Position = UDim2.new(0, 40 + 2*(dialogWidth-80)/3, 0, 145)
+    zBox.Size = UDim2.new(0, inputWidth, 0, 35)
+    zBox.Position = UDim2.new(0, 40 + 2*inputWidth, 0, 145)
     zBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     zBox.TextColor3 = Color3.new(1, 1, 1)
     zBox.PlaceholderText = "Z"
@@ -1004,7 +994,7 @@ local function showCameraSettings()
     local sensLabel = Instance.new("TextLabel")
     sensLabel.Parent = bg
     sensLabel.Size = UDim2.new(1, -40, 0, 30)
-    sensLabel.Position = UDim2.new(0, 20, 0, 270)
+    sensLabel.Position = UDim2.new(0, 20, 0, 275)
     sensLabel.BackgroundTransparency = 1
     sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
     sensLabel.TextColor3 = Color3.new(1, 1, 1)
@@ -1015,7 +1005,7 @@ local function showCameraSettings()
     local sensSlider = Instance.new("Frame")
     sensSlider.Parent = bg
     sensSlider.Size = UDim2.new(0, 200, 0, 30)
-    sensSlider.Position = UDim2.new(0, 20, 0, 300)
+    sensSlider.Position = UDim2.new(0, 20, 0, 305)
     sensSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     sensSlider.BorderSizePixel = 0
     local sliderCorner = Instance.new("UICorner")
@@ -1036,7 +1026,7 @@ local function showCameraSettings()
     local sensValueBox = Instance.new("TextBox")
     sensValueBox.Parent = bg
     sensValueBox.Size = UDim2.new(0, 80, 0, 35)
-    sensValueBox.Position = UDim2.new(0, 240, 0, 295)
+    sensValueBox.Position = UDim2.new(0, 240, 0, 300)
     sensValueBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     sensValueBox.TextColor3 = Color3.new(1, 1, 1)
     sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
@@ -1051,7 +1041,7 @@ local function showCameraSettings()
     local minDistLabel = Instance.new("TextLabel")
     minDistLabel.Parent = bg
     minDistLabel.Size = UDim2.new(0, 100, 0, 30)
-    minDistLabel.Position = UDim2.new(0, 20, 0, 350)
+    minDistLabel.Position = UDim2.new(0, 20, 0, 355)
     minDistLabel.BackgroundTransparency = 1
     minDistLabel.Text = "最小距离"
     minDistLabel.TextColor3 = Color3.new(1, 1, 1)
@@ -1062,7 +1052,7 @@ local function showCameraSettings()
     local minDistBox = Instance.new("TextBox")
     minDistBox.Parent = bg
     minDistBox.Size = UDim2.new(0, 80, 0, 35)
-    minDistBox.Position = UDim2.new(0, 20, 0, 380)
+    minDistBox.Position = UDim2.new(0, 20, 0, 385)
     minDistBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     minDistBox.TextColor3 = Color3.new(1, 1, 1)
     minDistBox.Text = tostring(freeCamMinDist)
@@ -1077,7 +1067,7 @@ local function showCameraSettings()
     local maxDistLabel = Instance.new("TextLabel")
     maxDistLabel.Parent = bg
     maxDistLabel.Size = UDim2.new(0, 100, 0, 30)
-    maxDistLabel.Position = UDim2.new(0, 150, 0, 350)
+    maxDistLabel.Position = UDim2.new(0, 150, 0, 355)
     maxDistLabel.BackgroundTransparency = 1
     maxDistLabel.Text = "最大距离"
     maxDistLabel.TextColor3 = Color3.new(1, 1, 1)
@@ -1088,7 +1078,7 @@ local function showCameraSettings()
     local maxDistBox = Instance.new("TextBox")
     maxDistBox.Parent = bg
     maxDistBox.Size = UDim2.new(0, 80, 0, 35)
-    maxDistBox.Position = UDim2.new(0, 150, 0, 380)
+    maxDistBox.Position = UDim2.new(0, 150, 0, 385)
     maxDistBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     maxDistBox.TextColor3 = Color3.new(1, 1, 1)
     maxDistBox.Text = tostring(freeCamMaxDist)
@@ -1103,7 +1093,7 @@ local function showCameraSettings()
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = bg
     resetBtn.Size = UDim2.new(0, 120, 0, 40)
-    resetBtn.Position = UDim2.new(0, 20, 0, 440)
+    resetBtn.Position = UDim2.new(0, 20, 0, 450)
     resetBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     resetBtn.Text = "重置默认"
     resetBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1118,7 +1108,7 @@ local function showCameraSettings()
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(0, 120, 0, 40)
-    closeBtn.Position = UDim2.new(1, -140, 0, 440)
+    closeBtn.Position = UDim2.new(1, -140, 0, 450)
     closeBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
     closeBtn.Text = "关闭"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1156,8 +1146,9 @@ local function showCameraSettings()
 
     local function updateSensitivityFromSlider()
         local sliderWidth = sensSlider.AbsoluteSize.X - sliderButton.AbsoluteSize.X
+        if sliderWidth <= 0 then return end
         local posX = sliderButton.AbsolutePosition.X - sensSlider.AbsolutePosition.X
-        local ratio = clamp(posX / sliderWidth, 0, 1)  -- 使用 clamp
+        local ratio = clamp(posX / sliderWidth, 0, 1)
         freeCamSensitivity = ratio * 0.01
         sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
         sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
@@ -1211,8 +1202,10 @@ local function showCameraSettings()
                 freeCamSensitivity = val
                 sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
                 local sliderWidth = sensSlider.AbsoluteSize.X - sliderButton.AbsoluteSize.X
-                local newX = (freeCamSensitivity / 0.01) * sliderWidth
-                sliderButton.Position = UDim2.new(0, newX, 0, 0)
+                if sliderWidth > 0 then
+                    local newX = (freeCamSensitivity / 0.01) * sliderWidth
+                    sliderButton.Position = UDim2.new(0, newX, 0, 0)
+                end
             else
                 tanchuangxiaoxi("请输入0~0.01之间的数字", "错误")
                 sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
@@ -1227,7 +1220,6 @@ local function showCameraSettings()
             if val and val > 0 and val < freeCamMaxDist then
                 freeCamMinDist = val
                 if freeCamEnabled then
-                    -- 如果当前距离超出新范围，自动调整
                     if freeCamOffset.Magnitude < freeCamMinDist then
                         setFreeCamDistance(freeCamMinDist)
                         xBox.Text = tostring(freeCamOffset.X)
@@ -1402,13 +1394,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.9.1 更新内容：",
+                    "版本 6.9.2 更新内容：",
                     "",
-                    "1. 修复只读表错误（不再修改 math 表）",
-                    "2. 自由视角增强：支持单指旋转视角",
-                    "3. 触摸区域过滤：UI按钮区域不响应触摸",
-                    "4. 缩放范围自定义：可设置最小/最大距离",
-                    "5. 滑动灵敏度可调",
+                    "1. 修复自由视角无响应问题",
+                    "2. 优化相机设置对话框布局，适应不同屏幕",
+                    "3. 增强触摸事件判断，确保移动按钮区域不受干扰",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
