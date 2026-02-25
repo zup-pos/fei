@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.3.1 (增强锁血)
+-- Version: 7.3.2 (终极锁血)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -221,7 +221,7 @@ local function applyGodMode(enable)
         end
         godModeConnections = {}
         if godModeLoop then
-            task.cancel(godModeLoop)
+            godModeLoop:Disconnect()
             godModeLoop = nil
         end
 
@@ -260,15 +260,12 @@ local function applyGodMode(enable)
         end)
         table.insert(godModeConnections, charConn)
 
-        -- 持续强制恢复循环（应对持续扣血）
-        godModeLoop = task.spawn(function()
-            while godModeEnabled do
-                task.wait(0.1)  -- 每0.1秒检查一次
-                if player.Character then
-                    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
-                    if hum and hum.Health < hum.MaxHealth then
-                        hum.Health = hum.MaxHealth
-                    end
+        -- 每帧强制恢复（对抗持续伤害和服务器拉回）
+        godModeLoop = RunService.Heartbeat:Connect(function()
+            if godModeEnabled and player.Character then
+                local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.Health < hum.MaxHealth then
+                    hum.Health = hum.MaxHealth
                 end
             end
         end)
@@ -281,7 +278,7 @@ local function applyGodMode(enable)
         end
         godModeConnections = {}
         if godModeLoop then
-            task.cancel(godModeLoop)
+            godModeLoop:Disconnect()
             godModeLoop = nil
         end
         tanchuangxiaoxi("已关闭锁血", "上帝模式")
@@ -838,11 +835,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.3.1 更新内容：",
+                    "版本 7.3.2 更新内容：",
                     "",
-                    "1. 增强锁血功能：增加持续强制恢复循环，防止持续扣血",
-                    "2. 添加死亡事件处理，防止死亡",
-                    "3. 优化锁血稳定性",
+                    "1. 终极锁血：每帧强制恢复血量，对抗服务器拉回和持续伤害",
+                    "2. 增强事件监听，防止死亡",
+                    "3. 其他功能保持不变",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -975,7 +972,7 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 锁血：开启后角色血量锁定为最大值（增强版）",
+                    "🔹 锁血：开启后角色血量锁定为最大值（终极版）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
