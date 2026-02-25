@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.5.1 (修复减速负数问题)
+-- Version: 6.6.0 (新增第三人称视角)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -144,6 +144,9 @@ local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "屏幕"
+local thirdPersonEnabled = false          -- 第三人称开关
+local originalCameraType = nil            -- 原始相机类型
+local originalCameraSubject = nil         -- 原始相机目标
 
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
@@ -204,6 +207,63 @@ local function updateButtonText()
         down.Text = "下降"
     end
 end
+
+-- ==================== 第三人称相机控制 ====================
+local function applyThirdPerson(enable)
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    if enable then
+        -- 保存原始设置
+        if originalCameraType == nil then
+            originalCameraType = camera.CameraType
+            originalCameraSubject = camera.CameraSubject
+        end
+        -- 设置第三人称跟随
+        camera.CameraType = Enum.CameraType.Follow
+        if player.Character then
+            local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                camera.CameraSubject = hum
+            end
+        end
+    else
+        -- 恢复原始设置
+        if originalCameraType then
+            camera.CameraType = originalCameraType
+            camera.CameraSubject = originalCameraSubject
+        else
+            -- 默认设置
+            camera.CameraType = Enum.CameraType.Custom
+            camera.CameraSubject = nil
+        end
+    end
+end
+
+-- 角色重生时重新应用第三人称
+local function onCharacterAdded(char)
+    task.wait(0.7)
+    if thirdPersonEnabled then
+        applyThirdPerson(true)
+    end
+    -- 飞天状态处理
+    if isFlying then
+        isFlying = false
+        onof.Text = "飞天(关闭)"
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            for _, state in ipairs(VALID_HUMANOD_STATES) do
+                pcall(function() hum:SetStateEnabled(state, true) end)
+            end
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+        end
+        char.Animate.Disabled = false
+        stopTpwalking()
+    end
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then onCharacterAdded(player.Character) end
 
 -- ==================== 紧凑弹窗系统 ====================
 local function reposition()
@@ -725,19 +785,20 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.5.1 更新内容：",
+                    "版本 6.6.0 更新内容：",
                     "",
-                    "1. 修复减速按钮负数问题：现在速度可支持小数，减速时不会低于0.1",
-                    "2. 优化了代码结构",
-                    "3. 其他功能保持稳定",
+                    "1. 新增第三人称视角：在设置中可开启/关闭，相机自动跟随角色",
+                    "2. 修复减速按钮负数问题",
+                    "3. 优化了代码结构",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
-                    "- 加速/减速：单击调速度，长按连续",
+                    "- 加速/减速：单击调速度，长按连续（支持小数，最小0.1）",
                     "- 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
                     "- 飞天开关：开启/关闭飞行，支持方向选择",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
+                    "- 第三人称视角：独立开关，可随时启用",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -860,6 +921,7 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
+                    "🔹 第三人称视角：独立开关，开启后相机跟随角色（通过鼠标旋转）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -869,7 +931,8 @@ local function showMainMenu()
                     "  设置屏幕尺寸、",
                     "  长按速度、",
                     "  上升/下降模式、",
-                    "  飞行方向模式",
+                    "  飞行方向模式、",
+                    "  第三人称视角",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1078,7 +1141,18 @@ local function showMainMenu()
                                 customHeight = nil
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
-                        }
+                        },
+                        -- ==================== 第三人称视角开关 ====================
+                        {
+                            text = thirdPersonEnabled and "👁️ 第三人称视角: 开启" or "👁️ 第三人称视角: 关闭",
+                            callback = function(parentMenu)
+                                thirdPersonEnabled = not thirdPersonEnabled
+                                applyThirdPerson(thirdPersonEnabled)
+                                tanchuangxiaoxi(thirdPersonEnabled and "已开启第三人称视角" or "已关闭第三人称视角", "视角设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
                     }, showMainMenu)
                 end
                 createSettingMenu()
@@ -1092,18 +1166,9 @@ local function showMainMenu()
                     { text = "确认", callback = function(confirmMenu)
                         confirmMenu:Destroy()
                         isFlying = false
-                        local char = player.Character
-                    if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                for _, state in ipairs(VALID_HUMANOD_STATES) do
-                    pcall(function() hum:SetStateEnabled(state, true) end)
-                end
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
-            end
-            char.Animate.Disabled = false
-        end
                         tpwalking = false
+                        -- 恢复相机
+                        applyThirdPerson(false)
                         if main and main.Parent then main:Destroy() end
                         if miniWindow and miniWindow.Parent then miniWindow:Destroy(); miniWindow = nil end
                         for _, notif in ipairs(notifs) do if notif.sg and notif.sg.Parent then notif.sg:Destroy() end end
@@ -1137,27 +1202,6 @@ local function startTpwalking()
     end)
 end
 
--- ==================== 角色重生处理 ====================
-local function onCharacterAdded(char)
-    task.wait(0.7)
-    if isFlying then
-        isFlying = false
-        onof.Text = "飞天(关闭)"
-        local hum = char:FindFirstChildWhichIsA("Humanoid")
-        if hum then
-            for _, state in ipairs(VALID_HUMANOD_STATES) do
-                pcall(function() hum:SetStateEnabled(state, true) end)
-            end
-            pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
-        end
-        char.Animate.Disabled = false
-        stopTpwalking()
-    end
-end
-
-player.CharacterAdded:Connect(onCharacterAdded)
-if player.Character then onCharacterAdded(player.Character) end
-
 -- ==================== 飞天开关 ====================
 onof.MouseButton1Click:Connect(function()
     if isFlying then
@@ -1177,6 +1221,7 @@ onof.MouseButton1Click:Connect(function()
             end
             char.Animate.Disabled = false
         end
+        -- 第三人称状态保持不变，不恢复相机（由开关控制）
     else
         isFlying = true
         onof.Text = "飞天(开启)"
@@ -1431,7 +1476,7 @@ end
 do
     local holding = false
     local longPressTask = nil
-    local MIN_SPEED = 0.1  -- 最小速度阈值
+    local MIN_SPEED = 0.1
 
     local function decreaseSpeed()
         if speeds > 1 then
@@ -1439,11 +1484,10 @@ do
         elseif speeds > MIN_SPEED then
             speeds = MIN_SPEED
         else
-            -- 已经是最小值，提示但不改变
             speed.Text = "已达最小速度"
             task.wait(1)
             speed.Text = tostring(speeds)
-            return false  -- 表示没有实际改变
+            return false
         end
         speed.Text = tostring(speeds)
         return true
@@ -1453,10 +1497,7 @@ do
         if not holding then return end
         local interval = longPressSpeed
         while holding do
-            if not decreaseSpeed() then
-                -- 如果已经最小，停止继续减速
-                break
-            end
+            if not decreaseSpeed() then break end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
         end
@@ -1465,24 +1506,16 @@ do
     mine.MouseButton1Down:Connect(function()
         if holding then return end
         holding = true
-
-        -- 单击执行一次减速
         decreaseSpeed()
-
         longPressTask = task.delay(0.3, function()
-            if holding then
-                startLongPress()
-            end
+            if holding then startLongPress() end
         end)
     end)
 
     local function stopPress()
         if holding then
             holding = false
-            if longPressTask then
-                task.cancel(longPressTask)
-                longPressTask = nil
-            end
+            if longPressTask then task.cancel(longPressTask); longPressTask = nil end
         end
     end
 
@@ -1664,6 +1697,7 @@ end
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
+    applyThirdPerson(false)  -- 恢复相机
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
