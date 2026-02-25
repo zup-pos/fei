@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.3.2 (终极锁血)
+-- Version: 7.4.0 (移除锁血，修复减速错误)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -145,11 +145,6 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"   -- 上升/下降模式
 local flyMode = "屏幕"        -- 飞天方向模式: "屏幕", "悬空", "绝对锁高"
 
--- 锁血相关
-local godModeEnabled = false          -- 锁血开关
-local godModeConnections = {}         -- 存储所有锁血事件的连接
-local godModeLoop = nil               -- 循环任务
-
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
     Enum.HumanoidStateType.Running,
@@ -212,83 +207,9 @@ local function updateButtonText()
     end
 end
 
--- ==================== 锁血功能 ====================
-local function applyGodMode(enable)
-    if enable then
-        -- 断开之前的连接和循环
-        for _, conn in ipairs(godModeConnections) do
-            pcall(function() conn:Disconnect() end)
-        end
-        godModeConnections = {}
-        if godModeLoop then
-            godModeLoop:Disconnect()
-            godModeLoop = nil
-        end
-
-        -- 处理当前角色的Humanoid
-        local function setupHumanoid(hum)
-            if not hum then return end
-            -- 健康值变化时立即恢复满血
-            local conn = hum.HealthChanged:Connect(function()
-                if godModeEnabled and hum and hum.Parent then
-                    hum.Health = hum.MaxHealth
-                end
-            end)
-            table.insert(godModeConnections, conn)
-            -- 防止死亡
-            local diedConn = hum.Died:Connect(function()
-                if godModeEnabled and hum and hum.Parent then
-                    hum.Health = hum.MaxHealth
-                end
-            end)
-            table.insert(godModeConnections, diedConn)
-            -- 初始设置为满血
-            hum.Health = hum.MaxHealth
-        end
-
-        -- 当前角色
-        if player.Character then
-            local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
-            setupHumanoid(hum)
-        end
-
-        -- 角色重生时重新绑定
-        local charConn = player.CharacterAdded:Connect(function(char)
-            task.wait(0.5) -- 等待Humanoid出现
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            setupHumanoid(hum)
-        end)
-        table.insert(godModeConnections, charConn)
-
-        -- 每帧强制恢复（对抗持续伤害和服务器拉回）
-        godModeLoop = RunService.Heartbeat:Connect(function()
-            if godModeEnabled and player.Character then
-                local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
-                if hum and hum.Health < hum.MaxHealth then
-                    hum.Health = hum.MaxHealth
-                end
-            end
-        end)
-
-        tanchuangxiaoxi("已开启锁血", "上帝模式")
-    else
-        -- 断开所有连接和循环
-        for _, conn in ipairs(godModeConnections) do
-            pcall(function() conn:Disconnect() end)
-        end
-        godModeConnections = {}
-        if godModeLoop then
-            godModeLoop:Disconnect()
-            godModeLoop = nil
-        end
-        tanchuangxiaoxi("已关闭锁血", "上帝模式")
-    end
-end
-
 -- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
-    -- 处理飞天状态
     if isFlying then
         isFlying = false
         onof.Text = "飞天(关闭)"
@@ -302,7 +223,6 @@ local function onCharacterAdded(char)
         char.Animate.Disabled = false
         stopTpwalking()
     end
-    -- 锁血会在CharacterAdded连接中处理，无需额外操作
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
@@ -835,11 +755,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.3.2 更新内容：",
+                    "版本 7.4.0 更新内容：",
                     "",
-                    "1. 终极锁血：每帧强制恢复血量，对抗服务器拉回和持续伤害",
-                    "2. 增强事件监听，防止死亡",
-                    "3. 其他功能保持不变",
+                    "1. 移除锁血功能（因服务器端无效）",
+                    "2. 修复减速按钮的类型错误",
+                    "3. 保留飞天、速度自定义、方向切换等核心功能",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -848,7 +768,6 @@ local function showMainMenu()
                     "- 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
-                    "- 锁血：开启后角色血量锁定为最大值",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -972,7 +891,6 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 锁血：开启后角色血量锁定为最大值（终极版）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -982,8 +900,7 @@ local function showMainMenu()
                     "  设置屏幕尺寸、",
                     "  长按速度、",
                     "  上升/下降模式、",
-                    "  飞行方向模式、",
-                    "  锁血",
+                    "  飞行方向模式",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1265,16 +1182,6 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- 锁血开关
-                        {
-                            text = godModeEnabled and "❤️ 锁血: 开启" or "❤️ 锁血: 关闭",
-                            callback = function(parentMenu)
-                                godModeEnabled = not godModeEnabled
-                                applyGodMode(godModeEnabled)
-                                parentMenu:Destroy()
-                                createSettingMenu()
-                            end
-                        },
                     }, showMainMenu)
                 end
                 createSettingMenu()
@@ -1291,7 +1198,6 @@ local function showMainMenu()
                             confirmMenu:Destroy()
                             isFlying = false
                             tpwalking = false
-                            applyGodMode(false)
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -1693,23 +1599,26 @@ do
     end)
 end
 
--- 减速按钮
+-- 减速按钮（修复类型错误）
 do
     local holding = false
     local longPressTask = nil
     local MIN_SPEED = 0.1
 
     local function decreaseSpeed()
-        if speeds > 1 then
-            speeds = speeds - 1
-        elseif speeds > MIN_SPEED then
-            speeds = MIN_SPEED
+        -- 确保 speeds 是数字
+        local current = tonumber(speeds) or 0
+        if current > 1 then
+            current = current - 1
+        elseif current > MIN_SPEED then
+            current = MIN_SPEED
         else
             speed.Text = "已达最小速度"
             task.wait(1)
             speed.Text = tostring(speeds)
             return false
         end
+        speeds = current
         speed.Text = tostring(speeds)
         return true
     end
@@ -1773,8 +1682,13 @@ do
                     "设置上升/下降步长",
                     tostring(stepSize),
                     function(newStep)
-                        stepSize = newStep
-                        tanchuangxiaoxi("步长已设为 " .. tostring(newStep), "步长设置")
+                        local num = tonumber(newStep)
+                        if num and num > 0 then
+                            stepSize = num
+                            tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
                     end,
                     {
                         text = "移动模式: " .. moveMode,
@@ -1806,6 +1720,7 @@ do
                 "设置速度倍率",
                 tostring(speeds),
                 function(newSpeed)
+                    -- newSpeed 已经是数字且大于0
                     speeds = newSpeed
                     speed.Text = tostring(speeds)
                     tanchuangxiaoxi("速度倍率已设为 " .. tostring(newSpeed), "速度设置")
@@ -1949,7 +1864,6 @@ end
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
-    applyGodMode(false)
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
