@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.5.0 (飞天/移速双模式切换)
+-- Version: 7.5.1 (修复函数顺序 + 死亡自动关闭开关)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -145,10 +145,13 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"   -- 上升/下降模式
 local flyMode = "屏幕"        -- 飞天方向模式: "屏幕", "悬空", "绝对锁高"
 
--- 新增：模式切换相关
+-- 模式切换相关
 local activeMode = "fly"          -- 当前模式: "fly" 或 "speed"
 local speedModeEnabled = false     -- 移速开关
 local speedModeConnection = nil    -- 移速模式的 Heartbeat 连接
+
+-- 死亡后自动关闭开关
+local autoDisableOnDeath = true    -- 默认开启
 
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
@@ -219,6 +222,31 @@ local function updateMainButtonText()
     else
         onof.Text = speedModeEnabled and "移速(开启)" or "移速(关闭)"
     end
+end
+
+-- ==================== TP Walk 相关 ====================
+-- 这些函数必须在 onCharacterAdded 之前定义
+local function stopTpwalking()
+    tpwalking = false
+end
+
+local function startTpwalking()
+    if tpwalking then return end
+    tpwalking = true
+    task.spawn(function()
+        local hb = RunService.Heartbeat
+        local chr, hum
+        while tpwalking do
+            hb:Wait()
+            chr = player.Character
+            if chr then
+                hum = chr:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    chr:TranslateBy(hum.MoveDirection * speeds)
+                end
+            end
+        end
+    end)
 end
 
 -- ==================== 移速模式控制 ====================
@@ -376,26 +404,45 @@ end
 -- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
-    -- 如果飞天开启，关闭（重生后自动关闭）
-    if isFlying then
-        isFlying = false
-        updateMainButtonText()
-        -- 清理飞行数据
-        if _G._flyData then
-            pcall(function() _G._flyData.bg:Destroy() end)
-            pcall(function() _G._flyData.bv:Destroy() end)
-            _G._flyData = nil
+
+    -- 根据自动关闭开关处理模式
+    if autoDisableOnDeath then
+        -- 开关开启：强制关闭所有模式
+        if isFlying then
+            isFlying = false
+            updateMainButtonText()
+            if _G._flyData then
+                pcall(function() _G._flyData.bg:Destroy() end)
+                pcall(function() _G._flyData.bv:Destroy() end)
+                _G._flyData = nil
+            end
         end
-    end
-    -- 如果移速开启，重新应用
-    if speedModeEnabled then
-        -- 移速循环会自动处理，但需要确保 connection 存在
-        if not speedModeConnection then
-            applySpeedMode(true) -- 会重建连接
+        if speedModeEnabled then
+            speedModeEnabled = false
+            if speedModeConnection then
+                speedModeConnection:Disconnect()
+                speedModeConnection = nil
+            end
+            -- 恢复移速
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = 16 end)
+            end
         end
+    else
+        -- 开关关闭：移速模式尝试重新应用（如果开启），飞天保持关闭（无法自动恢复）
+        if speedModeEnabled then
+            -- 重新启动移速循环
+            applySpeedMode(true)
+        end
+        -- 飞天不自动恢复，但变量保持原样（角色重生后飞行失效，用户需手动重新开启）
     end
-    char.Animate.Disabled = false
+
+    -- 总是停止 TP Walk
     stopTpwalking()
+
+    -- 确保动画开启
+    char.Animate.Disabled = false
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
@@ -928,20 +975,20 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.5.0 更新内容：",
+                    "版本 7.5.1 更新内容：",
                     "",
-                    "1. 新增模式切换：长按主按钮可在飞天/移速模式间切换",
-                    "2. 移速模式：使用飞天的加速值（speeds）调整行走速度",
-                    "3. 两种模式互斥，自动关闭另一种",
-                    "4. 修复减速按钮类型错误",
+                    "1. 修复函数顺序错误",
+                    "2. 新增死亡自动关闭开关（可在设置中关闭）",
+                    "3. 优化角色重生处理",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续（支持小数，最小0.1）",
                     "- 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
-                    "- 主按钮：长按切换模式，单击开关当前模式功能",
+                    "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
+                    "- 音量键控制：可在设置中开启/关闭",
+                    "- 死亡自动关闭：可控制角色死后是否自动停用当前模式",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1065,6 +1112,7 @@ local function showMainMenu()
                     "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
+                    "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -1074,7 +1122,8 @@ local function showMainMenu()
                     "  设置屏幕尺寸、",
                     "  长按速度、",
                     "  上升/下降模式、",
-                    "  飞行方向模式",
+                    "  飞行方向模式、",
+                    "  死亡自动关闭",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1356,6 +1405,16 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
+                        -- 新增：死亡后自动关闭开关
+                        {
+                            text = autoDisableOnDeath and "☠️ 死亡自动关闭: 开启" or "☠️ 死亡自动关闭: 关闭",
+                            callback = function(parentMenu)
+                                autoDisableOnDeath = not autoDisableOnDeath
+                                tanchuangxiaoxi(autoDisableOnDeath and "死亡后自动关闭已开启" or "死亡后自动关闭已关闭", "设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
                     }, showMainMenu)
                 end
                 createSettingMenu()
@@ -1409,33 +1468,6 @@ local function showMainMenu()
         }
     }, nil)
 end
-
--- ==================== TP Walk 相关 ====================
-local function stopTpwalking()
-    tpwalking = false
-end
-
-local function startTpwalking()
-    if tpwalking then return end
-    tpwalking = true
-    task.spawn(function()
-        local hb = RunService.Heartbeat
-        local chr, hum
-        while tpwalking do
-            hb:Wait()
-            chr = player.Character
-            if chr then
-                hum = chr:FindFirstChildWhichIsA("Humanoid")
-                if hum and hum.MoveDirection.Magnitude > 0 then
-                    chr:TranslateBy(hum.MoveDirection * speeds)
-                end
-            end
-        end
-    end)
-end
-
--- ==================== 飞天开关（已用 toggleFly 封装）====================
--- 原有的 onof.MouseButton1Click 已被下面的长按/单击逻辑替代
 
 -- ==================== 按钮长按逻辑 ====================
 
@@ -1926,6 +1958,58 @@ do
             onUp()
         end
     end)
+end
+
+-- ==================== 辅助函数：根据当前模式获取移动向量 ====================
+local function getMoveVector(dir, rootPart)
+    local step = dir * stepSize
+    if moveMode == "角色上下" then
+        return rootPart.CFrame.UpVector * step
+    elseif moveMode == "角色前后" then
+        return rootPart.CFrame.LookVector * step
+    elseif moveMode == "角色左右" then
+        return -rootPart.CFrame.RightVector * step
+    elseif moveMode == "屏幕上下" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.UpVector * step
+        end
+    elseif moveMode == "屏幕前后" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.LookVector * step
+        end
+    elseif moveMode == "屏幕左右" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return -camera.CFrame.RightVector * step
+        end
+    elseif moveMode == "水平上下" then
+        return Vector3.new(0, step, 0)
+    elseif moveMode == "水平前后(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local look = camera.CFrame.LookVector
+            local horizontal = Vector3.new(look.X, 0, look.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
+            end
+        end
+    elseif moveMode == "水平左右(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local right = camera.CFrame.RightVector
+            local horizontal = Vector3.new(right.X, 0, right.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
+            end
+        end
+    end
+    return Vector3.new()
 end
 
 -- ==================== 清理 ====================
