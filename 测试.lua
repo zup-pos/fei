@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.6.0 (新增第三人称视角)
+-- Version: 6.7.0 (新增自由视角)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -148,6 +148,12 @@ local thirdPersonEnabled = false          -- 第三人称开关
 local originalCameraType = nil            -- 原始相机类型
 local originalCameraSubject = nil         -- 原始相机目标
 
+-- 自由视角相关
+local freeCamEnabled = false               -- 自由视角开关
+local freeCamOffset = Vector3.new(0, 5, 10) -- 默认偏移（第三人称）
+local freeCamConnection = nil               -- RenderStepped连接
+local originalFreeCamType = nil             -- 原始相机类型（用于恢复）
+
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
     Enum.HumanoidStateType.Running,
@@ -208,18 +214,116 @@ local function updateButtonText()
     end
 end
 
+-- ==================== 自由视角控制 ====================
+local function applyFreeCam(enable)
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    if enable then
+        -- 保存原始相机类型
+        if originalFreeCamType == nil then
+            originalFreeCamType = camera.CameraType
+        end
+        -- 设置为脚本控制
+        camera.CameraType = Enum.CameraType.Scriptable
+        -- 连接心跳更新相机
+        if freeCamConnection then freeCamConnection:Disconnect() end
+        freeCamConnection = RunService.RenderStepped:Connect(function()
+            local char = player.Character
+            if not char then return end
+            local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+            if not rootPart then return end
+            -- 计算相机位置：角色位置 + 偏移
+            local camPos = rootPart.Position + freeCamOffset
+            -- 相机始终看向角色
+            camera.CFrame = CFrame.lookAt(camPos, rootPart.Position)
+        end)
+    else
+        -- 断开连接
+        if freeCamConnection then
+            freeCamConnection:Disconnect()
+            freeCamConnection = nil
+        end
+        -- 恢复原始相机类型
+        if originalFreeCamType then
+            camera.CameraType = originalFreeCamType
+            originalFreeCamType = nil
+        else
+            camera.CameraType = Enum.CameraType.Custom
+        end
+    end
+end
+
+-- 解析用户输入的坐标字符串（格式 "x,y,z"）
+local function parseVector3(str)
+    local parts = string.split(str, ",")
+    if #parts ~= 3 then return nil end
+    local x = tonumber(parts[1])
+    local y = tonumber(parts[2])
+    local z = tonumber(parts[3])
+    if x and y and z then
+        return Vector3.new(x, y, z)
+    end
+    return nil
+end
+
+-- 设置相机偏移（基于输入的世界坐标）
+local function setFreeCamOffsetFromWorld(worldPos)
+    local char = player.Character
+    if not char then
+        tanchuangxiaoxi("角色不存在，无法计算偏移", "错误")
+        return
+    end
+    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    if not rootPart then
+        tanchuangxiaoxi("无法获取角色位置", "错误")
+        return
+    end
+    freeCamOffset = worldPos - rootPart.Position
+    -- 自动启用自由视角
+    if not freeCamEnabled then
+        freeCamEnabled = true
+        applyFreeCam(true)
+    end
+    tanchuangxiaoxi("相机偏移已更新", "自由视角")
+end
+
+-- 设置相机距离（缩放）
+local function setFreeCamDistance(dist)
+    if freeCamOffset.Magnitude == 0 then
+        freeCamOffset = Vector3.new(0, 5, 10) -- 默认方向
+    end
+    local dir = freeCamOffset.Unit
+    freeCamOffset = dir * dist
+    -- 自动启用自由视角
+    if not freeCamEnabled then
+        freeCamEnabled = true
+        applyFreeCam(true)
+    end
+    tanchuangxiaoxi("相机距离已设为 " .. tostring(dist), "自由视角")
+end
+
+-- 重置偏移为默认
+local function resetFreeCamOffset()
+    freeCamOffset = Vector3.new(0, 5, 10)
+    if freeCamEnabled then
+        -- 保持启用
+        tanchuangxiaoxi("相机偏移已重置", "自由视角")
+    else
+        -- 如果未启用，只修改偏移，不启用
+    end
+end
+
 -- ==================== 第三人称相机控制 ====================
 local function applyThirdPerson(enable)
     local camera = workspace.CurrentCamera
     if not camera then return end
 
     if enable then
-        -- 保存原始设置
         if originalCameraType == nil then
             originalCameraType = camera.CameraType
             originalCameraSubject = camera.CameraSubject
         end
-        -- 设置第三人称跟随
         camera.CameraType = Enum.CameraType.Follow
         if player.Character then
             local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
@@ -228,25 +332,26 @@ local function applyThirdPerson(enable)
             end
         end
     else
-        -- 恢复原始设置
         if originalCameraType then
             camera.CameraType = originalCameraType
             camera.CameraSubject = originalCameraSubject
         else
-            -- 默认设置
             camera.CameraType = Enum.CameraType.Custom
             camera.CameraSubject = nil
         end
     end
 end
 
--- 角色重生时重新应用第三人称
+-- 角色重生处理
 local function onCharacterAdded(char)
     task.wait(0.7)
     if thirdPersonEnabled then
         applyThirdPerson(true)
     end
-    -- 飞天状态处理
+    if freeCamEnabled then
+        -- 自由视角需要重新应用（连接还在，但需要更新相机类型）
+        applyFreeCam(true)
+    end
     if isFlying then
         isFlying = false
         onof.Text = "飞天(关闭)"
@@ -531,11 +636,16 @@ local function showInputDialog(title, defaultText, callback, extraButton)
             btn.MouseButton1Click:Connect(function()
                 local input = textBox.Text
                 local num = tonumber(input)
-                if num and num > 0 then
-                    callback(num)
-                    close()
+                if extraButton then
+                    -- 如果有额外按钮，回调处理输入（由调用者决定）
+                    callback(input)
                 else
-                    tanchuangxiaoxi("请输入大于0的数字", "输入错误")
+                    if num and num > 0 then
+                        callback(num)
+                        close()
+                    else
+                        tanchuangxiaoxi("请输入大于0的数字", "输入错误")
+                    end
                 end
             end)
         end
@@ -785,11 +895,12 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.6.0 更新内容：",
+                    "版本 6.7.0 更新内容：",
                     "",
-                    "1. 新增第三人称视角：在设置中可开启/关闭，相机自动跟随角色",
-                    "2. 修复减速按钮负数问题",
-                    "3. 优化了代码结构",
+                    "1. 新增自由视角：可在设置中开启，自定义相机坐标和距离",
+                    "2. 支持输入世界坐标（格式 x,y,z）来定位相机",
+                    "3. 支持输入距离值缩放相机视角",
+                    "4. 修复减速按钮负数问题",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -798,7 +909,8 @@ local function showMainMenu()
                     "- 飞天开关：开启/关闭飞行，支持方向选择",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
-                    "- 第三人称视角：独立开关，可随时启用",
+                    "- 第三人称视角：独立开关，相机跟随角色",
+                    "- 自由视角：可自定义偏移和距离，适用于强制第一人称的游戏",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -922,6 +1034,7 @@ local function showMainMenu()
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
                     "🔹 第三人称视角：独立开关，开启后相机跟随角色（通过鼠标旋转）",
+                    "🔹 自由视角：开启后可通过坐标/距离自定义相机位置（覆盖其他视角）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -932,7 +1045,8 @@ local function showMainMenu()
                     "  长按速度、",
                     "  上升/下降模式、",
                     "  飞行方向模式、",
-                    "  第三人称视角",
+                    "  第三人称视角、",
+                    "  自由视角（含坐标/距离设置）",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1142,13 +1256,65 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- ==================== 第三人称视角开关 ====================
+                        -- 第三人称视角开关
                         {
                             text = thirdPersonEnabled and "👁️ 第三人称视角: 开启" or "👁️ 第三人称视角: 关闭",
                             callback = function(parentMenu)
                                 thirdPersonEnabled = not thirdPersonEnabled
                                 applyThirdPerson(thirdPersonEnabled)
                                 tanchuangxiaoxi(thirdPersonEnabled and "已开启第三人称视角" or "已关闭第三人称视角", "视角设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
+                        -- 自由视角开关
+                        {
+                            text = freeCamEnabled and "🎥 自由视角: 开启" or "🎥 自由视角: 关闭",
+                            callback = function(parentMenu)
+                                freeCamEnabled = not freeCamEnabled
+                                applyFreeCam(freeCamEnabled)
+                                tanchuangxiaoxi(freeCamEnabled and "已开启自由视角" or "已关闭自由视角", "自由视角")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
+                        -- 设置相机坐标
+                        {
+                            text = "📍 设置相机坐标",
+                            callback = function(parentMenu)
+                                showInputDialog("输入相机坐标 (格式 x,y,z)", "0,5,10", function(input)
+                                    local pos = parseVector3(input)
+                                    if pos then
+                                        setFreeCamOffsetFromWorld(pos)
+                                    else
+                                        tanchuangxiaoxi("格式错误，应为 x,y,z 如 10,5,20", "错误")
+                                    end
+                                end, nil)  -- 无额外按钮
+                            end
+                        },
+                        -- 设置相机距离
+                        {
+                            text = "📏 设置相机距离",
+                            callback = function(parentMenu)
+                                showInputDialog("输入相机距离 (正数)", tostring(freeCamOffset.Magnitude), function(dist)
+                                    if dist and dist > 0 then
+                                        setFreeCamDistance(dist)
+                                    else
+                                        tanchuangxiaoxi("请输入正数", "错误")
+                                    end
+                                end, nil)
+                            end
+                        },
+                        -- 重置偏移
+                        {
+                            text = "🔄 重置相机偏移",
+                            callback = function(parentMenu)
+                                resetFreeCamOffset()
+                                if freeCamEnabled then
+                                    -- 如果自由视角已开启，需要更新
+                                    applyFreeCam(true)  -- 重新应用以更新偏移
+                                end
+                                tanchuangxiaoxi("相机偏移已重置为默认", "自由视角")
                                 parentMenu:Destroy()
                                 createSettingMenu()
                             end
@@ -1169,6 +1335,7 @@ local function showMainMenu()
                         tpwalking = false
                         -- 恢复相机
                         applyThirdPerson(false)
+                        applyFreeCam(false)
                         if main and main.Parent then main:Destroy() end
                         if miniWindow and miniWindow.Parent then miniWindow:Destroy(); miniWindow = nil end
                         for _, notif in ipairs(notifs) do if notif.sg and notif.sg.Parent then notif.sg:Destroy() end end
@@ -1221,7 +1388,6 @@ onof.MouseButton1Click:Connect(function()
             end
             char.Animate.Disabled = false
         end
-        -- 第三人称状态保持不变，不恢复相机（由开关控制）
     else
         isFlying = true
         onof.Text = "飞天(开启)"
@@ -1697,7 +1863,8 @@ end
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
-    applyThirdPerson(false)  -- 恢复相机
+    applyThirdPerson(false)
+    applyFreeCam(false)
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
