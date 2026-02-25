@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.5.1 (修复函数顺序 + 死亡自动关闭开关)
+-- Version: 7.5.2 (修复飞天死亡重启)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -225,7 +225,6 @@ local function updateMainButtonText()
 end
 
 -- ==================== TP Walk 相关 ====================
--- 这些函数必须在 onCharacterAdded 之前定义
 local function stopTpwalking()
     tpwalking = false
 end
@@ -405,16 +404,26 @@ end
 local function onCharacterAdded(char)
     task.wait(0.7)
 
+    -- 先确保动画开启
+    char.Animate.Disabled = false
+
     -- 根据自动关闭开关处理模式
     if autoDisableOnDeath then
         -- 开关开启：强制关闭所有模式
         if isFlying then
             isFlying = false
-            updateMainButtonText()
             if _G._flyData then
                 pcall(function() _G._flyData.bg:Destroy() end)
                 pcall(function() _G._flyData.bv:Destroy() end)
                 _G._flyData = nil
+            end
+            -- 恢复 Humanoid 状态
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                for _, state in ipairs(VALID_HUMANOD_STATES) do
+                    pcall(function() hum:SetStateEnabled(state, true) end)
+                end
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
             end
         end
         if speedModeEnabled then
@@ -429,20 +438,66 @@ local function onCharacterAdded(char)
                 pcall(function() hum.WalkSpeed = 16 end)
             end
         end
+        updateMainButtonText()
     else
-        -- 开关关闭：移速模式尝试重新应用（如果开启），飞天保持关闭（无法自动恢复）
+        -- 开关关闭：飞天和移速都尝试重新应用（如果之前开启）
+        if isFlying then
+            -- 需要重新创建飞天所需的一切
+            -- 先清理旧数据
+            if _G._flyData then
+                pcall(function() _G._flyData.bg:Destroy() end)
+                pcall(function() _G._flyData.bv:Destroy() end)
+                _G._flyData = nil
+            end
+            -- 重新调用 toggleFly(true) 但要注意避免递归
+            task.spawn(function()
+                -- 等待一小段时间确保角色完全加载
+                task.wait(0.5)
+                if isFlying and player.Character then
+                    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
+                    if hum then
+                        player.Character.Animate.Disabled = true
+                        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+                            track:AdjustSpeed(0)
+                        end
+                        for _, state in ipairs(VALID_HUMANOD_STATES) do
+                            pcall(function() hum:SetStateEnabled(state, false) end)
+                        end
+                        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
+
+                        local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso") or player.Character:FindFirstChild("HumanoidRootPart")
+                        if torso then
+                            local startY = torso.Position.Y
+                            local bg = Instance.new("BodyGyro")
+                            bg.P = 9e4
+                            bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+                            bg.CFrame = torso.CFrame
+                            bg.Parent = torso
+
+                            local bv = Instance.new("BodyVelocity")
+                            bv.Velocity = Vector3.new(0, 0.1, 0)
+                            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                            bv.Parent = torso
+
+                            _G._flyData = {
+                                bg = bg,
+                                bv = bv,
+                                torso = torso,
+                                startY = startY
+                            }
+                        end
+                    end
+                end
+            end)
+        end
         if speedModeEnabled then
             -- 重新启动移速循环
             applySpeedMode(true)
         end
-        -- 飞天不自动恢复，但变量保持原样（角色重生后飞行失效，用户需手动重新开启）
     end
 
     -- 总是停止 TP Walk
     stopTpwalking()
-
-    -- 确保动画开启
-    char.Animate.Disabled = false
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
@@ -975,11 +1030,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.5.1 更新内容：",
+                    "版本 7.5.2 更新内容：",
                     "",
-                    "1. 修复函数顺序错误",
-                    "2. 新增死亡自动关闭开关（可在设置中关闭）",
-                    "3. 优化角色重生处理",
+                    "1. 修复飞天死亡后无法移动的问题",
+                    "2. 优化死亡自动关闭开关：关闭时飞天和移速都会自动重启",
+                    "3. 飞天和移速行为完全一致",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
