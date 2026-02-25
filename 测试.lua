@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.9.4 (修复自由视角操作)
+-- Version: 6.9.5 (自由视角旋转方向可调)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -154,19 +154,20 @@ local freeCamOffset = Vector3.new(0, 5, 10)
 local freeCamConnection = nil
 local originalFreeCamType = nil
 
--- 自由视角触摸相关（手动维护触摸点）
-local touchPoints = {}                 -- 当前触摸点列表 { [fingerId] = Vector2 }
-local rotateStartPos = nil              -- 单指旋转起始位置
-local initialAngles = nil               -- 初始偏移向量的角度 {yaw, pitch}
-local initialPinchDist = nil             -- 双指初始距离
-local initialOffsetMag = nil             -- 初始偏移长度
-local pinchConnection = nil              -- 触摸移动连接
-local touchEndedConnection = nil         -- 触摸结束连接
+-- 自由视角触摸相关
+local touchPoints = {}
+local rotateStartPos = nil
+local initialAngles = nil
+local initialPinchDist = nil
+local initialOffsetMag = nil
+local pinchConnection = nil
+local touchEndedConnection = nil
 
 -- 自由视角自定义参数
 local freeCamSensitivity = 0.005
 local freeCamMinDist = 1
 local freeCamMaxDist = 50
+local invertRotation = false   -- 是否反转旋转方向
 
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
@@ -265,7 +266,6 @@ local function applyFreeCam(enable)
             for fingerId, pos in pairs(touchPoints) do
                 table.insert(points, {Position = pos})
             end
-            -- 简单排序（便于双指识别）
             table.sort(points, function(a,b) return a.Position.Magnitude < b.Position.Magnitude end)
 
             -- 检查是否有触摸点在UI内
@@ -277,8 +277,6 @@ local function applyFreeCam(enable)
                 end
             end
             if anyInUI then
-                -- 如果有触摸点在UI内，不处理自由视角，但保持状态？
-                -- 重置状态以避免手指离开UI后误操作
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -288,7 +286,6 @@ local function applyFreeCam(enable)
 
             local count = #points
             if count == 1 then
-                -- 单指旋转
                 local pos = points[1].Position
                 if not rotateStartPos then
                     rotateStartPos = pos
@@ -306,10 +303,14 @@ local function applyFreeCam(enable)
                     end
                 else
                     local delta = pos - rotateStartPos
-                    -- 修正方向：向右滑动增加偏航角（向右看）
+                    -- 基础方向增量
                     local yawDelta = delta.X * freeCamSensitivity
-                    -- 向上滑动增加俯仰角（向上看）
                     local pitchDelta = -delta.Y * freeCamSensitivity
+                    -- 根据反转设置调整符号
+                    if invertRotation then
+                        yawDelta = -yawDelta
+                        pitchDelta = -pitchDelta
+                    end
 
                     local newYaw = initialAngles.yaw + yawDelta
                     local maxPitch = math.pi/2 - 0.1
@@ -324,7 +325,6 @@ local function applyFreeCam(enable)
                     freeCamOffset = dir * dist
                 end
             elseif count == 2 then
-                -- 双指缩放
                 local p1 = points[1].Position
                 local p2 = points[2].Position
                 local currentDist = (p2 - p1).Magnitude
@@ -339,11 +339,9 @@ local function applyFreeCam(enable)
                         freeCamOffset = freeCamOffset.Unit * newMag
                     end
                 end
-                -- 双指时重置旋转状态，避免干扰
                 rotateStartPos = nil
                 initialAngles = nil
             else
-                -- 其他情况重置
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -378,7 +376,6 @@ local function applyFreeCam(enable)
                 end
             end)
         end
-        -- 触摸开始时也要记录
         UserInputService.TouchStarted:Connect(function(input, gameProcessed)
             if gameProcessed then return end
             local fingerId = input.UserInputType == Enum.UserInputType.Touch and input.KeyCode or nil
@@ -901,8 +898,8 @@ end
 -- ==================== 相机设置对话框（自适应小屏幕）====================
 local function showCameraSettings()
     local screenSize = getScreenSize()
-    local dialogWidth = math.min(400, screenSize.X * 0.85)  -- 小屏时宽度自适应
-    local dialogHeight = math.min(600, screenSize.Y * 0.8)  -- 高度不超过屏幕80%
+    local dialogWidth = math.min(400, screenSize.X * 0.85)
+    local dialogHeight = math.min(650, screenSize.Y * 0.8)  -- 增加高度容纳新按钮
 
     local dialog = Instance.new("ScreenGui")
     dialog.Parent = playerGui
@@ -934,12 +931,11 @@ local function showCameraSettings()
     titleLabel.TextSize = 20
     titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    -- 创建一个滚动框架，以便内容过多时可以滚动
     local scrollingFrame = Instance.new("ScrollingFrame")
     scrollingFrame.Parent = bg
-    scrollingFrame.Size = UDim2.new(1, -20, 1, -80)  -- 减去标题和底部按钮区域
+    scrollingFrame.Size = UDim2.new(1, -20, 1, -80)
     scrollingFrame.Position = UDim2.new(0, 10, 0, 50)
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 540)  -- 预设内容总高度
+    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 600)
     scrollingFrame.ScrollBarThickness = 8
     scrollingFrame.BackgroundTransparency = 1
     scrollingFrame.BorderSizePixel = 0
@@ -948,7 +944,7 @@ local function showCameraSettings()
 
     local container = Instance.new("Frame")
     container.Parent = scrollingFrame
-    container.Size = UDim2.new(1, 0, 0, 540)
+    container.Size = UDim2.new(1, 0, 0, 600)
     container.BackgroundTransparency = 1
     container.Position = UDim2.new(0, 0, 0, 0)
 
@@ -1139,11 +1135,26 @@ local function showCameraSettings()
     maxDistCorner.Parent = maxDistBox
     maxDistCorner.CornerRadius = UDim.new(0, 4)
 
-    -- 重置按钮和关闭按钮放在容器底部
+    -- 旋转方向反转开关
+    local invertBtn = Instance.new("TextButton")
+    invertBtn.Parent = container
+    invertBtn.Size = UDim2.new(1, -20, 0, 40)
+    invertBtn.Position = UDim2.new(0, 10, 0, 390)
+    invertBtn.BackgroundColor3 = invertRotation and Color3.fromRGB(0,150,0) or Color3.fromRGB(150,0,0)
+    invertBtn.Text = invertRotation and "旋转方向: 反转" or "旋转方向: 正常"
+    invertBtn.TextColor3 = Color3.new(1, 1, 1)
+    invertBtn.Font = Enum.Font.GothamBold
+    invertBtn.TextSize = 16
+    invertBtn.AutoButtonColor = true
+    local invertCorner = Instance.new("UICorner")
+    invertCorner.Parent = invertBtn
+    invertCorner.CornerRadius = UDim.new(0, 6)
+
+    -- 重置按钮
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = container
     resetBtn.Size = UDim2.new(0, 120, 0, 40)
-    resetBtn.Position = UDim2.new(0, 10, 0, 400)
+    resetBtn.Position = UDim2.new(0, 10, 0, 450)
     resetBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     resetBtn.Text = "重置默认"
     resetBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1154,10 +1165,11 @@ local function showCameraSettings()
     resetCorner.Parent = resetBtn
     resetCorner.CornerRadius = UDim.new(0, 6)
 
+    -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = container
     closeBtn.Size = UDim2.new(0, 120, 0, 40)
-    closeBtn.Position = UDim2.new(1, -130, 0, 400)
+    closeBtn.Position = UDim2.new(1, -130, 0, 450)
     closeBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
     closeBtn.Text = "关闭"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -1168,8 +1180,8 @@ local function showCameraSettings()
     closeCorner.Parent = closeBtn
     closeCorner.CornerRadius = UDim.new(0, 6)
 
-    -- 更新画布大小以适应内容
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 470)
+    -- 更新画布大小
+    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 520)
 
     -- 功能函数：更新偏移
     local function updateOffsetFromInputs()
@@ -1309,6 +1321,14 @@ local function showCameraSettings()
         end
     end)
 
+    -- 旋转方向反转开关
+    invertBtn.MouseButton1Click:Connect(function()
+        invertRotation = not invertRotation
+        invertBtn.BackgroundColor3 = invertRotation and Color3.fromRGB(0,150,0) or Color3.fromRGB(150,0,0)
+        invertBtn.Text = invertRotation and "旋转方向: 反转" or "旋转方向: 正常"
+        tanchuangxiaoxi(invertRotation and "已启用旋转方向反转" or "已禁用旋转方向反转", "相机")
+    end)
+
     -- 重置按钮
     resetBtn.MouseButton1Click:Connect(function()
         resetFreeCamOffset()
@@ -1446,12 +1466,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.9.4 更新内容：",
+                    "版本 6.9.5 更新内容：",
                     "",
-                    "1. 修复双指缩放无反应",
-                    "2. 修复单指旋转方向（现在正确）",
-                    "3. 修复滑块和输入框无效果",
-                    "4. 优化触摸区域过滤",
+                    "1. 新增旋转方向反转开关，可自由调整滑动方向",
+                    "2. 优化触摸区域过滤",
+                    "3. 修复缩放与旋转灵敏度",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1460,7 +1479,7 @@ local function showMainMenu()
                     "- 飞天开关：开启/关闭飞行，支持方向选择",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
-                    "- 自由视角：开启后可用单指旋转、双指缩放",
+                    "- 自由视角：开启后可用单指旋转、双指缩放，方向可反转",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1583,7 +1602,7 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 自由视角：开启后可用单指旋转、双指缩放",
+                    "🔹 自由视角：开启后可用单指旋转、双指缩放，方向可反转",
                     "   可在相机设置中调节灵敏度、最小/最大距离",
                     "",
                     "⚙️ 菜单功能：",
@@ -1805,7 +1824,7 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- 第三人称视角开关（保留但可能无效）
+                        -- 第三人称视角开关
                         {
                             text = thirdPersonEnabled and "👁️ 第三人称视角: 开启" or "👁️ 第三人称视角: 关闭",
                             callback = function(parentMenu)
