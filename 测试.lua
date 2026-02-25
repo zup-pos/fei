@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.8.0 (整合相机设置对话框)
+-- Version: 6.9.0 (自由视角增强版)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -154,6 +154,19 @@ local freeCamOffset = Vector3.new(0, 5, 10) -- 默认偏移（第三人称）
 local freeCamConnection = nil               -- RenderStepped连接
 local originalFreeCamType = nil             -- 原始相机类型（用于恢复）
 
+-- 自由视角触摸相关
+local rotateStartPos = nil          -- 单指旋转起始位置
+local initialAngles = nil           -- 初始偏移向量的角度 {yaw, pitch}
+local initialPinchDist = nil        -- 双指初始距离
+local initialOffsetMag = nil        -- 初始偏移长度
+local pinchConnection = nil         -- 触摸移动连接
+local touchEndedConnection = nil    -- 触摸结束连接
+
+-- 自由视角自定义参数
+local freeCamSensitivity = 0.005          -- 滑动灵敏度
+local freeCamMinDist = 1                   -- 最小距离
+local freeCamMaxDist = 50                  -- 最大距离
+
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
     Enum.HumanoidStateType.Running,
@@ -182,6 +195,11 @@ local MOVE_MODES = {
 local FLY_MODES = { "屏幕", "悬空", "绝对锁高" }
 
 -- ==================== 辅助函数 ====================
+local function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
+end
+math.clamp = clamp
+
 local function getScreenSize()
     if customWidth and customHeight then
         return Vector2.new(customWidth, customHeight)
@@ -192,10 +210,6 @@ local function getScreenSize()
     else
         return Vector2.new(1920, 1080)
     end
-end
-
-local function clamp(val, min, max)
-    return math.max(min, math.min(max, val))
 end
 
 local function updateButtonText()
@@ -224,8 +238,8 @@ local function applyFreeCam(enable)
         if originalFreeCamType == nil then
             originalFreeCamType = camera.CameraType
         end
-        -- 设置为脚本控制
         camera.CameraType = Enum.CameraType.Scriptable
+
         -- 连接心跳更新相机
         if freeCamConnection then freeCamConnection:Disconnect() end
         freeCamConnection = RunService.RenderStepped:Connect(function()
@@ -233,17 +247,140 @@ local function applyFreeCam(enable)
             if not char then return end
             local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
             if not rootPart then return end
-            -- 相机位置 = 角色位置 + 偏移
             local camPos = rootPart.Position + freeCamOffset
-            -- 相机始终看向角色
             camera.CFrame = CFrame.lookAt(camPos, rootPart.Position)
         end)
+
+        -- 检查触摸点是否在UI区域内
+        local function isPointInUI(pos)
+            if not Frame or not Frame.Visible then return false end
+            local absPos = Frame.AbsolutePosition
+            local absSize = Frame.AbsoluteSize
+            return pos.X >= absPos.X and pos.X <= absPos.X + absSize.X
+               and pos.Y >= absPos.Y and pos.Y <= absPos.Y + absSize.Y
+        end
+
+        -- 触摸事件处理函数
+        local function handleTouch()
+            local points = UserInputService:GetTouchInputs()
+            local count = #points
+
+            -- 过滤UI区域：所有触摸点都必须在UI外才处理
+            local allOutsideUI = true
+            for _, point in ipairs(points) do
+                if isPointInUI(point.Position) then
+                    allOutsideUI = false
+                    break
+                end
+            end
+            if not allOutsideUI then
+                -- 有触摸点在UI内，重置状态并忽略
+                rotateStartPos = nil
+                initialAngles = nil
+                initialPinchDist = nil
+                initialOffsetMag = nil
+                return
+            end
+
+            if count == 1 then
+                -- 单指旋转
+                local pos = points[1].Position
+                if not rotateStartPos then
+                    rotateStartPos = pos
+                    local offset = freeCamOffset
+                    local dist = offset.Magnitude
+                    if dist > 0 then
+                        local dir = offset.Unit
+                        local yaw = math.atan2(dir.X, dir.Z)
+                        local pitch = math.asin(dir.Y)
+                        initialAngles = { yaw = yaw, pitch = pitch }
+                        initialOffsetMag = dist
+                    else
+                        initialAngles = { yaw = 0, pitch = 0 }
+                        initialOffsetMag = 0
+                    end
+                else
+                    local delta = pos - rotateStartPos
+                    local yawDelta = delta.X * freeCamSensitivity
+                    local pitchDelta = -delta.Y * freeCamSensitivity
+
+                    local newYaw = initialAngles.yaw + yawDelta
+                    local maxPitch = math.pi/2 - 0.1
+                    local newPitch = math.clamp(initialAngles.pitch + pitchDelta, -maxPitch, maxPitch)
+
+                    local dist = initialOffsetMag
+                    local dir = Vector3.new(
+                        math.sin(newYaw) * math.cos(newPitch),
+                        math.sin(newPitch),
+                        math.cos(newYaw) * math.cos(newPitch)
+                    )
+                    freeCamOffset = dir * dist
+                end
+
+            elseif count == 2 then
+                -- 双指缩放
+                local p1 = points[1].Position
+                local p2 = points[2].Position
+                local currentDist = (p2 - p1).Magnitude
+
+                if not initialPinchDist then
+                    initialPinchDist = currentDist
+                    initialOffsetMag = freeCamOffset.Magnitude
+                else
+                    local scale = currentDist / initialPinchDist
+                    local newMag = math.clamp(initialOffsetMag * scale, freeCamMinDist, freeCamMaxDist)
+                    if freeCamOffset.Magnitude > 0 then
+                        freeCamOffset = freeCamOffset.Unit * newMag
+                    end
+                end
+                -- 双指时重置旋转状态
+                rotateStartPos = nil
+                initialAngles = nil
+
+            else
+                -- 无触摸或多于双指
+                rotateStartPos = nil
+                initialAngles = nil
+                initialPinchDist = nil
+                initialOffsetMag = nil
+            end
+        end
+
+        -- 连接触摸事件
+        if not pinchConnection then
+            pinchConnection = UserInputService.TouchMoved:Connect(handleTouch)
+        end
+        if not touchEndedConnection then
+            touchEndedConnection = UserInputService.TouchEnded:Connect(function()
+                task.wait()
+                if #UserInputService:GetTouchInputs() == 0 then
+                    rotateStartPos = nil
+                    initialAngles = nil
+                    initialPinchDist = nil
+                    initialOffsetMag = nil
+                end
+            end)
+        end
+
     else
-        -- 断开连接
+        -- 关闭自由视角，断开所有连接
         if freeCamConnection then
             freeCamConnection:Disconnect()
             freeCamConnection = nil
         end
+        if pinchConnection then
+            pinchConnection:Disconnect()
+            pinchConnection = nil
+        end
+        if touchEndedConnection then
+            touchEndedConnection:Disconnect()
+            touchEndedConnection = nil
+        end
+        rotateStartPos = nil
+        initialAngles = nil
+        initialPinchDist = nil
+        initialOffsetMag = nil
+
         -- 恢复原始相机类型
         if originalFreeCamType then
             camera.CameraType = originalFreeCamType
@@ -258,7 +395,6 @@ end
 local function setFreeCamOffset(x, y, z)
     freeCamOffset = Vector3.new(x, y, z)
     if freeCamEnabled then
-        -- 如果已开启，重新应用（更新偏移）
         applyFreeCam(true)
     end
 end
@@ -266,10 +402,10 @@ end
 -- 设置相机距离（保持方向不变）
 local function setFreeCamDistance(dist)
     if freeCamOffset.Magnitude == 0 then
-        freeCamOffset = Vector3.new(0, 5, 10) -- 默认方向
+        freeCamOffset = Vector3.new(0, 5, 10)
     end
     local dir = freeCamOffset.Unit
-    freeCamOffset = dir * dist
+    freeCamOffset = dir * math.clamp(dist, freeCamMinDist, freeCamMaxDist)
     if freeCamEnabled then
         applyFreeCam(true)
     end
@@ -318,7 +454,6 @@ local function onCharacterAdded(char)
         applyThirdPerson(true)
     end
     if freeCamEnabled then
-        -- 自由视角需要重新应用（连接还在，但需要更新相机类型）
         applyFreeCam(true)
     end
     if isFlying then
@@ -746,7 +881,7 @@ end
 local function showCameraSettings()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(450, screenSize.X * 0.8)
-    local dialogHeight = 380
+    local dialogHeight = 520  -- 增加高度以容纳新控件
 
     local dialog = Instance.new("ScreenGui")
     dialog.Parent = playerGui
@@ -865,11 +1000,110 @@ local function showCameraSettings()
     distBox.TextSize = 14
     distBox.ClearTextOnFocus = false
 
+    -- 灵敏度滑块
+    local sensLabel = Instance.new("TextLabel")
+    sensLabel.Parent = bg
+    sensLabel.Size = UDim2.new(1, -40, 0, 30)
+    sensLabel.Position = UDim2.new(0, 20, 0, 270)
+    sensLabel.BackgroundTransparency = 1
+    sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
+    sensLabel.TextColor3 = Color3.new(1, 1, 1)
+    sensLabel.Font = Enum.Font.Gotham
+    sensLabel.TextSize = 14
+    sensLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local sensSlider = Instance.new("Frame")
+    sensSlider.Parent = bg
+    sensSlider.Size = UDim2.new(0, 200, 0, 30)
+    sensSlider.Position = UDim2.new(0, 20, 0, 300)
+    sensSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    sensSlider.BorderSizePixel = 0
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.Parent = sensSlider
+    sliderCorner.CornerRadius = UDim.new(0, 4)
+
+    local sliderButton = Instance.new("TextButton")
+    sliderButton.Parent = sensSlider
+    sliderButton.Size = UDim2.new(0, 20, 1, 0)
+    sliderButton.Position = UDim2.new(freeCamSensitivity / 0.01, 0, 0, 0)
+    sliderButton.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    sliderButton.Text = ""
+    sliderButton.AutoButtonColor = false
+    local sliderButtonCorner = Instance.new("UICorner")
+    sliderButtonCorner.Parent = sliderButton
+    sliderButtonCorner.CornerRadius = UDim.new(0, 4)
+
+    local sensValueBox = Instance.new("TextBox")
+    sensValueBox.Parent = bg
+    sensValueBox.Size = UDim2.new(0, 80, 0, 35)
+    sensValueBox.Position = UDim2.new(0, 240, 0, 295)
+    sensValueBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    sensValueBox.TextColor3 = Color3.new(1, 1, 1)
+    sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
+    sensValueBox.Font = Enum.Font.Gotham
+    sensValueBox.TextSize = 14
+    sensValueBox.ClearTextOnFocus = false
+    local sensValueCorner = Instance.new("UICorner")
+    sensValueCorner.Parent = sensValueBox
+    sensValueCorner.CornerRadius = UDim.new(0, 4)
+
+    -- 最小距离输入
+    local minDistLabel = Instance.new("TextLabel")
+    minDistLabel.Parent = bg
+    minDistLabel.Size = UDim2.new(0, 100, 0, 30)
+    minDistLabel.Position = UDim2.new(0, 20, 0, 350)
+    minDistLabel.BackgroundTransparency = 1
+    minDistLabel.Text = "最小距离"
+    minDistLabel.TextColor3 = Color3.new(1, 1, 1)
+    minDistLabel.Font = Enum.Font.Gotham
+    minDistLabel.TextSize = 14
+    minDistLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local minDistBox = Instance.new("TextBox")
+    minDistBox.Parent = bg
+    minDistBox.Size = UDim2.new(0, 80, 0, 35)
+    minDistBox.Position = UDim2.new(0, 20, 0, 380)
+    minDistBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    minDistBox.TextColor3 = Color3.new(1, 1, 1)
+    minDistBox.Text = tostring(freeCamMinDist)
+    minDistBox.Font = Enum.Font.Gotham
+    minDistBox.TextSize = 14
+    minDistBox.ClearTextOnFocus = false
+    local minDistCorner = Instance.new("UICorner")
+    minDistCorner.Parent = minDistBox
+    minDistCorner.CornerRadius = UDim.new(0, 4)
+
+    -- 最大距离输入
+    local maxDistLabel = Instance.new("TextLabel")
+    maxDistLabel.Parent = bg
+    maxDistLabel.Size = UDim2.new(0, 100, 0, 30)
+    maxDistLabel.Position = UDim2.new(0, 150, 0, 350)
+    maxDistLabel.BackgroundTransparency = 1
+    maxDistLabel.Text = "最大距离"
+    maxDistLabel.TextColor3 = Color3.new(1, 1, 1)
+    maxDistLabel.Font = Enum.Font.Gotham
+    maxDistLabel.TextSize = 14
+    maxDistLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local maxDistBox = Instance.new("TextBox")
+    maxDistBox.Parent = bg
+    maxDistBox.Size = UDim2.new(0, 80, 0, 35)
+    maxDistBox.Position = UDim2.new(0, 150, 0, 380)
+    maxDistBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    maxDistBox.TextColor3 = Color3.new(1, 1, 1)
+    maxDistBox.Text = tostring(freeCamMaxDist)
+    maxDistBox.Font = Enum.Font.Gotham
+    maxDistBox.TextSize = 14
+    maxDistBox.ClearTextOnFocus = false
+    local maxDistCorner = Instance.new("UICorner")
+    maxDistCorner.Parent = maxDistBox
+    maxDistCorner.CornerRadius = UDim.new(0, 4)
+
     -- 重置按钮
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = bg
     resetBtn.Size = UDim2.new(0, 120, 0, 40)
-    resetBtn.Position = UDim2.new(0, 20, 0, 280)
+    resetBtn.Position = UDim2.new(0, 20, 0, 440)
     resetBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     resetBtn.Text = "重置默认"
     resetBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -884,7 +1118,7 @@ local function showCameraSettings()
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(0, 120, 0, 40)
-    closeBtn.Position = UDim2.new(1, -140, 0, 280)
+    closeBtn.Position = UDim2.new(1, -140, 0, 440)
     closeBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
     closeBtn.Text = "关闭"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
@@ -902,7 +1136,6 @@ local function showCameraSettings()
         local z = tonumber(zBox.Text)
         if x and y and z then
             setFreeCamOffset(x, y, z)
-            -- 更新距离框
             distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
         else
             tanchuangxiaoxi("请输入有效的数字", "错误")
@@ -913,13 +1146,21 @@ local function showCameraSettings()
         local d = tonumber(distBox.Text)
         if d and d > 0 then
             setFreeCamDistance(d)
-            -- 更新坐标框
             xBox.Text = tostring(freeCamOffset.X)
             yBox.Text = tostring(freeCamOffset.Y)
             zBox.Text = tostring(freeCamOffset.Z)
         else
             tanchuangxiaoxi("请输入大于0的距离", "错误")
         end
+    end
+
+    local function updateSensitivityFromSlider()
+        local sliderWidth = sensSlider.AbsoluteSize.X - sliderButton.AbsoluteSize.X
+        local posX = sliderButton.AbsolutePosition.X - sensSlider.AbsolutePosition.X
+        local ratio = math.clamp(posX / sliderWidth, 0, 1)
+        freeCamSensitivity = ratio * 0.01
+        sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
+        sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
     end
 
     -- 开关按钮点击
@@ -943,6 +1184,84 @@ local function showCameraSettings()
     distBox.FocusLost:Connect(function(enterPressed)
         if enterPressed then
             updateDistFromInput()
+        end
+    end)
+
+    -- 灵敏度滑块拖动
+    sliderButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local dragConn
+            dragConn = UserInputService.InputChanged:Connect(function()
+                updateSensitivityFromSlider()
+            end)
+            local releaseConn
+            releaseConn = UserInputService.InputEnded:Connect(function(endedInput)
+                if endedInput == input then
+                    dragConn:Disconnect()
+                    releaseConn:Disconnect()
+                end
+            end)
+        end
+    end)
+
+    sensValueBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local val = tonumber(sensValueBox.Text)
+            if val and val >= 0 and val <= 0.01 then
+                freeCamSensitivity = val
+                sensLabel.Text = "滑动灵敏度: " .. string.format("%.3f", freeCamSensitivity)
+                local sliderWidth = sensSlider.AbsoluteSize.X - sliderButton.AbsoluteSize.X
+                local newX = (freeCamSensitivity / 0.01) * sliderWidth
+                sliderButton.Position = UDim2.new(0, newX, 0, 0)
+            else
+                tanchuangxiaoxi("请输入0~0.01之间的数字", "错误")
+                sensValueBox.Text = string.format("%.3f", freeCamSensitivity)
+            end
+        end
+    end)
+
+    -- 最小距离
+    minDistBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local val = tonumber(minDistBox.Text)
+            if val and val > 0 and val < freeCamMaxDist then
+                freeCamMinDist = val
+                if freeCamEnabled then
+                    -- 如果当前距离超出新范围，自动调整
+                    if freeCamOffset.Magnitude < freeCamMinDist then
+                        setFreeCamDistance(freeCamMinDist)
+                        xBox.Text = tostring(freeCamOffset.X)
+                        yBox.Text = tostring(freeCamOffset.Y)
+                        zBox.Text = tostring(freeCamOffset.Z)
+                        distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
+                    end
+                end
+            else
+                tanchuangxiaoxi("最小距离必须小于最大距离且大于0", "错误")
+                minDistBox.Text = tostring(freeCamMinDist)
+            end
+        end
+    end)
+
+    -- 最大距离
+    maxDistBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            local val = tonumber(maxDistBox.Text)
+            if val and val > freeCamMinDist then
+                freeCamMaxDist = val
+                if freeCamEnabled then
+                    if freeCamOffset.Magnitude > freeCamMaxDist then
+                        setFreeCamDistance(freeCamMaxDist)
+                        xBox.Text = tostring(freeCamOffset.X)
+                        yBox.Text = tostring(freeCamOffset.Y)
+                        zBox.Text = tostring(freeCamOffset.Z)
+                        distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
+                    end
+                end
+            else
+                tanchuangxiaoxi("最大距离必须大于最小距离", "错误")
+                maxDistBox.Text = tostring(freeCamMaxDist)
+            end
         end
     end)
 
@@ -1083,12 +1402,12 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.8.0 更新内容：",
+                    "版本 6.9.0 更新内容：",
                     "",
-                    "1. 整合相机设置到独立对话框",
-                    "2. 自由视角现在使用相对偏移，相机跟随角色旋转",
-                    "3. 坐标输入改为三个独立输入框（X,Y,Z）",
-                    "4. 距离输入可调整偏移大小",
+                    "1. 自由视角增强：支持单指旋转视角",
+                    "2. 触摸区域过滤：UI按钮区域不响应触摸",
+                    "3. 缩放范围自定义：可设置最小/最大距离",
+                    "4. 滑动灵敏度可调",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1097,8 +1416,7 @@ local function showMainMenu()
                     "- 飞天开关：开启/关闭飞行，支持方向选择",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
-                    "- 第三人称视角：独立开关，相机跟随角色",
-                    "- 自由视角：可自定义偏移和距离，相机围绕角色旋转",
+                    "- 自由视角：开启后可用单指旋转、双指缩放",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1221,8 +1539,8 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 第三人称视角：独立开关，相机跟随角色（通过鼠标旋转）",
-                    "🔹 自由视角：开启后可通过坐标/距离自定义相机位置（相对偏移）",
+                    "🔹 自由视角：开启后可用单指旋转、双指缩放",
+                    "   可在相机设置中调节灵敏度、最小/最大距离",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -1233,7 +1551,6 @@ local function showMainMenu()
                     "  长按速度、",
                     "  上升/下降模式、",
                     "  飞行方向模式、",
-                    "  第三人称视角、",
                     "  相机设置（自由视角）",
                     "- 结束脚本：彻底停止",
                     "",
@@ -1444,7 +1761,7 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- 第三人称视角开关
+                        -- 第三人称视角开关（保留但可能无效）
                         {
                             text = thirdPersonEnabled and "👁️ 第三人称视角: 开启" or "👁️ 第三人称视角: 关闭",
                             callback = function(parentMenu)
