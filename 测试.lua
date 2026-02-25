@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.7.0 (新增自由视角)
+-- Version: 6.8.0 (整合相机设置对话框)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -233,7 +233,7 @@ local function applyFreeCam(enable)
             if not char then return end
             local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
             if not rootPart then return end
-            -- 计算相机位置：角色位置 + 偏移
+            -- 相机位置 = 角色位置 + 偏移
             local camPos = rootPart.Position + freeCamOffset
             -- 相机始终看向角色
             camera.CFrame = CFrame.lookAt(camPos, rootPart.Position)
@@ -254,63 +254,32 @@ local function applyFreeCam(enable)
     end
 end
 
--- 解析用户输入的坐标字符串（格式 "x,y,z"）
-local function parseVector3(str)
-    local parts = string.split(str, ",")
-    if #parts ~= 3 then return nil end
-    local x = tonumber(parts[1])
-    local y = tonumber(parts[2])
-    local z = tonumber(parts[3])
-    if x and y and z then
-        return Vector3.new(x, y, z)
-    end
-    return nil
-end
-
--- 设置相机偏移（基于输入的世界坐标）
-local function setFreeCamOffsetFromWorld(worldPos)
-    local char = player.Character
-    if not char then
-        tanchuangxiaoxi("角色不存在，无法计算偏移", "错误")
-        return
-    end
-    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
-    if not rootPart then
-        tanchuangxiaoxi("无法获取角色位置", "错误")
-        return
-    end
-    freeCamOffset = worldPos - rootPart.Position
-    -- 自动启用自由视角
-    if not freeCamEnabled then
-        freeCamEnabled = true
+-- 设置偏移向量
+local function setFreeCamOffset(x, y, z)
+    freeCamOffset = Vector3.new(x, y, z)
+    if freeCamEnabled then
+        -- 如果已开启，重新应用（更新偏移）
         applyFreeCam(true)
     end
-    tanchuangxiaoxi("相机偏移已更新", "自由视角")
 end
 
--- 设置相机距离（缩放）
+-- 设置相机距离（保持方向不变）
 local function setFreeCamDistance(dist)
     if freeCamOffset.Magnitude == 0 then
         freeCamOffset = Vector3.new(0, 5, 10) -- 默认方向
     end
     local dir = freeCamOffset.Unit
     freeCamOffset = dir * dist
-    -- 自动启用自由视角
-    if not freeCamEnabled then
-        freeCamEnabled = true
+    if freeCamEnabled then
         applyFreeCam(true)
     end
-    tanchuangxiaoxi("相机距离已设为 " .. tostring(dist), "自由视角")
 end
 
 -- 重置偏移为默认
 local function resetFreeCamOffset()
     freeCamOffset = Vector3.new(0, 5, 10)
     if freeCamEnabled then
-        -- 保持启用
-        tanchuangxiaoxi("相机偏移已重置", "自由视角")
-    else
-        -- 如果未启用，只修改偏移，不启用
+        applyFreeCam(true)
     end
 end
 
@@ -637,7 +606,6 @@ local function showInputDialog(title, defaultText, callback, extraButton)
                 local input = textBox.Text
                 local num = tonumber(input)
                 if extraButton then
-                    -- 如果有额外按钮，回调处理输入（由调用者决定）
                     callback(input)
                 else
                     if num and num > 0 then
@@ -774,6 +742,226 @@ local function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
+-- ==================== 相机设置对话框 ====================
+local function showCameraSettings()
+    local screenSize = getScreenSize()
+    local dialogWidth = math.min(450, screenSize.X * 0.8)
+    local dialogHeight = 380
+
+    local dialog = Instance.new("ScreenGui")
+    dialog.Parent = playerGui
+    dialog.IgnoreGuiInset = true
+    dialog.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = dialog
+    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.ClipsDescendants = true
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Parent = bg
+    titleLabel.Size = UDim2.new(1, -20, 0, 40)
+    titleLabel.Position = UDim2.new(0, 10, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "相机设置"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 20
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- 开关按钮
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Parent = bg
+    toggleBtn.Size = UDim2.new(1, -40, 0, 40)
+    toggleBtn.Position = UDim2.new(0, 20, 0, 60)
+    toggleBtn.BackgroundColor3 = freeCamEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(150,0,0)
+    toggleBtn.Text = freeCamEnabled and "自由视角: 开启" or "自由视角: 关闭"
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 16
+    toggleBtn.AutoButtonColor = true
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.Parent = toggleBtn
+    toggleCorner.CornerRadius = UDim.new(0, 6)
+
+    -- 坐标输入
+    local coordLabel = Instance.new("TextLabel")
+    coordLabel.Parent = bg
+    coordLabel.Size = UDim2.new(1, -40, 0, 30)
+    coordLabel.Position = UDim2.new(0, 20, 0, 110)
+    coordLabel.BackgroundTransparency = 1
+    coordLabel.Text = "偏移坐标 X, Y, Z"
+    coordLabel.TextColor3 = Color3.new(1, 1, 1)
+    coordLabel.Font = Enum.Font.Gotham
+    coordLabel.TextSize = 14
+    coordLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local xBox = Instance.new("TextBox")
+    xBox.Parent = bg
+    xBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
+    xBox.Position = UDim2.new(0, 20, 0, 145)
+    xBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    xBox.TextColor3 = Color3.new(1, 1, 1)
+    xBox.PlaceholderText = "X"
+    xBox.Text = tostring(freeCamOffset.X)
+    xBox.Font = Enum.Font.Gotham
+    xBox.TextSize = 14
+    xBox.ClearTextOnFocus = false
+
+    local yBox = Instance.new("TextBox")
+    yBox.Parent = bg
+    yBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
+    yBox.Position = UDim2.new(0, 30 + (dialogWidth-80)/3, 0, 145)
+    yBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    yBox.TextColor3 = Color3.new(1, 1, 1)
+    yBox.PlaceholderText = "Y"
+    yBox.Text = tostring(freeCamOffset.Y)
+    yBox.Font = Enum.Font.Gotham
+    yBox.TextSize = 14
+    yBox.ClearTextOnFocus = false
+
+    local zBox = Instance.new("TextBox")
+    zBox.Parent = bg
+    zBox.Size = UDim2.new(0, (dialogWidth-80)/3, 0, 35)
+    zBox.Position = UDim2.new(0, 40 + 2*(dialogWidth-80)/3, 0, 145)
+    zBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    zBox.TextColor3 = Color3.new(1, 1, 1)
+    zBox.PlaceholderText = "Z"
+    zBox.Text = tostring(freeCamOffset.Z)
+    zBox.Font = Enum.Font.Gotham
+    zBox.TextSize = 14
+    zBox.ClearTextOnFocus = false
+
+    -- 距离输入
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Parent = bg
+    distLabel.Size = UDim2.new(1, -40, 0, 30)
+    distLabel.Position = UDim2.new(0, 20, 0, 195)
+    distLabel.BackgroundTransparency = 1
+    distLabel.Text = "距离 (保持方向)"
+    distLabel.TextColor3 = Color3.new(1, 1, 1)
+    distLabel.Font = Enum.Font.Gotham
+    distLabel.TextSize = 14
+    distLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local distBox = Instance.new("TextBox")
+    distBox.Parent = bg
+    distBox.Size = UDim2.new(0, 100, 0, 35)
+    distBox.Position = UDim2.new(0, 20, 0, 225)
+    distBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    distBox.TextColor3 = Color3.new(1, 1, 1)
+    distBox.PlaceholderText = "距离"
+    distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
+    distBox.Font = Enum.Font.Gotham
+    distBox.TextSize = 14
+    distBox.ClearTextOnFocus = false
+
+    -- 重置按钮
+    local resetBtn = Instance.new("TextButton")
+    resetBtn.Parent = bg
+    resetBtn.Size = UDim2.new(0, 120, 0, 40)
+    resetBtn.Position = UDim2.new(0, 20, 0, 280)
+    resetBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    resetBtn.Text = "重置默认"
+    resetBtn.TextColor3 = Color3.new(1, 1, 1)
+    resetBtn.Font = Enum.Font.GothamBold
+    resetBtn.TextSize = 14
+    resetBtn.AutoButtonColor = true
+    local resetCorner = Instance.new("UICorner")
+    resetCorner.Parent = resetBtn
+    resetCorner.CornerRadius = UDim.new(0, 6)
+
+    -- 关闭按钮
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 120, 0, 40)
+    closeBtn.Position = UDim2.new(1, -140, 0, 280)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    closeBtn.Text = "关闭"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    closeBtn.AutoButtonColor = true
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.Parent = closeBtn
+    closeCorner.CornerRadius = UDim.new(0, 6)
+
+    -- 功能函数：更新偏移
+    local function updateOffsetFromInputs()
+        local x = tonumber(xBox.Text)
+        local y = tonumber(yBox.Text)
+        local z = tonumber(zBox.Text)
+        if x and y and z then
+            setFreeCamOffset(x, y, z)
+            -- 更新距离框
+            distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
+        else
+            tanchuangxiaoxi("请输入有效的数字", "错误")
+        end
+    end
+
+    local function updateDistFromInput()
+        local d = tonumber(distBox.Text)
+        if d and d > 0 then
+            setFreeCamDistance(d)
+            -- 更新坐标框
+            xBox.Text = tostring(freeCamOffset.X)
+            yBox.Text = tostring(freeCamOffset.Y)
+            zBox.Text = tostring(freeCamOffset.Z)
+        else
+            tanchuangxiaoxi("请输入大于0的距离", "错误")
+        end
+    end
+
+    -- 开关按钮点击
+    toggleBtn.MouseButton1Click:Connect(function()
+        freeCamEnabled = not freeCamEnabled
+        applyFreeCam(freeCamEnabled)
+        toggleBtn.BackgroundColor3 = freeCamEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(150,0,0)
+        toggleBtn.Text = freeCamEnabled and "自由视角: 开启" or "自由视角: 关闭"
+        tanchuangxiaoxi(freeCamEnabled and "已开启自由视角" or "已关闭自由视角", "相机")
+    end)
+
+    -- 坐标输入框回车或失去焦点时应用
+    local function onCoordEnter()
+        updateOffsetFromInputs()
+    end
+    xBox.FocusLost:Connect(onCoordEnter)
+    yBox.FocusLost:Connect(onCoordEnter)
+    zBox.FocusLost:Connect(onCoordEnter)
+
+    -- 距离框回车或失去焦点时应用
+    distBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            updateDistFromInput()
+        end
+    end)
+
+    -- 重置按钮
+    resetBtn.MouseButton1Click:Connect(function()
+        resetFreeCamOffset()
+        xBox.Text = tostring(freeCamOffset.X)
+        yBox.Text = tostring(freeCamOffset.Y)
+        zBox.Text = tostring(freeCamOffset.Z)
+        distBox.Text = tostring(math.floor(freeCamOffset.Magnitude * 100) / 100)
+        tanchuangxiaoxi("相机偏移已重置为默认", "相机")
+    end)
+
+    -- 关闭按钮
+    closeBtn.MouseButton1Click:Connect(function()
+        dialog:Destroy()
+    end)
+end
+
 -- ==================== 音量键隐藏功能 ====================
 local function setUIVisible(visible)
     uiVisible = visible
@@ -895,12 +1083,12 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.7.0 更新内容：",
+                    "版本 6.8.0 更新内容：",
                     "",
-                    "1. 新增自由视角：可在设置中开启，自定义相机坐标和距离",
-                    "2. 支持输入世界坐标（格式 x,y,z）来定位相机",
-                    "3. 支持输入距离值缩放相机视角",
-                    "4. 修复减速按钮负数问题",
+                    "1. 整合相机设置到独立对话框",
+                    "2. 自由视角现在使用相对偏移，相机跟随角色旋转",
+                    "3. 坐标输入改为三个独立输入框（X,Y,Z）",
+                    "4. 距离输入可调整偏移大小",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -910,7 +1098,7 @@ local function showMainMenu()
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
                     "- 第三人称视角：独立开关，相机跟随角色",
-                    "- 自由视角：可自定义偏移和距离，适用于强制第一人称的游戏",
+                    "- 自由视角：可自定义偏移和距离，相机围绕角色旋转",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1033,8 +1221,8 @@ local function showMainMenu()
                     "🔹 飞天开关：开启/关闭飞行，支持方向选择",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
-                    "🔹 第三人称视角：独立开关，开启后相机跟随角色（通过鼠标旋转）",
-                    "🔹 自由视角：开启后可通过坐标/距离自定义相机位置（覆盖其他视角）",
+                    "🔹 第三人称视角：独立开关，相机跟随角色（通过鼠标旋转）",
+                    "🔹 自由视角：开启后可通过坐标/距离自定义相机位置（相对偏移）",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -1046,7 +1234,7 @@ local function showMainMenu()
                     "  上升/下降模式、",
                     "  飞行方向模式、",
                     "  第三人称视角、",
-                    "  自由视角（含坐标/距离设置）",
+                    "  相机设置（自由视角）",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1267,56 +1455,11 @@ local function showMainMenu()
                                 createSettingMenu()
                             end
                         },
-                        -- 自由视角开关
+                        -- 相机设置（自由视角）
                         {
-                            text = freeCamEnabled and "🎥 自由视角: 开启" or "🎥 自由视角: 关闭",
+                            text = "📷 相机设置",
                             callback = function(parentMenu)
-                                freeCamEnabled = not freeCamEnabled
-                                applyFreeCam(freeCamEnabled)
-                                tanchuangxiaoxi(freeCamEnabled and "已开启自由视角" or "已关闭自由视角", "自由视角")
-                                parentMenu:Destroy()
-                                createSettingMenu()
-                            end
-                        },
-                        -- 设置相机坐标
-                        {
-                            text = "📍 设置相机坐标",
-                            callback = function(parentMenu)
-                                showInputDialog("输入相机坐标 (格式 x,y,z)", "0,5,10", function(input)
-                                    local pos = parseVector3(input)
-                                    if pos then
-                                        setFreeCamOffsetFromWorld(pos)
-                                    else
-                                        tanchuangxiaoxi("格式错误，应为 x,y,z 如 10,5,20", "错误")
-                                    end
-                                end, nil)  -- 无额外按钮
-                            end
-                        },
-                        -- 设置相机距离
-                        {
-                            text = "📏 设置相机距离",
-                            callback = function(parentMenu)
-                                showInputDialog("输入相机距离 (正数)", tostring(freeCamOffset.Magnitude), function(dist)
-                                    if dist and dist > 0 then
-                                        setFreeCamDistance(dist)
-                                    else
-                                        tanchuangxiaoxi("请输入正数", "错误")
-                                    end
-                                end, nil)
-                            end
-                        },
-                        -- 重置偏移
-                        {
-                            text = "🔄 重置相机偏移",
-                            callback = function(parentMenu)
-                                resetFreeCamOffset()
-                                if freeCamEnabled then
-                                    -- 如果自由视角已开启，需要更新
-                                    applyFreeCam(true)  -- 重新应用以更新偏移
-                                end
-                                tanchuangxiaoxi("相机偏移已重置为默认", "自由视角")
-                                parentMenu:Destroy()
-                                createSettingMenu()
+                                showCameraSettings()
                             end
                         },
                     }, showMainMenu)
@@ -1333,7 +1476,6 @@ local function showMainMenu()
                         confirmMenu:Destroy()
                         isFlying = false
                         tpwalking = false
-                        -- 恢复相机
                         applyThirdPerson(false)
                         applyFreeCam(false)
                         if main and main.Parent then main:Destroy() end
