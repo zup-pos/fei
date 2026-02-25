@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 6.9.3 (修复触摸事件 + 自适应UI)
+-- Version: 6.9.4 (修复自由视角操作)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -265,9 +265,10 @@ local function applyFreeCam(enable)
             for fingerId, pos in pairs(touchPoints) do
                 table.insert(points, {Position = pos})
             end
-            table.sort(points, function(a,b) return a.Position.Magnitude < b.Position.Magnitude end) -- 简单排序
+            -- 简单排序（便于双指识别）
+            table.sort(points, function(a,b) return a.Position.Magnitude < b.Position.Magnitude end)
 
-            -- 过滤UI区域：只要有一个点在UI内就忽略全部
+            -- 检查是否有触摸点在UI内
             local anyInUI = false
             for _, point in ipairs(points) do
                 if isPointInUI(point.Position) then
@@ -276,6 +277,8 @@ local function applyFreeCam(enable)
                 end
             end
             if anyInUI then
+                -- 如果有触摸点在UI内，不处理自由视角，但保持状态？
+                -- 重置状态以避免手指离开UI后误操作
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -285,6 +288,7 @@ local function applyFreeCam(enable)
 
             local count = #points
             if count == 1 then
+                -- 单指旋转
                 local pos = points[1].Position
                 if not rotateStartPos then
                     rotateStartPos = pos
@@ -302,7 +306,9 @@ local function applyFreeCam(enable)
                     end
                 else
                     local delta = pos - rotateStartPos
+                    -- 修正方向：向右滑动增加偏航角（向右看）
                     local yawDelta = delta.X * freeCamSensitivity
+                    -- 向上滑动增加俯仰角（向上看）
                     local pitchDelta = -delta.Y * freeCamSensitivity
 
                     local newYaw = initialAngles.yaw + yawDelta
@@ -318,6 +324,7 @@ local function applyFreeCam(enable)
                     freeCamOffset = dir * dist
                 end
             elseif count == 2 then
+                -- 双指缩放
                 local p1 = points[1].Position
                 local p2 = points[2].Position
                 local currentDist = (p2 - p1).Magnitude
@@ -332,9 +339,11 @@ local function applyFreeCam(enable)
                         freeCamOffset = freeCamOffset.Unit * newMag
                     end
                 end
+                -- 双指时重置旋转状态，避免干扰
                 rotateStartPos = nil
                 initialAngles = nil
             else
+                -- 其他情况重置
                 rotateStartPos = nil
                 initialAngles = nil
                 initialPinchDist = nil
@@ -1130,7 +1139,7 @@ local function showCameraSettings()
     maxDistCorner.Parent = maxDistBox
     maxDistCorner.CornerRadius = UDim.new(0, 4)
 
-    -- 重置按钮和关闭按钮放在容器底部，但为了滚动，将其放在容器内
+    -- 重置按钮和关闭按钮放在容器底部
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = container
     resetBtn.Size = UDim2.new(0, 120, 0, 40)
@@ -1437,11 +1446,12 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 6.9.3 更新内容：",
+                    "版本 6.9.4 更新内容：",
                     "",
-                    "1. 修复触摸错误：改用 TouchStarted/TouchMoved/TouchEnded",
-                    "2. 优化UI自适应：小屏幕可滚动，不再溢出",
-                    "3. 相机设置对话框完全适配不同尺寸",
+                    "1. 修复双指缩放无反应",
+                    "2. 修复单指旋转方向（现在正确）",
+                    "3. 修复滑块和输入框无效果",
+                    "4. 优化触摸区域过滤",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
