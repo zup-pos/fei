@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.6.0 (整合旧版飞天逻辑 + 移速模式 + 死亡自动开关)
+-- Version: 7.6.1 (修复输入验证和按钮失效)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -870,7 +870,9 @@ local function showInputDialog(title, defaultText, callback, extraButton)
                 local input = textBox.Text
                 local num = tonumber(input)
                 if extraButton then
-                    callback(input)  -- 传入原始输入，由调用者处理
+                    -- 即使有额外按钮，我们也对输入进行验证，但为了兼容性，我们仍然传入原始输入，但回调需要自己处理
+                    -- 这里不做验证，由回调处理
+                    callback(input)
                     close()
                 else
                     if num and num > 0 then
@@ -1130,11 +1132,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.6.0 更新内容：",
+                    "版本 7.6.1 更新内容：",
                     "",
-                    "1. 整合旧版飞天逻辑，解决飞天无法移动问题",
-                    "2. 保留移速模式切换和死亡自动关闭开关",
-                    "3. 飞天和移速在关闭自动关闭时均可重生后自动重启",
+                    "1. 修复速度倍率输入验证，防止字母输入导致错误",
+                    "2. 修复上升/下降按钮失效问题",
+                    "3. 优化输入对话框逻辑",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1868,8 +1870,8 @@ do
                 showInputDialog(
                     "设置上升/下降步长",
                     tostring(stepSize),
-                    function(newStep)
-                        local num = tonumber(newStep)
+                    function(input)
+                        local num = tonumber(input)
                         if num and num > 0 then
                             stepSize = num
                             tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
@@ -1906,11 +1908,15 @@ do
             showInputDialog(
                 "设置速度倍率",
                 tostring(speeds),
-                function(newSpeed)
-                    -- newSpeed 已经是数字且大于0
-                    speeds = newSpeed
-                    speed.Text = tostring(speeds)
-                    tanchuangxiaoxi("速度倍率已设为 " .. tostring(newSpeed), "速度设置")
+                function(input)
+                    local num = tonumber(input)
+                    if num and num > 0 then
+                        speeds = num
+                        speed.Text = tostring(speeds)
+                        tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
+                    else
+                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                    end
                 end,
                 {
                     text = "飞行模式: " .. flyMode,
