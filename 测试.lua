@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.4.0 (移除锁血，修复减速错误)
+-- Version: 7.5.0 (飞天/移速双模式切换)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -145,6 +145,11 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"   -- 上升/下降模式
 local flyMode = "屏幕"        -- 飞天方向模式: "屏幕", "悬空", "绝对锁高"
 
+-- 新增：模式切换相关
+local activeMode = "fly"          -- 当前模式: "fly" 或 "speed"
+local speedModeEnabled = false     -- 移速开关
+local speedModeConnection = nil    -- 移速模式的 Heartbeat 连接
+
 -- 有效Humanoid状态列表
 local VALID_HUMANOD_STATES = {
     Enum.HumanoidStateType.Running,
@@ -207,22 +212,190 @@ local function updateButtonText()
     end
 end
 
+-- 更新主按钮文本（根据当前模式和状态）
+local function updateMainButtonText()
+    if activeMode == "fly" then
+        onof.Text = isFlying and "飞天(开启)" or "飞天(关闭)"
+    else
+        onof.Text = speedModeEnabled and "移速(开启)" or "移速(关闭)"
+    end
+end
+
+-- ==================== 移速模式控制 ====================
+local function applySpeedMode(enable)
+    if enable then
+        -- 如果飞天正在开启，先关闭
+        if isFlying then
+            isFlying = false
+            -- 停止飞行相关逻辑
+            if _G._flyData then
+                pcall(function() _G._flyData.bg:Destroy() end)
+                pcall(function() _G._flyData.bv:Destroy() end)
+                _G._flyData = nil
+            end
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    for _, state in ipairs(VALID_HUMANOD_STATES) do
+                        pcall(function() hum:SetStateEnabled(state, true) end)
+                    end
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+                end
+                char.Animate.Disabled = false
+            end
+            stopTpwalking()
+        end
+
+        -- 启动移速循环
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+        end
+        speedModeConnection = RunService.Heartbeat:Connect(function()
+            if not speedModeEnabled then return end
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    -- 基础移速 16，乘以 speeds 倍率
+                    local targetSpeed = 16 * speeds
+                    -- 限制最大速度（可选）
+                    targetSpeed = clamp(targetSpeed, 1, 100)
+                    pcall(function()
+                        hum.WalkSpeed = targetSpeed
+                    end)
+                end
+            end
+        end)
+
+        tanchuangxiaoxi("已开启移速倍率: " .. tostring(speeds), "移速模式")
+    else
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        -- 恢复默认移速（16）
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function()
+                    hum.WalkSpeed = 16
+                end)
+            end
+        end
+        tanchuangxiaoxi("已关闭移速模式", "移速模式")
+    end
+    updateMainButtonText()
+end
+
+-- ==================== 飞天开关 ====================
+local function toggleFly(enable)
+    if enable then
+        -- 如果移速正在开启，先关闭
+        if speedModeEnabled then
+            speedModeEnabled = false
+            applySpeedMode(false)
+        end
+
+        -- 开启飞天
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if not hum then return end
+
+        char.Animate.Disabled = true
+        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+            track:AdjustSpeed(0)
+        end
+
+        for _, state in ipairs(VALID_HUMANOD_STATES) do
+            pcall(function()
+                hum:SetStateEnabled(state, false)
+            end)
+        end
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Swimming)
+            hum.PlatformStand = true
+        end)
+
+        local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+        if not torso then return end
+
+        local startY = torso.Position.Y
+
+        local bg = Instance.new("BodyGyro")
+        bg.P = 9e4
+        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.CFrame = torso.CFrame
+        bg.Parent = torso
+
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0, 0.1, 0)
+        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.Parent = torso
+
+        -- 存储到飞天相关变量以便后续关闭
+        _G._flyData = {
+            bg = bg,
+            bv = bv,
+            torso = torso,
+            startY = startY
+        }
+
+        tanchuangxiaoxi("已开启飞天", "飞天")
+    else
+        -- 关闭飞天
+        if _G._flyData then
+            pcall(function() _G._flyData.bg:Destroy() end)
+            pcall(function() _G._flyData.bv:Destroy() end)
+            _G._flyData = nil
+        end
+
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                for _, state in ipairs(VALID_HUMANOD_STATES) do
+                    pcall(function()
+                        hum:SetStateEnabled(state, true)
+                    end)
+                end
+                pcall(function()
+                    hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+                    hum.PlatformStand = false
+                end)
+            end
+            char.Animate.Disabled = false
+        end
+        tanchuangxiaoxi("已关闭飞天", "飞天")
+    end
+    updateMainButtonText()
+end
+
 -- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
+    -- 如果飞天开启，关闭（重生后自动关闭）
     if isFlying then
         isFlying = false
-        onof.Text = "飞天(关闭)"
-        local hum = char:FindFirstChildWhichIsA("Humanoid")
-        if hum then
-            for _, state in ipairs(VALID_HUMANOD_STATES) do
-                pcall(function() hum:SetStateEnabled(state, true) end)
-            end
-            pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+        updateMainButtonText()
+        -- 清理飞行数据
+        if _G._flyData then
+            pcall(function() _G._flyData.bg:Destroy() end)
+            pcall(function() _G._flyData.bv:Destroy() end)
+            _G._flyData = nil
         end
-        char.Animate.Disabled = false
-        stopTpwalking()
     end
+    -- 如果移速开启，重新应用
+    if speedModeEnabled then
+        -- 移速循环会自动处理，但需要确保 connection 存在
+        if not speedModeConnection then
+            applySpeedMode(true) -- 会重建连接
+        end
+    end
+    char.Animate.Disabled = false
+    stopTpwalking()
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
@@ -755,17 +928,18 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.4.0 更新内容：",
+                    "版本 7.5.0 更新内容：",
                     "",
-                    "1. 移除锁血功能（因服务器端无效）",
-                    "2. 修复减速按钮的类型错误",
-                    "3. 保留飞天、速度自定义、方向切换等核心功能",
+                    "1. 新增模式切换：长按主按钮可在飞天/移速模式间切换",
+                    "2. 移速模式：使用飞天的加速值（speeds）调整行走速度",
+                    "3. 两种模式互斥，自动关闭另一种",
+                    "4. 修复减速按钮类型错误",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续（支持小数，最小0.1）",
                     "- 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
-                    "- 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
+                    "- 主按钮：长按切换模式，单击开关当前模式功能",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
                     "",
@@ -888,7 +1062,7 @@ local function showMainMenu()
                     "   - 水平左右(屏幕)：基于相机右方的水平方向",
                     "🔹 加速/减速：单击速度+1/-1，长按连续（支持小数，最小0.1）",
                     "🔹 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
-                    "🔹 飞天开关：开启/关闭飞行，支持方向选择（屏幕/悬空/绝对锁高）",
+                    "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
                     "",
@@ -1198,6 +1372,16 @@ local function showMainMenu()
                             confirmMenu:Destroy()
                             isFlying = false
                             tpwalking = false
+                            speedModeEnabled = false
+                            if speedModeConnection then
+                                speedModeConnection:Disconnect()
+                                speedModeConnection = nil
+                            end
+                            if _G._flyData then
+                                pcall(function() _G._flyData.bg:Destroy() end)
+                                pcall(function() _G._flyData.bv:Destroy() end)
+                                _G._flyData = nil
+                            end
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -1250,192 +1434,8 @@ local function startTpwalking()
     end)
 end
 
--- ==================== 飞天开关 ====================
-onof.MouseButton1Click:Connect(function()
-    if isFlying then
-        isFlying = false
-        onof.Text = "飞天(关闭)"
-        stopTpwalking()
-        tanchuangxiaoxi("已关闭飞天", "飞天")
-
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                for _, state in ipairs(VALID_HUMANOD_STATES) do
-                    pcall(function()
-                        hum:SetStateEnabled(state, true)
-                    end)
-                end
-                pcall(function()
-                    hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-                    hum.PlatformStand = false
-                end)
-            end
-            char.Animate.Disabled = false
-        end
-    else
-        isFlying = true
-        onof.Text = "飞天(开启)"
-        stopTpwalking()
-        tanchuangxiaoxi("已开启飞天", "飞天")
-
-        local char = player.Character
-        if not char then return end
-        local hum = char:FindFirstChildWhichIsA("Humanoid")
-        if not hum then return end
-
-        char.Animate.Disabled = true
-        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-            track:AdjustSpeed(0)
-        end
-
-        for _, state in ipairs(VALID_HUMANOD_STATES) do
-            pcall(function()
-                hum:SetStateEnabled(state, false)
-            end)
-        end
-        pcall(function()
-            hum:ChangeState(Enum.HumanoidStateType.Swimming)
-            hum.PlatformStand = true
-        end)
-
-        local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-        if not torso then return end
-
-        local startY = torso.Position.Y
-
-        local bg = Instance.new("BodyGyro")
-        bg.P = 9e4
-        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bg.CFrame = torso.CFrame
-        bg.Parent = torso
-
-        local bv = Instance.new("BodyVelocity")
-        bv.Velocity = Vector3.new(0, 0.1, 0)
-        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bv.Parent = torso
-
-        while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
-            RunService.Heartbeat:Wait()
-            local camera = workspace.CurrentCamera
-            if camera then
-                local moveDir = hum.MoveDirection
-                local maxspeed = 50 * speeds
-
-                if flyMode == "屏幕" then
-                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                    if moveDir.Magnitude > 0 then
-                        bv.Velocity = moveDir * maxspeed
-                    else
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                    end
-                    bg.CFrame = camera.CFrame
-
-                elseif flyMode == "悬空" then
-                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                    if moveDir.Magnitude > 0 then
-                        bv.Velocity = moveDir.Unit * maxspeed
-                    else
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                    end
-                    bg.CFrame = camera.CFrame
-
-                elseif flyMode == "绝对锁高" then
-                    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
-                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                    if moveDir.Magnitude > 0 then
-                        bv.Velocity = moveDir.Unit * maxspeed
-                    else
-                        bv.Velocity = Vector3.new(0, 0, 0)
-                    end
-                    bg.CFrame = camera.CFrame
-
-                    local pos = torso.Position
-                    torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
-                end
-            end
-        end
-
-        bg:Destroy()
-        bv:Destroy()
-
-        if isFlying then
-            isFlying = false
-            onof.Text = "飞天(关闭)"
-            stopTpwalking()
-            local charNow = player.Character
-            if charNow then
-                local humNow = charNow:FindFirstChildWhichIsA("Humanoid")
-                if humNow then
-                    for _, state in ipairs(VALID_HUMANOD_STATES) do
-                        pcall(function()
-                            humNow:SetStateEnabled(state, true)
-                        end)
-                    end
-                    pcall(function()
-                        humNow:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-                        humNow.PlatformStand = false
-                    end)
-                end
-                charNow.Animate.Disabled = false
-            end
-        end
-    end
-end)
-
--- ==================== 辅助函数：根据当前模式获取移动向量 ====================
-local function getMoveVector(dir, rootPart)
-    local step = dir * stepSize
-    if moveMode == "角色上下" then
-        return rootPart.CFrame.UpVector * step
-    elseif moveMode == "角色前后" then
-        return rootPart.CFrame.LookVector * step
-    elseif moveMode == "角色左右" then
-        return -rootPart.CFrame.RightVector * step
-    elseif moveMode == "屏幕上下" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return camera.CFrame.UpVector * step
-        end
-    elseif moveMode == "屏幕前后" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return camera.CFrame.LookVector * step
-        end
-    elseif moveMode == "屏幕左右" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            return -camera.CFrame.RightVector * step
-        end
-    elseif moveMode == "水平上下" then
-        return Vector3.new(0, step, 0)
-    elseif moveMode == "水平前后(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local look = camera.CFrame.LookVector
-            local horizontal = Vector3.new(look.X, 0, look.Z)
-            if horizontal.Magnitude > 0 then
-                return horizontal.Unit * step
-            else
-                return Vector3.new(0, 0, 0)
-            end
-        end
-    elseif moveMode == "水平左右(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local right = camera.CFrame.RightVector
-            local horizontal = Vector3.new(right.X, 0, right.Z)
-            if horizontal.Magnitude > 0 then
-                return horizontal.Unit * step
-            else
-                return Vector3.new(0, 0, 0)
-            end
-        end
-    end
-    return Vector3.new()
-end
+-- ==================== 飞天开关（已用 toggleFly 封装）====================
+-- 原有的 onof.MouseButton1Click 已被下面的长按/单击逻辑替代
 
 -- ==================== 按钮长按逻辑 ====================
 
@@ -1749,6 +1749,72 @@ do
     end)
 end
 
+-- ==================== 主按钮（onof）长按/单击逻辑（模式切换）====================
+do
+    local holding = false
+    local longPressTask = nil
+    local isLongPress = false
+
+    onof.MouseButton1Down:Connect(function()
+        if holding then return end
+        holding = true
+        isLongPress = false
+
+        longPressTask = task.delay(0.3, function()
+            if holding then
+                isLongPress = true
+                -- 长按：切换模式
+                if activeMode == "fly" then
+                    activeMode = "speed"
+                    -- 如果飞天正在开启，关闭它
+                    if isFlying then
+                        isFlying = false
+                        toggleFly(false)
+                    end
+                else
+                    activeMode = "fly"
+                    -- 如果移速正在开启，关闭它
+                    if speedModeEnabled then
+                        speedModeEnabled = false
+                        applySpeedMode(false)
+                    end
+                end
+                updateMainButtonText()
+                tanchuangxiaoxi("已切换至" .. (activeMode == "fly" and "飞天模式" or "移速模式"), "模式切换")
+                holding = false
+                longPressTask = nil
+            end
+        end)
+    end)
+
+    local function onUp()
+        if holding then
+            if longPressTask then
+                task.cancel(longPressTask)
+                longPressTask = nil
+            end
+            if not isLongPress then
+                -- 单击：在当前模式下开关
+                if activeMode == "fly" then
+                    isFlying = not isFlying
+                    toggleFly(isFlying)
+                else
+                    speedModeEnabled = not speedModeEnabled
+                    applySpeedMode(speedModeEnabled)
+                end
+            end
+            holding = false
+        end
+    end
+
+    onof.MouseButton1Up:Connect(onUp)
+    onof.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            onUp()
+        end
+    end)
+end
+
 -- 隐藏按钮
 do
     local holding = false
@@ -1864,6 +1930,15 @@ end
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
+    if speedModeConnection then
+        speedModeConnection:Disconnect()
+        speedModeConnection = nil
+    end
+    if _G._flyData then
+        pcall(function() _G._flyData.bg:Destroy() end)
+        pcall(function() _G._flyData.bv:Destroy() end)
+        _G._flyData = nil
+    end
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
@@ -1871,3 +1946,4 @@ main.Destroying:Connect(function()
 end)
 
 updateButtonText()
+updateMainButtonText()
