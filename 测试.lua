@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.5.2 (修复飞天死亡重启)
+-- Version: 7.5.3 (使用旧版飞天逻辑)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -254,24 +254,7 @@ local function applySpeedMode(enable)
         -- 如果飞天正在开启，先关闭
         if isFlying then
             isFlying = false
-            -- 停止飞行相关逻辑
-            if _G._flyData then
-                pcall(function() _G._flyData.bg:Destroy() end)
-                pcall(function() _G._flyData.bv:Destroy() end)
-                _G._flyData = nil
-            end
-            local char = player.Character
-            if char then
-                local hum = char:FindFirstChildWhichIsA("Humanoid")
-                if hum then
-                    for _, state in ipairs(VALID_HUMANOD_STATES) do
-                        pcall(function() hum:SetStateEnabled(state, true) end)
-                    end
-                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
-                end
-                char.Animate.Disabled = false
-            end
-            stopTpwalking()
+            toggleFly(false) -- 关闭飞天
         end
 
         -- 启动移速循环
@@ -286,7 +269,6 @@ local function applySpeedMode(enable)
                 if hum then
                     -- 基础移速 16，乘以 speeds 倍率
                     local targetSpeed = 16 * speeds
-                    -- 限制最大速度（可选）
                     targetSpeed = clamp(targetSpeed, 1, 100)
                     pcall(function()
                         hum.WalkSpeed = targetSpeed
@@ -316,7 +298,10 @@ local function applySpeedMode(enable)
     updateMainButtonText()
 end
 
--- ==================== 飞天开关 ====================
+-- ==================== 飞天线程变量 ====================
+local flyThread = nil
+
+-- ==================== 飞天开关（旧版逻辑）====================
 local function toggleFly(enable)
     if enable then
         -- 如果移速正在开启，先关闭
@@ -349,8 +334,6 @@ local function toggleFly(enable)
         local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
         if not torso then return end
 
-        local startY = torso.Position.Y
-
         local bg = Instance.new("BodyGyro")
         bg.P = 9e4
         bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
@@ -362,17 +345,44 @@ local function toggleFly(enable)
         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
         bv.Parent = torso
 
-        -- 存储到飞天相关变量以便后续关闭
+        -- 存储到全局表以便关闭时访问
         _G._flyData = {
             bg = bg,
-            bv = bv,
-            torso = torso,
-            startY = startY
+            bv = bv
         }
+
+        -- 启动飞天循环线程
+        flyThread = task.spawn(function()
+            while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
+                RunService.Heartbeat:Wait()
+                local camera = workspace.CurrentCamera
+                if camera then
+                    local moveDir = hum.MoveDirection
+                    local maxspeed = 50 * speeds
+
+                    if moveDir.Magnitude > 0 then
+                        bv.Velocity = moveDir.Unit * maxspeed
+                    else
+                        bv.Velocity = Vector3.new(0, 0, 0)
+                    end
+
+                    bg.CFrame = camera.CFrame
+                end
+            end
+            -- 循环结束（可能是飞天关闭或角色死亡），清理实例
+            pcall(function() bg:Destroy() end)
+            pcall(function() bv:Destroy() end)
+            _G._flyData = nil
+        end)
 
         tanchuangxiaoxi("已开启飞天", "飞天")
     else
         -- 关闭飞天
+        if flyThread then
+            task.cancel(flyThread)
+            flyThread = nil
+        end
+        -- 清理 BodyGyro/BodyVelocity
         if _G._flyData then
             pcall(function() _G._flyData.bg:Destroy() end)
             pcall(function() _G._flyData.bv:Destroy() end)
@@ -404,7 +414,7 @@ end
 local function onCharacterAdded(char)
     task.wait(0.7)
 
-    -- 先确保动画开启
+    -- 确保动画开启
     char.Animate.Disabled = false
 
     -- 根据自动关闭开关处理模式
@@ -412,19 +422,7 @@ local function onCharacterAdded(char)
         -- 开关开启：强制关闭所有模式
         if isFlying then
             isFlying = false
-            if _G._flyData then
-                pcall(function() _G._flyData.bg:Destroy() end)
-                pcall(function() _G._flyData.bv:Destroy() end)
-                _G._flyData = nil
-            end
-            -- 恢复 Humanoid 状态
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                for _, state in ipairs(VALID_HUMANOD_STATES) do
-                    pcall(function() hum:SetStateEnabled(state, true) end)
-                end
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
-            end
+            toggleFly(false)
         end
         if speedModeEnabled then
             speedModeEnabled = false
@@ -442,51 +440,11 @@ local function onCharacterAdded(char)
     else
         -- 开关关闭：飞天和移速都尝试重新应用（如果之前开启）
         if isFlying then
-            -- 需要重新创建飞天所需的一切
-            -- 先清理旧数据
-            if _G._flyData then
-                pcall(function() _G._flyData.bg:Destroy() end)
-                pcall(function() _G._flyData.bv:Destroy() end)
-                _G._flyData = nil
-            end
-            -- 重新调用 toggleFly(true) 但要注意避免递归
+            -- 重新开启飞天
             task.spawn(function()
-                -- 等待一小段时间确保角色完全加载
                 task.wait(0.5)
                 if isFlying and player.Character then
-                    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
-                    if hum then
-                        player.Character.Animate.Disabled = true
-                        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-                            track:AdjustSpeed(0)
-                        end
-                        for _, state in ipairs(VALID_HUMANOD_STATES) do
-                            pcall(function() hum:SetStateEnabled(state, false) end)
-                        end
-                        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
-
-                        local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso") or player.Character:FindFirstChild("HumanoidRootPart")
-                        if torso then
-                            local startY = torso.Position.Y
-                            local bg = Instance.new("BodyGyro")
-                            bg.P = 9e4
-                            bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
-                            bg.CFrame = torso.CFrame
-                            bg.Parent = torso
-
-                            local bv = Instance.new("BodyVelocity")
-                            bv.Velocity = Vector3.new(0, 0.1, 0)
-                            bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                            bv.Parent = torso
-
-                            _G._flyData = {
-                                bg = bg,
-                                bv = bv,
-                                torso = torso,
-                                startY = startY
-                            }
-                        end
-                    end
+                    toggleFly(true)
                 end
             end)
         end
@@ -770,7 +728,7 @@ local function showInputDialog(title, defaultText, callback, extraButton)
                 local input = textBox.Text
                 local num = tonumber(input)
                 if extraButton then
-                    callback(input)  -- 传入原始输入，由调用者处理
+                    callback(input)
                     close()
                 else
                     if num and num > 0 then
@@ -1030,11 +988,11 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.5.2 更新内容：",
+                    "版本 7.5.3 更新内容：",
                     "",
-                    "1. 修复飞天死亡后无法移动的问题",
-                    "2. 优化死亡自动关闭开关：关闭时飞天和移速都会自动重启",
-                    "3. 飞天和移速行为完全一致",
+                    "1. 恢复旧版飞天逻辑，修复飞天失效问题",
+                    "2. 保留移速模式、死亡自动关闭开关",
+                    "3. 优化飞天线程管理",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1460,7 +1418,7 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- 新增：死亡后自动关闭开关
+                        -- 死亡后自动关闭开关
                         {
                             text = autoDisableOnDeath and "☠️ 死亡自动关闭: 开启" or "☠️ 死亡自动关闭: 关闭",
                             callback = function(parentMenu)
@@ -1490,6 +1448,10 @@ local function showMainMenu()
                             if speedModeConnection then
                                 speedModeConnection:Disconnect()
                                 speedModeConnection = nil
+                            end
+                            if flyThread then
+                                task.cancel(flyThread)
+                                flyThread = nil
                             end
                             if _G._flyData then
                                 pcall(function() _G._flyData.bg:Destroy() end)
@@ -1693,7 +1655,6 @@ do
     local MIN_SPEED = 0.1
 
     local function decreaseSpeed()
-        -- 确保 speeds 是数字
         local current = tonumber(speeds) or 0
         if current > 1 then
             current = current - 1
@@ -1780,7 +1741,6 @@ do
                     {
                         text = "移动模式: " .. moveMode,
                         callback = function(btn)
-                            -- 弹出移动模式选择菜单
                             showMoveModeSelection(moveMode, function(newMode)
                                 moveMode = newMode
                                 btn.Text = "移动模式: " .. moveMode
@@ -1807,7 +1767,6 @@ do
                 "设置速度倍率",
                 tostring(speeds),
                 function(newSpeed)
-                    -- newSpeed 已经是数字且大于0
                     speeds = newSpeed
                     speed.Text = tostring(speeds)
                     tanchuangxiaoxi("速度倍率已设为 " .. tostring(newSpeed), "速度设置")
@@ -1815,7 +1774,6 @@ do
                 {
                     text = "飞行模式: " .. flyMode,
                     callback = function(btn)
-                        -- 弹出飞行模式选择菜单
                         showFlyModeSelection(flyMode, function(newMode)
                             flyMode = newMode
                             btn.Text = "飞行模式: " .. flyMode
@@ -1853,14 +1811,12 @@ do
                 -- 长按：切换模式
                 if activeMode == "fly" then
                     activeMode = "speed"
-                    -- 如果飞天正在开启，关闭它
                     if isFlying then
                         isFlying = false
                         toggleFly(false)
                     end
                 else
                     activeMode = "fly"
-                    -- 如果移速正在开启，关闭它
                     if speedModeEnabled then
                         speedModeEnabled = false
                         applySpeedMode(false)
@@ -1881,7 +1837,6 @@ do
                 longPressTask = nil
             end
             if not isLongPress then
-                -- 单击：在当前模式下开关
                 if activeMode == "fly" then
                     isFlying = not isFlying
                     toggleFly(isFlying)
@@ -2072,6 +2027,10 @@ main.Destroying:Connect(function()
     if speedModeConnection then
         speedModeConnection:Disconnect()
         speedModeConnection = nil
+    end
+    if flyThread then
+        task.cancel(flyThread)
+        flyThread = nil
     end
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
