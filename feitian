@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 5.5
+-- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -127,8 +127,8 @@ local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- ==================== 全局变量 ====================
-local speeds = 1
-local stepSize = 2
+local speeds = 1               -- 飞天倍率
+local stepSize = 2              -- 统一步长：用于上升/下降移动距离 和 移速模式增减量
 local isFlying = false
 local tpwalking = false
 local notifs = {}
@@ -141,9 +141,54 @@ local volumeKeyConnection = nil
 local customWidth = nil
 local customHeight = nil
 local miniWindow = nil
-local longPressSpeed = 0.01  -- 长按初始间隔（秒），可自定义
+local longPressSpeed = 0.01
+local moveMode = "角色上下"
+local flyMode = "屏幕"
+
+-- 模式切换
+local activeMode = "fly"
+local speedModeEnabled = false
+local speedModeConnection = nil
+
+-- 移速模式专用变量
+local lockedSpeed = 16          -- 锁定的目标速度
+local originalSpeed = 16         -- 记录开启移速模式前的原始速度
+
+-- 死亡自动关闭
+local autoDisableOnDeath = true
+
+-- 有效Humanoid状态
+local VALID_HUMANOD_STATES = {
+    Enum.HumanoidStateType.Running,
+    Enum.HumanoidStateType.RunningNoPhysics,
+    Enum.HumanoidStateType.Climbing,
+    Enum.HumanoidStateType.StrafingNoPhysics,
+    Enum.HumanoidStateType.Ragdoll,
+    Enum.HumanoidStateType.GettingUp,
+    Enum.HumanoidStateType.Jumping,
+    Enum.HumanoidStateType.FallingDown,
+    Enum.HumanoidStateType.Seated,
+    Enum.HumanoidStateType.PlatformStanding,
+    Enum.HumanoidStateType.Dead,
+    Enum.HumanoidStateType.Physics,
+    Enum.HumanoidStateType.Swimming,
+    Enum.HumanoidStateType.Freefall,
+    Enum.HumanoidStateType.Landed,
+}
+
+local MOVE_MODES = {
+    "角色上下", "角色前后", "角色左右",
+    "屏幕上下", "屏幕前后", "屏幕左右",
+    "水平上下", "水平前后(屏幕)", "水平左右(屏幕)"
+}
+
+local FLY_MODES = { "屏幕", "悬空", "绝对锁高" }
 
 -- ==================== 辅助函数 ====================
+local function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
+end
+
 local function getScreenSize()
     if customWidth and customHeight then
         return Vector2.new(customWidth, customHeight)
@@ -156,9 +201,302 @@ local function getScreenSize()
     end
 end
 
-local function clamp(val, min, max)
-    return math.max(min, math.min(max, val))
+local function updateButtonText()
+    if moveMode == "角色上下" or moveMode == "屏幕上下" or moveMode == "水平上下" then
+        up.Text = "上升"
+        down.Text = "下降"
+    elseif moveMode == "角色前后" or moveMode == "屏幕前后" or moveMode == "水平前后(屏幕)" then
+        up.Text = "前移"
+        down.Text = "后移"
+    elseif moveMode == "角色左右" or moveMode == "屏幕左右" or moveMode == "水平左右(屏幕)" then
+        up.Text = "左移"
+        down.Text = "右移"
+    else
+        up.Text = "上升"
+        down.Text = "下降"
+    end
 end
+
+local function updateMainButtonText()
+    if activeMode == "fly" then
+        onof.Text = isFlying and "飞天(开启)" or "飞天(关闭)"
+    else
+        onof.Text = speedModeEnabled and "移速(开启)" or "移速(关闭)"
+    end
+end
+
+local function updateSpeedButtonText()
+    if activeMode == "fly" then
+        speed.Text = tostring(speeds)
+    else
+        if speedModeEnabled then
+            speed.Text = string.format("%.1f", lockedSpeed)
+        else
+            -- 显示实际速度
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    speed.Text = string.format("%.1f", hum.WalkSpeed)
+                else
+                    speed.Text = "0.0"
+                end
+            else
+                speed.Text = "0.0"
+            end
+        end
+    end
+end
+
+-- ==================== TP Walk ====================
+local function stopTpwalking()
+    tpwalking = false
+end
+
+local function startTpwalking()
+    if tpwalking then return end
+    tpwalking = true
+    task.spawn(function()
+        local hb = RunService.Heartbeat
+        while tpwalking do
+            hb:Wait()
+            local chr = player.Character
+            if chr then
+                local hum = chr:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    chr:TranslateBy(hum.MoveDirection * speeds)
+                end
+            end
+        end
+    end)
+end
+
+-- ==================== 移速模式 ====================
+local function applySpeedMode(enable)
+    if enable then
+        -- 如果飞天正在开启，先关闭
+        if isFlying then
+            isFlying = false
+            removeFly()
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    for _, state in ipairs(VALID_HUMANOD_STATES) do
+                        pcall(function() hum:SetStateEnabled(state, true) end)
+                    end
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+                end
+                char.Animate.Disabled = false
+            end
+            stopTpwalking()
+        end
+
+        -- 记录当前速度作为原始速度
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                originalSpeed = hum.WalkSpeed
+            else
+                originalSpeed = 16
+            end
+        else
+            originalSpeed = 16
+        end
+        if originalSpeed <= 0 then originalSpeed = 16 end
+
+        -- 初始化锁定速度为原始速度
+        lockedSpeed = originalSpeed
+
+        -- 启动移速循环
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+        end
+        speedModeConnection = RunService.Heartbeat:Connect(function()
+            if not speedModeEnabled then return end
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    pcall(function() hum.WalkSpeed = lockedSpeed end)
+                end
+            end
+        end)
+
+        tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
+    else
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        -- 恢复原始速度
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = originalSpeed end)
+            end
+        end
+        tanchuangxiaoxi("已关闭移速模式", "移速模式")
+    end
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+-- ==================== 飞天辅助函数 ====================
+local function removeFly()
+    if _G._flyData then
+        pcall(function() _G._flyData.bg:Destroy() end)
+        pcall(function() _G._flyData.bv:Destroy() end)
+        _G._flyData = nil
+    end
+end
+
+local function applyFly()
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return false end
+
+    char.Animate.Disabled = true
+    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+        track:AdjustSpeed(0)
+    end
+
+    for _, state in ipairs(VALID_HUMANOD_STATES) do
+        pcall(function() hum:SetStateEnabled(state, false) end)
+    end
+    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+    if not torso then return false end
+
+    local startY = torso.Position.Y
+
+    local bg = Instance.new("BodyGyro")
+    bg.P = 9e4
+    bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bg.CFrame = torso.CFrame
+    bg.Parent = torso
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Velocity = Vector3.new(0, 0.1, 0)
+    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bv.Parent = torso
+
+    _G._flyData = { bg = bg, bv = bv, torso = torso, startY = startY }
+
+    task.spawn(function()
+        while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
+            RunService.Heartbeat:Wait()
+            local camera = workspace.CurrentCamera
+            if camera then
+                local moveDir = hum.MoveDirection
+                local maxspeed = 50 * speeds
+
+                if flyMode == "屏幕" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                elseif flyMode == "悬空" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                elseif flyMode == "绝对锁高" then
+                    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                    local pos = torso.Position
+                    torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
+                end
+            end
+        end
+        removeFly()
+    end)
+    return true
+end
+
+-- ==================== 飞天开关 ====================
+local function toggleFly(enable)
+    if enable then
+        if speedModeEnabled then
+            speedModeEnabled = false
+            applySpeedMode(false)
+        end
+        if isFlying then return end
+        isFlying = true
+        updateMainButtonText()
+        stopTpwalking()
+        tanchuangxiaoxi("已开启飞天", "飞天")
+        applyFly()
+    else
+        if not isFlying then return end
+        isFlying = false
+        updateMainButtonText()
+        stopTpwalking()
+        tanchuangxiaoxi("已关闭飞天", "飞天")
+        removeFly()
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                for _, state in ipairs(VALID_HUMANOD_STATES) do
+                    pcall(function() hum:SetStateEnabled(state, true) end)
+                end
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+            end
+            char.Animate.Disabled = false
+        end
+    end
+    updateSpeedButtonText()
+end
+
+-- ==================== 角色重生处理 ====================
+local function onCharacterAdded(char)
+    task.wait(0.7)
+    char.Animate.Disabled = false
+
+    if autoDisableOnDeath then
+        if isFlying then
+            isFlying = false
+            updateMainButtonText()
+            removeFly()
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                for _, state in ipairs(VALID_HUMANOD_STATES) do
+                    pcall(function() hum:SetStateEnabled(state, true) end)
+                end
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+            end
+            char.Animate.Disabled = false
+        end
+        if speedModeEnabled then
+            speedModeEnabled = false
+            applySpeedMode(false)  -- 关闭移速模式并恢复原始速度
+        end
+    else
+        if isFlying then
+            task.spawn(function()
+                task.wait(0.5)
+                if isFlying and player.Character then
+                    removeFly()
+                    applyFly()
+                end
+            end)
+        end
+        if speedModeEnabled then
+            applySpeedMode(true)
+        end
+    end
+    stopTpwalking()
+    updateSpeedButtonText()
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then onCharacterAdded(player.Character) end
 
 -- ==================== 紧凑弹窗系统 ====================
 local function reposition()
@@ -185,15 +523,12 @@ local function processReady()
         if n and n.frame and n.frame.Parent then
             local f, sg = n.frame, n.sg
             local fadeOut = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-
             local t1 = TweenService:Create(f, fadeOut, {BackgroundTransparency = 1})
             TweenService:Create(n.title, fadeOut, {TextTransparency = 1}):Play()
             TweenService:Create(n.line, fadeOut, {BackgroundTransparency = 1}):Play()
             TweenService:Create(n.msg, fadeOut, {TextTransparency = 1}):Play()
-
             t1:Play()
             t1.Completed:Wait()
-
             remove(f)
             sg:Destroy()
         end
@@ -217,12 +552,10 @@ function tanchuangxiaoxi(msg, title)
 
     local titleSizeVec = TextService:GetTextSize(title, titleSize, titleFont, Vector2.new(1000, 1000))
     local msgSizeVec = TextService:GetTextSize(msg, msgSize, msgFont, Vector2.new(1000, 1000))
-
     local titleWidth = titleSizeVec.X
     local msgWidth = msgSizeVec.X
     local contentWidth = math.max(titleWidth, msgWidth)
     local frameWidth = contentWidth + 2 * padding
-
     local titleHeight = titleSizeVec.Y
     local msgHeight = msgSizeVec.Y
     local frameHeight = padding + titleHeight + lineHeight + msgHeight + padding
@@ -279,15 +612,7 @@ function tanchuangxiaoxi(msg, title)
     msgL.TextYAlignment = Enum.TextYAlignment.Top
     msgL.TextWrapped = false
 
-    local notif = {
-        frame = f,
-        sg = sg,
-        title = titleL,
-        line = line,
-        msg = msgL,
-        height = frameHeight
-    }
-
+    local notif = { frame = f, sg = sg, title = titleL, line = line, msg = msgL, height = frameHeight }
     table.insert(notifs, 1, notif)
     reposition()
 
@@ -299,8 +624,8 @@ function tanchuangxiaoxi(msg, title)
     end)
 end
 
--- ==================== 输入对话框 ====================
-local function showInputDialog(title, defaultText, callback)
+-- ==================== 输入对话框（支持第三个按钮） ====================
+local function showInputDialog(title, defaultText, callback, extraButton)
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
     local dialogHeight = 180
@@ -359,42 +684,102 @@ local function showInputDialog(title, defaultText, callback)
     buttonFrame.Position = UDim2.new(0, 10, 1, -50)
     buttonFrame.BackgroundTransparency = 1
 
-    local confirm = Instance.new("TextButton")
-    confirm.Parent = buttonFrame
-    confirm.Size = UDim2.new(0.5, -5, 1, 0)
-    confirm.Position = UDim2.new(0, 0, 0, 0)
-    confirm.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-    confirm.Text = "确认"
-    confirm.TextColor3 = Color3.new(1, 1, 1)
-    confirm.Font = Enum.Font.GothamBold
-    confirm.TextSize = 14
+    local buttons = {}
+    if extraButton then
+        local btnWidth = (dialogWidth - 20 - 10) / 3
 
-    local cancel = Instance.new("TextButton")
-    cancel.Parent = buttonFrame
-    cancel.Size = UDim2.new(0.5, -5, 1, 0)
-    cancel.Position = UDim2.new(0.5, 5, 0, 0)
-    cancel.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-    cancel.Text = "取消"
-    cancel.TextColor3 = Color3.new(1, 1, 1)
-    cancel.Font = Enum.Font.GothamBold
-    cancel.TextSize = 14
+        local cancel = Instance.new("TextButton")
+        cancel.Parent = buttonFrame
+        cancel.Size = UDim2.new(0, btnWidth, 1, 0)
+        cancel.Position = UDim2.new(0, 0, 0, 0)
+        cancel.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+        cancel.Text = "取消"
+        cancel.TextColor3 = Color3.new(1, 1, 1)
+        cancel.Font = Enum.Font.GothamBold
+        cancel.TextSize = 14
+        table.insert(buttons, cancel)
+
+        local extra = Instance.new("TextButton")
+        extra.Parent = buttonFrame
+        extra.Size = UDim2.new(0, btnWidth, 1, 0)
+        extra.Position = UDim2.new(0, btnWidth + 5, 0, 0)
+        extra.BackgroundColor3 = Color3.fromRGB(80, 80, 200)
+        extra.Text = extraButton.text
+        extra.TextColor3 = Color3.new(1, 1, 1)
+        extra.Font = Enum.Font.GothamBold
+        extra.TextSize = 14
+        extra.TextScaled = true
+        table.insert(buttons, extra)
+
+        local confirm = Instance.new("TextButton")
+        confirm.Parent = buttonFrame
+        confirm.Size = UDim2.new(0, btnWidth, 1, 0)
+        confirm.Position = UDim2.new(0, 2*(btnWidth + 5), 0, 0)
+        confirm.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        confirm.Text = "确认"
+        confirm.TextColor3 = Color3.new(1, 1, 1)
+        confirm.Font = Enum.Font.GothamBold
+        confirm.TextSize = 14
+        table.insert(buttons, confirm)
+
+        extra.MouseButton1Click:Connect(function()
+            extraButton.callback(extra)
+        end)
+    else
+        local cancel = Instance.new("TextButton")
+        cancel.Parent = buttonFrame
+        cancel.Size = UDim2.new(0.5, -5, 1, 0)
+        cancel.Position = UDim2.new(0, 0, 0, 0)
+        cancel.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+        cancel.Text = "取消"
+        cancel.TextColor3 = Color3.new(1, 1, 1)
+        cancel.Font = Enum.Font.GothamBold
+        cancel.TextSize = 14
+        table.insert(buttons, cancel)
+
+        local confirm = Instance.new("TextButton")
+        confirm.Parent = buttonFrame
+        confirm.Size = UDim2.new(0.5, -5, 1, 0)
+        confirm.Position = UDim2.new(0.5, 5, 0, 0)
+        confirm.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        confirm.Text = "确认"
+        confirm.TextColor3 = Color3.new(1, 1, 1)
+        confirm.Font = Enum.Font.GothamBold
+        confirm.TextSize = 14
+        table.insert(buttons, confirm)
+    end
 
     local function close()
         dialog:Destroy()
     end
 
-    confirm.MouseButton1Click:Connect(function()
-        local input = textBox.Text
-        local num = tonumber(input)
-        if num and num > 0 then
-            callback(num)
-            close()
-        else
-            tanchuangxiaoxi("请输入大于0的数字", "输入错误")
+    for _, btn in ipairs(buttons) do
+        if btn.Text == "取消" then
+            btn.MouseButton1Click:Connect(close)
         end
-    end)
+    end
 
-    cancel.MouseButton1Click:Connect(close)
+    for _, btn in ipairs(buttons) do
+        if btn.Text == "确认" then
+            btn.MouseButton1Click:Connect(function()
+                local input = textBox.Text
+                local num = tonumber(input)
+                if extraButton then
+                    callback(input)
+                    close()
+                else
+                    if num and num > 0 then
+                        callback(num)
+                        close()
+                    else
+                        tanchuangxiaoxi("请输入大于0的数字", "输入错误")
+                    end
+                end
+            end)
+        end
+    end
+
+    return dialog
 end
 
 -- ==================== 通用菜单创建函数 ====================
@@ -538,7 +923,7 @@ local function enableVolumeKey()
     end
 
     if volumeKeyEnabled then return end
-    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
         if input.KeyCode == Enum.KeyCode.VolumeDown then
             setUIVisible(false)
         elseif input.KeyCode == Enum.KeyCode.VolumeUp then
@@ -559,6 +944,23 @@ local function disableVolumeKey()
     tanchuangxiaoxi("音量键控制已禁用", "设置")
 end
 
+-- ==================== 快捷模式选择菜单 ====================
+local function showFlyModeSelection(currentMode, callback)
+    local buttons = {}
+    for _, mode in ipairs(FLY_MODES) do
+        table.insert(buttons, { text = mode .. (mode == currentMode and " ✓" or ""), callback = function(menu) menu:Destroy(); callback(mode) end })
+    end
+    createMenu("选择飞行模式", buttons, nil)
+end
+
+local function showMoveModeSelection(currentMode, callback)
+    local buttons = {}
+    for _, mode in ipairs(MOVE_MODES) do
+        table.insert(buttons, { text = mode .. (mode == currentMode and " ✓" or ""), callback = function(menu) menu:Destroy(); callback(mode) end })
+    end
+    createMenu("选择移动模式", buttons, nil)
+end
+
 -- ==================== 主菜单显示函数 ====================
 local function showMainMenu()
     createMenu("UI菜单", {
@@ -566,250 +968,258 @@ local function showMainMenu()
             text = "📢 查看公告",
             callback = function(menu)
                 menu:Destroy()
-    local screenSize = getScreenSize()
-    local dialogWidth = math.min(450, screenSize.X * 0.8)
-    local dialogHeight = math.min(500, screenSize.Y * 0.8)
+                local screenSize = getScreenSize()
+                local dialogWidth = math.min(450, screenSize.X * 0.8)
+                local dialogHeight = math.min(500, screenSize.Y * 0.8)
 
-    local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
+                local dialog = Instance.new("ScreenGui")
+                dialog.Parent = playerGui
+                dialog.IgnoreGuiInset = true
+                dialog.ResetOnSpawn = false
 
-    local bg = Instance.new("Frame")
-    bg.Parent = dialog
-    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
-    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
-    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.ClipsDescendants = true
+                local bg = Instance.new("Frame")
+                bg.Parent = dialog
+                bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+                bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+                bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                bg.BackgroundTransparency = 0.2
+                bg.BorderSizePixel = 0
+                bg.Active = true
+                bg.ClipsDescendants = true
 
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
+                local corner = Instance.new("UICorner")
+                corner.Parent = bg
+                corner.CornerRadius = UDim.new(0, 8)
 
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Parent = bg
-    titleLabel.Size = UDim2.new(1, -20, 0, 40)
-    titleLabel.Position = UDim2.new(0, 10, 0, 10)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "更新日志"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 20
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+                local titleLabel = Instance.new("TextLabel")
+                titleLabel.Parent = bg
+                titleLabel.Size = UDim2.new(1, -20, 0, 40)
+                titleLabel.Position = UDim2.new(0, 10, 0, 10)
+                titleLabel.BackgroundTransparency = 1
+                titleLabel.Text = "更新日志"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1)
+                titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20
+                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    local scrollingFrame = Instance.new("ScrollingFrame")
-    scrollingFrame.Parent = bg
-    scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
-    scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollingFrame.ScrollBarThickness = 8
-    scrollingFrame.BackgroundTransparency = 1
-    scrollingFrame.BorderSizePixel = 0
-    scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+                local scrollingFrame = Instance.new("ScrollingFrame")
+                scrollingFrame.Parent = bg
+                scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
+                scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                scrollingFrame.ScrollBarThickness = 8
+                scrollingFrame.BackgroundTransparency = 1
+                scrollingFrame.BorderSizePixel = 0
+                scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
-    local lines = {
-        "版本 5.5 更新内容：",
-        "",
-        "1. 修复音量键在部分设备上报错的问题",
-        "2. 音量键功能现可正常开关",
-        "3. 新增长按速度自定义（设置中可调整）",
-        "4. 保持原有所有功能",
-        "",
-        "功能介绍：",
-        "- 上升/下降：单击移动，长按连续（步长可调）",
-        "- 加速/减速：单击调速度，长按连续",
-        "- 速度标签：单击设倍率，长按设步长",
-        "- 飞天开关：开启/关闭飞行（支持摇杆）",
-        "- 隐藏按钮：单击折叠UI，长按打开菜单",
-        "- 音量键控制：可在设置中开启/关闭，减隐藏、加显示",
-        "",
-        "自定义屏幕尺寸：",
-        "如自动检测不准确，可手动设置屏幕宽高",
-        "",
-        "感谢使用！"
-    }
+                local lines = {
+                    "版本 7.7.1 更新内容：",
+                    "",
+                    "1. 修复移速模式关闭时速度不刷新的问题",
+                    "2. 现在移速模式关闭时会实时显示实际速度",
+                    "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
+                    "4. 优化界面显示",
+                    "",
+                    "功能介绍：",
+                    "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "- 加速/减速：单击调速度，长按连续",
+                    "- 速度标签：根据不同模式显示不同内容，单击/长按可自定义",
+                    "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
+                    "- 隐藏按钮：单击折叠UI，长按打开菜单",
+                    "- 音量键控制：可在设置中开启/关闭",
+                    "- 死亡自动关闭：可控制角色死后是否自动停用当前模式",
+                    "",
+                    "自定义屏幕尺寸：",
+                    "如自动检测不准确，可手动设置屏幕宽高",
+                    "",
+                    "感谢使用！"
+                }
 
-    local contentContainer = Instance.new("Frame")
-    contentContainer.Parent = scrollingFrame
-    contentContainer.Size = UDim2.new(1, -10, 0, 0)
-    contentContainer.BackgroundTransparency = 1
-    contentContainer.Position = UDim2.new(0, 0, 0, 0)
+                local contentContainer = Instance.new("Frame")
+                contentContainer.Parent = scrollingFrame
+                contentContainer.Size = UDim2.new(1, -10, 0, 0)
+                contentContainer.BackgroundTransparency = 1
+                contentContainer.Position = UDim2.new(0, 0, 0, 0)
 
-    local yPos = 0
-    local lineHeight = 20
-    local lineSpacing = 2
+                local yPos = 0
+                local lineHeight = 20
+                local lineSpacing = 2
 
-    for _, lineText in ipairs(lines) do
-        local lineLabel = Instance.new("TextLabel")
-        lineLabel.Parent = contentContainer
-        lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
-        lineLabel.Position = UDim2.new(0, 0, 0, yPos)
-        lineLabel.BackgroundTransparency = 1
-        lineLabel.Text = lineText
-        lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-        lineLabel.Font = Enum.Font.Gotham
-        lineLabel.TextSize = 14
-        lineLabel.TextXAlignment = Enum.TextXAlignment.Left
-        lineLabel.TextYAlignment = Enum.TextYAlignment.Top
-        lineLabel.TextWrapped = false
-        
-        yPos = yPos + lineHeight + lineSpacing
-    end
+                for _, lineText in ipairs(lines) do
+                    local lineLabel = Instance.new("TextLabel")
+                    lineLabel.Parent = contentContainer
+                    lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
+                    lineLabel.BackgroundTransparency = 1
+                    lineLabel.Text = lineText
+                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    lineLabel.Font = Enum.Font.Gotham
+                    lineLabel.TextSize = 14
+                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    lineLabel.TextWrapped = false
+                    
+                    yPos = yPos + lineHeight + lineSpacing
+                end
 
-    contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
+                contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
 
-    local backBtn = Instance.new("TextButton")
-    backBtn.Parent = bg
-    backBtn.Size = UDim2.new(1, -40, 0, 40)
-    backBtn.Position = UDim2.new(0, 20, 1, -50)
-    backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    backBtn.Text = "返回"
-    backBtn.TextColor3 = Color3.new(1, 1, 1)
-    backBtn.Font = Enum.Font.GothamBold
-    backBtn.TextSize = 16
-    backBtn.AutoButtonColor = true
+                local backBtn = Instance.new("TextButton")
+                backBtn.Parent = bg
+                backBtn.Size = UDim2.new(1, -40, 0, 40)
+                backBtn.Position = UDim2.new(0, 20, 1, -50)
+                backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+                backBtn.Text = "返回"
+                backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold
+                backBtn.TextSize = 16
+                backBtn.AutoButtonColor = true
 
-    local backCorner = Instance.new("UICorner")
-    backCorner.Parent = backBtn
-    backCorner.CornerRadius = UDim.new(0, 8)
+                local backCorner = Instance.new("UICorner")
+                backCorner.Parent = backBtn
+                backCorner.CornerRadius = UDim.new(0, 8)
 
-    backBtn.MouseButton1Click:Connect(function()
-        dialog:Destroy()
-        showMainMenu()
-    end)
+                backBtn.MouseButton1Click:Connect(function()
+                    dialog:Destroy()
+                    showMainMenu()
+                end)
             end
         },
         {
             text = "📖 功能介绍",
             callback = function(menu)
                 menu:Destroy()
-    local screenSize = getScreenSize()
-    local dialogWidth = math.min(400, screenSize.X * 0.8)
-    local dialogHeight = math.min(450, screenSize.Y * 0.8)
+                local screenSize = getScreenSize()
+                local dialogWidth = math.min(400, screenSize.X * 0.8)
+                local dialogHeight = math.min(450, screenSize.Y * 0.8)
 
-    local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
+                local dialog = Instance.new("ScreenGui")
+                dialog.Parent = playerGui
+                dialog.IgnoreGuiInset = true
+                dialog.ResetOnSpawn = false
 
-    local bg = Instance.new("Frame")
-    bg.Parent = dialog
-    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
-    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
-    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.ClipsDescendants = true
+                local bg = Instance.new("Frame")
+                bg.Parent = dialog
+                bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+                bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+                bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                bg.BackgroundTransparency = 0.2
+                bg.BorderSizePixel = 0
+                bg.Active = true
+                bg.ClipsDescendants = true
 
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
+                local corner = Instance.new("UICorner")
+                corner.Parent = bg
+                corner.CornerRadius = UDim.new(0, 8)
 
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Parent = bg
-    titleLabel.Size = UDim2.new(1, -20, 0, 40)
-    titleLabel.Position = UDim2.new(0, 10, 0, 10)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "功能介绍"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 20
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+                local titleLabel = Instance.new("TextLabel")
+                titleLabel.Parent = bg
+                titleLabel.Size = UDim2.new(1, -20, 0, 40)
+                titleLabel.Position = UDim2.new(0, 10, 0, 10)
+                titleLabel.BackgroundTransparency = 1
+                titleLabel.Text = "功能介绍"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1)
+                titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20
+                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    local scrollingFrame = Instance.new("ScrollingFrame")
-    scrollingFrame.Parent = bg
-    scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
-    scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scrollingFrame.ScrollBarThickness = 8
-    scrollingFrame.BackgroundTransparency = 1
-    scrollingFrame.BorderSizePixel = 0
-    scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+                local scrollingFrame = Instance.new("ScrollingFrame")
+                scrollingFrame.Parent = bg
+                scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
+                scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                scrollingFrame.ScrollBarThickness = 8
+                scrollingFrame.BackgroundTransparency = 1
+                scrollingFrame.BorderSizePixel = 0
+                scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
-    local lines = {
-        "🔹 上升/下降：单击移动2单位，",
-        "   长按连续移动（步长可调）",
-        "🔹 加速/减速：单击速度+1/-1，",
-        "   长按连续调节",
-        "🔹 速度标签（橙色）：",
-        "   单击输入速度倍率，",
-        "   长按输入步长",
-        "🔹 飞天开关：",
-        "   开启/关闭飞天模式",
-        "   （极速响应，支持摇杆）",
-        "🔹 隐藏按钮：",
-        "   单击折叠UI为小悬浮窗，",
-        "   长按打开菜单",
-        "🔹 UI按钮：纯标签，无功能",
-        "",
-        "⚙️ 菜单功能：",
-        "- 查看公告：显示更新日志",
-        "- 功能介绍：本页面",
-        "- 设置：调整弹窗透明度、",
-        "  启用音量键隐藏、",
-        "  设置屏幕尺寸、",
-        "  长按速度",
-        "- 结束脚本：彻底停止",
-        "",
-        "音量键隐藏：",
-        "启用后，按音量减隐藏UI，",
-        "音量加显示"
-    }
+                local lines = {
+                    "🔹 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "   可切换多种方向模式（共9种）：",
+                    "   - 角色上下：沿角色自身向上方向",
+                    "   - 角色前后：基于角色朝向的前后",
+                    "   - 角色左右：基于角色朝向的左右",
+                    "   - 屏幕上下：基于相机上下方向",
+                    "   - 屏幕前后：基于相机前后方向",
+                    "   - 屏幕左右：基于相机左右方向",
+                    "   - 水平上下：世界Y轴（纯垂直）",
+                    "   - 水平前后(屏幕)：基于相机前方的水平方向",
+                    "   - 水平左右(屏幕)：基于相机右方的水平方向",
+                    "🔹 加速/减速：单击调速度（飞天倍率/锁定速度），长按连续",
+                    "🔹 速度标签：飞天模式下显示倍率，移速模式下显示当前锁定速度（开启时）或实际速度（关闭时）",
+                    "   单击可手动设置值，长按可设置步长",
+                    "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
+                    "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
+                    "🔹 UI按钮：纯标签，无功能",
+                    "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式",
+                    "",
+                    "⚙️ 菜单功能：",
+                    "- 查看公告：显示更新日志",
+                    "- 功能介绍：本页面",
+                    "- 设置：调整弹窗透明度、",
+                    "  启用音量键隐藏、",
+                    "  设置屏幕尺寸、",
+                    "  长按速度、",
+                    "  上升/下降模式、",
+                    "  飞行方向模式、",
+                    "  死亡自动关闭",
+                    "- 结束脚本：彻底停止",
+                    "",
+                    "音量键隐藏：",
+                    "启用后，按音量减隐藏UI，",
+                    "音量加显示"
+                }
 
-    local contentContainer = Instance.new("Frame")
-    contentContainer.Parent = scrollingFrame
-    contentContainer.Size = UDim2.new(1, -10, 0, 0)
-    contentContainer.BackgroundTransparency = 1
-    contentContainer.Position = UDim2.new(0, 0, 0, 0)
+                local contentContainer = Instance.new("Frame")
+                contentContainer.Parent = scrollingFrame
+                contentContainer.Size = UDim2.new(1, -10, 0, 0)
+                contentContainer.BackgroundTransparency = 1
+                contentContainer.Position = UDim2.new(0, 0, 0, 0)
 
-    local yPos = 0
-    local lineHeight = 20
-    local lineSpacing = 2
+                local yPos = 0
+                local lineHeight = 20
+                local lineSpacing = 2
 
-    for _, lineText in ipairs(lines) do
-        local lineLabel = Instance.new("TextLabel")
-        lineLabel.Parent = contentContainer
-        lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
-        lineLabel.Position = UDim2.new(0, 0, 0, yPos)
-        lineLabel.BackgroundTransparency = 1
-        lineLabel.Text = lineText
-        lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-        lineLabel.Font = Enum.Font.Gotham
-        lineLabel.TextSize = 14
-        lineLabel.TextXAlignment = Enum.TextXAlignment.Left
-        lineLabel.TextYAlignment = Enum.TextYAlignment.Top
-        lineLabel.TextWrapped = false
-        
-        yPos = yPos + lineHeight + lineSpacing
-    end
+                for _, lineText in ipairs(lines) do
+                    local lineLabel = Instance.new("TextLabel")
+                    lineLabel.Parent = contentContainer
+                    lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
+                    lineLabel.BackgroundTransparency = 1
+                    lineLabel.Text = lineText
+                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    lineLabel.Font = Enum.Font.Gotham
+                    lineLabel.TextSize = 14
+                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    lineLabel.TextWrapped = false
+                    
+                    yPos = yPos + lineHeight + lineSpacing
+                end
 
-    contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
-    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
+                contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
 
-    local backBtn = Instance.new("TextButton")
-    backBtn.Parent = bg
-    backBtn.Size = UDim2.new(1, -40, 0, 40)
-    backBtn.Position = UDim2.new(0, 20, 1, -50)
-    backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    backBtn.Text = "返回"
-    backBtn.TextColor3 = Color3.new(1, 1, 1)
-    backBtn.Font = Enum.Font.GothamBold
-    backBtn.TextSize = 16
-    backBtn.AutoButtonColor = true
+                local backBtn = Instance.new("TextButton")
+                backBtn.Parent = bg
+                backBtn.Size = UDim2.new(1, -40, 0, 40)
+                backBtn.Position = UDim2.new(0, 20, 1, -50)
+                backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+                backBtn.Text = "返回"
+                backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold
+                backBtn.TextSize = 16
+                backBtn.AutoButtonColor = true
 
-    local backCorner = Instance.new("UICorner")
-    backCorner.Parent = backBtn
-    backCorner.CornerRadius = UDim.new(0, 8)
+                local backCorner = Instance.new("UICorner")
+                backCorner.Parent = backBtn
+                backCorner.CornerRadius = UDim.new(0, 8)
 
-    backBtn.MouseButton1Click:Connect(function()
-        dialog:Destroy()
-        showMainMenu()
-    end)
+                backBtn.MouseButton1Click:Connect(function()
+                    dialog:Destroy()
+                    showMainMenu()
+                end)
             end
         },
         {
@@ -856,6 +1266,151 @@ local function showMainMenu()
                                 end)
                             end
                         },
+                        -- 上升/下降模式
+                        {
+                            text = "⬆️ 上升/下降模式: " .. moveMode,
+                            callback = function(parentMenu)
+                                createMenu("选择移动模式", {
+                                    {
+                                        text = "角色上下" .. (moveMode == "角色上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "角色前后" .. (moveMode == "角色前后" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色前后"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色前后", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "角色左右" .. (moveMode == "角色左右" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色左右"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色左右", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕上下" .. (moveMode == "屏幕上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕前后" .. (moveMode == "屏幕前后" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕前后"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕前后", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕左右" .. (moveMode == "屏幕左右" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕左右"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕左右", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平上下" .. (moveMode == "水平上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平前后(屏幕)" .. (moveMode == "水平前后(屏幕)" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平前后(屏幕)"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平前后(屏幕)", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平左右(屏幕)" .. (moveMode == "水平左右(屏幕)" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平左右(屏幕)"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平左右(屏幕)", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                }, nil)
+                            end
+                        },
+                        -- 飞行方向模式
+                        {
+                            text = "✈️ 飞行方向模式: " .. flyMode,
+                            callback = function(parentMenu)
+                                createMenu("选择飞行模式", {
+                                    {
+                                        text = "屏幕" .. (flyMode == "屏幕" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "屏幕"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 屏幕", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "悬空" .. (flyMode == "悬空" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "悬空"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 悬空", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "绝对锁高" .. (flyMode == "绝对锁高" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "绝对锁高"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 绝对锁高", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                }, nil)
+                            end
+                        },
                         {
                             text = "📏 设置屏幕宽度",
                             callback = function(subMenu)
@@ -889,7 +1444,17 @@ local function showMainMenu()
                                 customHeight = nil
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
-                        }
+                        },
+                        -- 死亡后自动关闭开关
+                        {
+                            text = autoDisableOnDeath and "☠️ 死亡自动关闭: 开启" or "☠️ 死亡自动关闭: 关闭",
+                            callback = function(parentMenu)
+                                autoDisableOnDeath = not autoDisableOnDeath
+                                tanchuangxiaoxi(autoDisableOnDeath and "死亡后自动关闭已开启" or "死亡后自动关闭已关闭", "设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
                     }, showMainMenu)
                 end
                 createSettingMenu()
@@ -906,6 +1471,12 @@ local function showMainMenu()
                             confirmMenu:Destroy()
                             isFlying = false
                             tpwalking = false
+                            speedModeEnabled = false
+                            if speedModeConnection then
+                                speedModeConnection:Disconnect()
+                                speedModeConnection = nil
+                            end
+                            removeFly()
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -934,164 +1505,74 @@ local function showMainMenu()
     }, nil)
 end
 
--- ==================== TP Walk 相关 ====================
-local function stopTpwalking()
-    tpwalking = false
-end
-
-local function startTpwalking()
-    if tpwalking then return end
-    tpwalking = true
-    task.spawn(function()
-        local hb = RunService.Heartbeat
-        local chr, hum
-        while tpwalking do
-            hb:Wait()
-            chr = player.Character
-            if chr then
-                hum = chr:FindFirstChildWhichIsA("Humanoid")
-                if hum and hum.MoveDirection.Magnitude > 0 then
-                    chr:TranslateBy(hum.MoveDirection * speeds)
-                end
+-- ==================== 辅助函数：根据当前模式获取移动向量 ====================
+local function getMoveVector(dir, rootPart)
+    local step = dir * stepSize   -- 使用统一步长 stepSize
+    if moveMode == "角色上下" then
+        return rootPart.CFrame.UpVector * step
+    elseif moveMode == "角色前后" then
+        return rootPart.CFrame.LookVector * step
+    elseif moveMode == "角色左右" then
+        return -rootPart.CFrame.RightVector * step
+    elseif moveMode == "屏幕上下" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.UpVector * step
+        end
+    elseif moveMode == "屏幕前后" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return camera.CFrame.LookVector * step
+        end
+    elseif moveMode == "屏幕左右" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            return -camera.CFrame.RightVector * step
+        end
+    elseif moveMode == "水平上下" then
+        return Vector3.new(0, step, 0)
+    elseif moveMode == "水平前后(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local look = camera.CFrame.LookVector
+            local horizontal = Vector3.new(look.X, 0, look.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
             end
         end
-    end)
-end
-
--- ==================== 角色重生处理 ====================
-local function onCharacterAdded(char)
-    task.wait(0.7)
-    if isFlying then
-        isFlying = false
-        onof.Text = "飞天(关闭)"
-        local hum = char:FindFirstChildWhichIsA("Humanoid")
-        if hum then
-            for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
-                hum:SetStateEnabled(state, true)
-            end
-            hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-            hum.PlatformStand = false
-        end
-        char.Animate.Disabled = false
-        stopTpwalking()
-    end
-end
-
-player.CharacterAdded:Connect(onCharacterAdded)
-if player.Character then
-    onCharacterAdded(player.Character)
-end
-
--- ==================== 飞天开关 ====================
-onof.MouseButton1Click:Connect(function()
-    if isFlying then
-        isFlying = false
-        onof.Text = "飞天(关闭)"
-        stopTpwalking()
-        tanchuangxiaoxi("已关闭飞天", "飞天")
-
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
-                    hum:SetStateEnabled(state, true)
-                end
-                hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-                hum.PlatformStand = false
-            end
-            char.Animate.Disabled = false
-        end
-    else
-        isFlying = true
-        onof.Text = "飞天(开启)"
-        stopTpwalking()
-        tanchuangxiaoxi("已开启飞天", "飞天")
-
-        local char = player.Character
-        if not char then return end
-        local hum = char:FindFirstChildWhichIsA("Humanoid")
-        if not hum then return end
-
-        char.Animate.Disabled = true
-        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
-            track:AdjustSpeed(0)
-        end
-
-        for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
-            hum:SetStateEnabled(state, false)
-        end
-        hum:ChangeState(Enum.HumanoidStateType.Swimming)
-        hum.PlatformStand = true
-
-        local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-        if not torso then return end
-
-        local bg = Instance.new("BodyGyro")
-        bg.P = 9e4
-        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bg.CFrame = torso.CFrame
-        bg.Parent = torso
-
-        local bv = Instance.new("BodyVelocity")
-        bv.Velocity = Vector3.new(0, 0.1, 0)
-        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bv.Parent = torso
-
-        while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
-            RunService.Heartbeat:Wait()
-            local camera = workspace.CurrentCamera
-            if camera then
-                local moveDir = hum.MoveDirection
-                local maxspeed = 50 * speeds
-
-                if moveDir.Magnitude > 0 then
-                    bv.Velocity = moveDir.Unit * maxspeed
-                else
-                    bv.Velocity = Vector3.new(0, 0, 0)
-                end
-
-                bg.CFrame = camera.CFrame
-            end
-        end
-
-        bg:Destroy()
-        bv:Destroy()
-
-        if isFlying then
-            isFlying = false
-            onof.Text = "飞天(关闭)"
-            stopTpwalking()
-            local charNow = player.Character
-            if charNow then
-                local humNow = charNow:FindFirstChildWhichIsA("Humanoid")
-                if humNow then
-                    for _, state in ipairs(Enum.HumanoidStateType:GetEnumItems()) do
-                        humNow:SetStateEnabled(state, true)
-                    end
-                    humNow:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-                    humNow.PlatformStand = false
-                end
-                charNow.Animate.Disabled = false
+    elseif moveMode == "水平左右(屏幕)" then
+        local camera = workspace.CurrentCamera
+        if camera then
+            local right = camera.CFrame.RightVector
+            local horizontal = Vector3.new(right.X, 0, right.Z)
+            if horizontal.Magnitude > 0 then
+                return horizontal.Unit * step
+            else
+                return Vector3.new(0, 0, 0)
             end
         end
     end
-end)
+    return Vector3.new()
+end
 
 -- ==================== 按钮长按逻辑 ====================
 
--- 上升按钮（使用 longPressSpeed）
+-- 上升按钮
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = longPressSpeed  -- 使用自定义速度
+        local interval = longPressSpeed
         while holding do
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, stepSize, 0)
+                local rootPart = char.HumanoidRootPart
+                local delta = getMoveVector(1, rootPart)
+                rootPart.CFrame = rootPart.CFrame + delta
             end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
@@ -1104,7 +1585,9 @@ do
 
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, stepSize, 0)
+            local rootPart = char.HumanoidRootPart
+            local delta = getMoveVector(1, rootPart)
+            rootPart.CFrame = rootPart.CFrame + delta
         end
 
         longPressTask = task.delay(0.3, function()
@@ -1132,18 +1615,20 @@ do
     end)
 end
 
--- 下降按钮（使用 longPressSpeed）
+-- 下降按钮
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = longPressSpeed  -- 使用自定义速度
+        local interval = longPressSpeed
         while holding do
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, -stepSize, 0)
+                local rootPart = char.HumanoidRootPart
+                local delta = getMoveVector(-1, rootPart)
+                rootPart.CFrame = rootPart.CFrame + delta
             end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
@@ -1156,7 +1641,9 @@ do
 
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            char.HumanoidRootPart.CFrame = char.HumanoidRootPart.CFrame * CFrame.new(0, -stepSize, 0)
+            local rootPart = char.HumanoidRootPart
+            local delta = getMoveVector(-1, rootPart)
+            rootPart.CFrame = rootPart.CFrame + delta
         end
 
         longPressTask = task.delay(0.3, function()
@@ -1184,17 +1671,21 @@ do
     end)
 end
 
--- 加速按钮（使用 longPressSpeed）
+-- 加速按钮（根据模式修改 speeds 或 lockedSpeed，使用 stepSize 作为增量）
 do
     local holding = false
     local longPressTask = nil
 
     local function startLongPress()
         if not holding then return end
-        local interval = longPressSpeed  -- 使用自定义速度
+        local interval = longPressSpeed
         while holding do
-            speeds = speeds + 1
-            speed.Text = tostring(speeds)
+            if activeMode == "fly" then
+                speeds = speeds + 1
+                speed.Text = tostring(speeds)
+            else
+                lockedSpeed = lockedSpeed + stepSize   -- 使用统一步长
+            end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
         end
@@ -1204,8 +1695,12 @@ do
         if holding then return end
         holding = true
 
-        speeds = speeds + 1
-        speed.Text = tostring(speeds)
+        if activeMode == "fly" then
+            speeds = speeds + 1
+            speed.Text = tostring(speeds)
+        else
+            lockedSpeed = lockedSpeed + stepSize       -- 使用统一步长
+        end
 
         longPressTask = task.delay(0.3, function()
             if holding then
@@ -1232,19 +1727,55 @@ do
     end)
 end
 
--- 减速按钮（使用 longPressSpeed）
+-- 减速按钮（根据模式修改 speeds 或 lockedSpeed，使用 stepSize 作为减量）
 do
     local holding = false
     local longPressTask = nil
+    local MIN_SPEED = 0.1
+    local MIN_LOCKED = 0.1
+
+    local function decreaseFlySpeed()
+        local current = tonumber(speeds) or 0
+        if current > 1 then
+            current = current - 1
+        elseif current > MIN_SPEED then
+            current = MIN_SPEED
+        else
+            speed.Text = "已达最小速度"
+            task.wait(1)
+            speed.Text = tostring(speeds)
+            return false
+        end
+        speeds = current
+        speed.Text = tostring(speeds)
+        return true
+    end
+
+    local function decreaseLockedSpeed()
+        if lockedSpeed > 1 then
+            lockedSpeed = lockedSpeed - stepSize       -- 使用统一步长
+        elseif lockedSpeed > MIN_LOCKED then
+            lockedSpeed = MIN_LOCKED
+        else
+            speed.Text = "已达最小速度"
+            task.wait(1)
+            speed.Text = string.format("%.1f", lockedSpeed)
+            return false
+        end
+        return true
+    end
 
     local function startLongPress()
         if not holding then return end
-        local interval = longPressSpeed  -- 使用自定义速度
+        local interval = longPressSpeed
         while holding do
-            if speeds > 1 then
-                speeds = speeds - 1
-                speed.Text = tostring(speeds)
+            local success = false
+            if activeMode == "fly" then
+                success = decreaseFlySpeed()
+            else
+                success = decreaseLockedSpeed()
             end
+            if not success then break end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
         end
@@ -1254,13 +1785,10 @@ do
         if holding then return end
         holding = true
 
-        if speeds == 1 then
-            speed.Text = "速度不能少于1"
-            task.wait(1)
-            speed.Text = tostring(speeds)
+        if activeMode == "fly" then
+            decreaseFlySpeed()
         else
-            speeds = speeds - 1
-            speed.Text = tostring(speeds)
+            decreaseLockedSpeed()
         end
 
         longPressTask = task.delay(0.3, function()
@@ -1288,7 +1816,7 @@ do
     end)
 end
 
--- 速度标签（单击设置 speeds，长按设置 stepSize）- 使用 longPressSpeed
+-- 速度标签（统一长按设置步长 stepSize，单击设置速度值）
 do
     local holding = false
     local longPressTask = nil
@@ -1299,10 +1827,31 @@ do
 
         longPressTask = task.delay(0.3, function()
             if holding then
-                showInputDialog("设置上升/下降步长", tostring(stepSize), function(newStep)
-                    stepSize = newStep
-                    tanchuangxiaoxi("步长已设为 " .. tostring(newStep), "步长设置")
-                end)
+                -- 长按：设置统一步长 stepSize
+                showInputDialog(
+                    "设置步长（移动距离/速度增量）",
+                    tostring(stepSize),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num > 0 then
+                            stepSize = num
+                            tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
+                    end,
+                    {
+                        text = "移动模式: " .. moveMode,
+                        callback = function(btn)
+                            showMoveModeSelection(moveMode, function(newMode)
+                                moveMode = newMode
+                                btn.Text = "移动模式: " .. moveMode
+                                updateButtonText()
+                                tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
                 holding = false
                 longPressTask = nil
             end
@@ -1315,11 +1864,58 @@ do
                 task.cancel(longPressTask)
                 longPressTask = nil
             end
-            showInputDialog("设置速度倍率", tostring(speeds), function(newSpeed)
-                speeds = newSpeed
-                speed.Text = tostring(speeds)
-                tanchuangxiaoxi("速度倍率已设为 " .. tostring(newSpeed), "速度设置")
-            end)
+            if activeMode == "fly" then
+                -- 飞天模式：单击设置速度倍率
+                showInputDialog(
+                    "设置速度倍率",
+                    tostring(speeds),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num > 0 then
+                            speeds = num
+                            speed.Text = tostring(speeds)
+                            tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
+                    end,
+                    {
+                        text = "飞行模式: " .. flyMode,
+                        callback = function(btn)
+                            showFlyModeSelection(flyMode, function(newMode)
+                                flyMode = newMode
+                                btn.Text = "飞行模式: " .. flyMode
+                                tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
+            else
+                -- 移速模式：单击设置锁定速度
+                showInputDialog(
+                    "设置锁定速度",
+                    string.format("%.1f", lockedSpeed),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num > 0 then
+                            lockedSpeed = num
+                            tanchuangxiaoxi("锁定速度已设为 " .. tostring(num), "速度设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
+                    end,
+                    {
+                        text = "飞行模式: " .. flyMode,
+                        callback = function(btn)
+                            showFlyModeSelection(flyMode, function(newMode)
+                                flyMode = newMode
+                                btn.Text = "飞行模式: " .. flyMode
+                                tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
+            end
             holding = false
         end
     end
@@ -1332,7 +1928,68 @@ do
     end)
 end
 
--- ==================== 隐藏按钮长按/单击逻辑 ====================
+-- ==================== 主按钮（onof）长按/单击逻辑（模式切换）====================
+do
+    local holding = false
+    local longPressTask = nil
+    local isLongPress = false
+
+    onof.MouseButton1Down:Connect(function()
+        if holding then return end
+        holding = true
+        isLongPress = false
+
+        longPressTask = task.delay(0.3, function()
+            if holding then
+                isLongPress = true
+                if activeMode == "fly" then
+                    activeMode = "speed"
+                    if isFlying then
+                        toggleFly(false)
+                    end
+                else
+                    activeMode = "fly"
+                    if speedModeEnabled then
+                        speedModeEnabled = false
+                        applySpeedMode(false)
+                    end
+                end
+                updateMainButtonText()
+                updateSpeedButtonText()
+                tanchuangxiaoxi("已切换至" .. (activeMode == "fly" and "飞天模式" or "移速模式"), "模式切换")
+                holding = false
+                longPressTask = nil
+            end
+        end)
+    end)
+
+    local function onUp()
+        if holding then
+            if longPressTask then
+                task.cancel(longPressTask)
+                longPressTask = nil
+            end
+            if not isLongPress then
+                if activeMode == "fly" then
+                    toggleFly(not isFlying)
+                else
+                    speedModeEnabled = not speedModeEnabled
+                    applySpeedMode(speedModeEnabled)
+                end
+            end
+            holding = false
+        end
+    end
+
+    onof.MouseButton1Up:Connect(onUp)
+    onof.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            onUp()
+        end
+    end)
+end
+
+-- 隐藏按钮
 do
     local holding = false
     local longPressTask = nil
@@ -1445,10 +2102,25 @@ do
     end)
 end
 
+-- ==================== 实时更新速度显示 ====================
+RunService.Heartbeat:Connect(function()
+    updateSpeedButtonText()
+end)
+
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
+    if speedModeConnection then
+        speedModeConnection:Disconnect()
+        speedModeConnection = nil
+    end
+    removeFly()
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
     end
 end)
+
+-- 初始化按钮文本
+updateButtonText()
+updateMainButtonText()
+updateSpeedButtonText()
