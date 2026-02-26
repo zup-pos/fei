@@ -1276,6 +1276,8 @@ local function showMainMenu()
                                     if val and val > 0 then
                                         incStep = val
                                         tanchuangxiaoxi("增长量已设为 " .. val, "设置")
+                                        subMenu:Destroy()  -- 销毁当前菜单
+                                        createSettingMenu() -- 重新创建设置菜单以更新显示
                                     else
                                         tanchuangxiaoxi("请输入大于0的数字", "错误")
                                     end
