@@ -152,6 +152,7 @@ local speedModeConnection = nil
 
 -- 移速模式专用变量
 local lockedSpeed = 16          -- 锁定的目标速度
+local originalSpeed = 16         -- 记录开启移速模式前的原始速度
 
 -- 死亡自动关闭
 local autoDisableOnDeath = true
@@ -291,15 +292,22 @@ local function applySpeedMode(enable)
             stopTpwalking()
         end
 
-        -- 初始化锁定速度为当前实际速度或默认16
+        -- 记录当前速度作为原始速度
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                lockedSpeed = hum.WalkSpeed
+                originalSpeed = hum.WalkSpeed
+            else
+                originalSpeed = 16
             end
+        else
+            originalSpeed = 16
         end
-        if lockedSpeed <= 0 then lockedSpeed = 16 end
+        if originalSpeed <= 0 then originalSpeed = 16 end
+
+        -- 初始化锁定速度为原始速度
+        lockedSpeed = originalSpeed
 
         -- 启动移速循环
         if speedModeConnection then
@@ -322,12 +330,12 @@ local function applySpeedMode(enable)
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
-        -- 恢复默认移速（16）
+        -- 恢复原始速度
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                pcall(function() hum.WalkSpeed = 16 end)
+                pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
@@ -463,15 +471,11 @@ local function onCharacterAdded(char)
                 end
                 pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
             end
+            char.Animate.Disabled = false
         end
         if speedModeEnabled then
             speedModeEnabled = false
-            if speedModeConnection then
-                speedModeConnection:Disconnect()
-                speedModeConnection = nil
-            end
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then pcall(function() hum.WalkSpeed = 16 end) end
+            applySpeedMode(false)  -- 关闭移速模式并恢复原始速度
         end
     else
         if isFlying then
