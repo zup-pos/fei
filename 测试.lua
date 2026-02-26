@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.0 (移速模式增强版：显示当前速度，加减速调整锁定值)
+-- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -229,7 +229,22 @@ local function updateSpeedButtonText()
     if activeMode == "fly" then
         speed.Text = tostring(speeds)
     else
-        speed.Text = string.format("%.1f", lockedSpeed)
+        if speedModeEnabled then
+            speed.Text = string.format("%.1f", lockedSpeed)
+        else
+            -- 显示实际速度
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    speed.Text = string.format("%.1f", hum.WalkSpeed)
+                else
+                    speed.Text = "0.0"
+                end
+            else
+                speed.Text = "0.0"
+            end
+        end
     end
 end
 
@@ -995,14 +1010,12 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.0 更新内容：",
+                    "版本 7.7.1 更新内容：",
                     "",
-                    "1. 移速模式增强：开启后显示当前实际速度，并可锁定",
-                    "2. 加减速按钮在移速模式下调整锁定速度值",
-                    "3. 速度标签显示当前锁定速度（移速模式）或倍率（飞天模式）",
-                    "4. 单击速度标签可手动设置锁定速度或倍率",
-                    "5. 长按速度标签可设置步长（移速模式）或上升步长（飞天模式）",
-                    "6. 优化了重生逻辑，保持原有飞天/移速状态",
+                    "1. 修复移速模式关闭时速度不刷新的问题",
+                    "2. 现在移速模式关闭时会实时显示实际速度",
+                    "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
+                    "4. 优化界面显示",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1131,7 +1144,7 @@ local function showMainMenu()
                     "   - 水平前后(屏幕)：基于相机前方的水平方向",
                     "   - 水平左右(屏幕)：基于相机右方的水平方向",
                     "🔹 加速/减速：单击调速度（飞天倍率/锁定速度），长按连续",
-                    "🔹 速度标签：飞天模式下显示倍率，移速模式下显示当前锁定速度",
+                    "🔹 速度标签：飞天模式下显示倍率，移速模式下显示当前锁定速度（开启时）或实际速度（关闭时）",
                     "   单击可手动设置值，长按可设置步长",
                     "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
@@ -1669,7 +1682,8 @@ do
                 speed.Text = tostring(speeds)
             else
                 lockedSpeed = lockedSpeed + speedStep
-                speed.Text = string.format("%.1f", lockedSpeed)
+                -- 不立即更新显示，因为显示由Heartbeat控制（会覆盖为实际速度或锁定速度）
+                -- 但在关闭时我们仍然更新lockedSpeed
             end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
@@ -1685,7 +1699,8 @@ do
             speed.Text = tostring(speeds)
         else
             lockedSpeed = lockedSpeed + speedStep
-            speed.Text = string.format("%.1f", lockedSpeed)
+            -- 加速后立即更新显示，让用户看到调整效果（即使关闭模式也显示锁定速度一小段时间？这里我们允许显示锁定速度）
+            -- 但为了保持一致性，我们让Heartbeat去更新，所以这里不修改speed.Text
         end
 
         longPressTask = task.delay(0.3, function()
@@ -1748,7 +1763,7 @@ do
             speed.Text = string.format("%.1f", lockedSpeed)
             return false
         end
-        speed.Text = string.format("%.1f", lockedSpeed)
+        -- 不立即更新显示
         return true
     end
 
@@ -1914,7 +1929,7 @@ do
                         local num = tonumber(input)
                         if num and num > 0 then
                             lockedSpeed = num
-                            speed.Text = string.format("%.1f", lockedSpeed)
+                            -- 显示会在Heartbeat中更新
                             tanchuangxiaoxi("锁定速度已设为 " .. tostring(num), "速度设置")
                         else
                             tanchuangxiaoxi("请输入大于0的数字", "错误")
@@ -2117,6 +2132,11 @@ do
         end
     end)
 end
+
+-- ==================== 实时更新速度显示 ====================
+RunService.Heartbeat:Connect(function()
+    updateSpeedButtonText()
+end)
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
