@@ -128,8 +128,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- ==================== 全局变量 ====================
 local speeds = 1               -- 飞天倍率
-local stepSize = 2              -- 上升/下降移动步长
-local speedStep = 1             -- 移速模式增减步长
+local stepSize = 1              -- 统一步长：用于上升/下降移动距离 和 移速/飞天模式的增减量
 local isFlying = false
 local tpwalking = false
 local notifs = {}
@@ -1024,7 +1023,8 @@ local function showMainMenu()
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：根据不同模式显示不同内容，单击/长按可自定义",
+                    "- 速度标签：根据不同模式显示不同内容，单击可手动设置值",
+                    "   长按可快速切换移动模式（上升/下降方向）",
                     "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
@@ -1147,12 +1147,14 @@ local function showMainMenu()
                     "   - 水平上下：世界Y轴（纯垂直）",
                     "   - 水平前后(屏幕)：基于相机前方的水平方向",
                     "   - 水平左右(屏幕)：基于相机右方的水平方向",
-                    "🔹 加速/减速：单击调速度（飞天倍率/锁定速度），长按连续",
-                    "🔹 速度标签：飞天模式下显示倍率，移速模式下显示当前锁定速度（开启时）或实际速度（关闭时）",
-                    "   单击可手动设置值，长按可设置步长",
+                    "🔹 加速/减速：单击调速度，长按连续",
+                    "   - 飞天模式：调整倍率，每次增减步长值",
+                    "   - 移速模式：调整锁定速度，每次增减步长值",
+                    "🔹 速度标签：",
+                    "   - 单击：手动设置当前值（飞天倍率/锁定速度）",
+                    "   - 长按：快速切换移动模式（上升/下降方向）",
                     "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "🔹 UI按钮：纯标签，无功能",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式",
                     "",
                     "⚙️ 菜单功能：",
@@ -1161,15 +1163,14 @@ local function showMainMenu()
                     "- 设置：调整弹窗透明度、",
                     "  启用音量键隐藏、",
                     "  设置屏幕尺寸、",
-                    "  长按速度、",
+                    "  调整步长（移动距离/速度增量）、",
                     "  上升/下降模式、",
                     "  飞行方向模式、",
                     "  死亡自动关闭",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
-                    "启用后，按音量减隐藏UI，",
-                    "音量加显示"
+                    "启用后，按音量减隐藏UI，音量加显示"
                 }
 
                 local contentContainer = Instance.new("Frame")
@@ -1261,6 +1262,20 @@ local function showMainMenu()
                                     if val and val > 0 then
                                         longPressSpeed = val
                                         tanchuangxiaoxi("长按速度已设为 " .. val .. " 秒", "设置")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        -- 调整步长（新增）
+                        {
+                            text = "📐 调整步长 (当前: " .. stepSize .. ")",
+                            callback = function(subMenu)
+                                showInputDialog("输入步长（移动距离/速度增量）", tostring(stepSize), function(val)
+                                    if val and val > 0 then
+                                        stepSize = val
+                                        tanchuangxiaoxi("步长已设为 " .. val, "设置")
                                     else
                                         tanchuangxiaoxi("请输入大于0的数字", "错误")
                                     end
@@ -1672,7 +1687,7 @@ do
     end)
 end
 
--- 加速按钮（根据模式修改 speeds 或 lockedSpeed）
+-- 加速按钮（根据模式修改 speeds 或 lockedSpeed，使用 stepSize 作为增量）
 do
     local holding = false
     local longPressTask = nil
@@ -1682,10 +1697,10 @@ do
         local interval = longPressSpeed
         while holding do
             if activeMode == "fly" then
-                speeds = speeds + 1
+                speeds = speeds + stepSize   -- 使用统一步长
                 speed.Text = tostring(speeds)
             else
-                lockedSpeed = lockedSpeed + speedStep   -- 使用移速步长
+                lockedSpeed = lockedSpeed + stepSize   -- 使用统一步长
             end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
@@ -1697,10 +1712,10 @@ do
         holding = true
 
         if activeMode == "fly" then
-            speeds = speeds + 1
+            speeds = speeds + stepSize
             speed.Text = tostring(speeds)
         else
-            lockedSpeed = lockedSpeed + speedStep       -- 使用移速步长
+            lockedSpeed = lockedSpeed + stepSize
         end
 
         longPressTask = task.delay(0.3, function()
@@ -1728,7 +1743,7 @@ do
     end)
 end
 
--- 减速按钮（根据模式修改 speeds 或 lockedSpeed）
+-- 减速按钮（根据模式修改 speeds 或 lockedSpeed，使用 stepSize 作为减量）
 do
     local holding = false
     local longPressTask = nil
@@ -1737,8 +1752,8 @@ do
 
     local function decreaseFlySpeed()
         local current = tonumber(speeds) or 0
-        if current > 1 then
-            current = current - 1
+        if current > stepSize then
+            current = current - stepSize
         elseif current > MIN_SPEED then
             current = MIN_SPEED
         else
@@ -1753,8 +1768,8 @@ do
     end
 
     local function decreaseLockedSpeed()
-        if lockedSpeed > 1 then
-            lockedSpeed = lockedSpeed - speedStep       -- 使用移速步长
+        if lockedSpeed > stepSize then
+            lockedSpeed = lockedSpeed - stepSize
         elseif lockedSpeed > MIN_LOCKED then
             lockedSpeed = MIN_LOCKED
         else
@@ -1817,7 +1832,7 @@ do
     end)
 end
 
--- 速度标签（根据模式长按设置对应步长，单击设置速度值）
+-- 速度标签（长按切换移动模式，单击设置速度值）
 do
     local holding = false
     local longPressTask = nil
@@ -1828,60 +1843,12 @@ do
 
         longPressTask = task.delay(0.3, function()
             if holding then
-                -- 长按：根据当前模式设置对应的步长
-                if activeMode == "fly" then
-                    -- 飞天模式：设置移动步长 stepSize
-                    showInputDialog(
-                        "设置移动步长（上升/下降距离）",
-                        tostring(stepSize),
-                        function(input)
-                            local num = tonumber(input)
-                            if num and num > 0 then
-                                stepSize = num
-                                tanchuangxiaoxi("移动步长已设为 " .. tostring(num), "步长设置")
-                            else
-                                tanchuangxiaoxi("请输入大于0的数字", "错误")
-                            end
-                        end,
-                        {
-                            text = "移动模式: " .. moveMode,
-                            callback = function(btn)
-                                showMoveModeSelection(moveMode, function(newMode)
-                                    moveMode = newMode
-                                    btn.Text = "移动模式: " .. moveMode
-                                    updateButtonText()
-                                    tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
-                                end)
-                            end
-                        }
-                    )
-                else
-                    -- 移速模式：设置速度步长 speedStep
-                    showInputDialog(
-                        "设置速度步长（移速增量）",
-                        tostring(speedStep),
-                        function(input)
-                            local num = tonumber(input)
-                            if num and num > 0 then
-                                speedStep = num
-                                tanchuangxiaoxi("速度步长已设为 " .. tostring(num), "步长设置")
-                            else
-                                tanchuangxiaoxi("请输入大于0的数字", "错误")
-                            end
-                        end,
-                        {
-                            text = "移动模式: " .. moveMode,
-                            callback = function(btn)
-                                showMoveModeSelection(moveMode, function(newMode)
-                                    moveMode = newMode
-                                    btn.Text = "移动模式: " .. moveMode
-                                    updateButtonText()
-                                    tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
-                                end)
-                            end
-                        }
-                    )
-                end
+                -- 长按：切换移动模式
+                showMoveModeSelection(moveMode, function(newMode)
+                    moveMode = newMode
+                    updateButtonText()
+                    tanchuangxiaoxi("移动模式已切换至: " .. newMode, "快捷设置")
+                end)
                 holding = false
                 longPressTask = nil
             end
