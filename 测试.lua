@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.6.3 (优化飞天重生逻辑) 完整版
+-- Version: 7.7.0 (移速模式增强版：显示当前速度，加减速调整锁定值)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -127,8 +127,8 @@ local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- ==================== 全局变量 ====================
-local speeds = 1
-local stepSize = 2
+local speeds = 1               -- 飞天倍率
+local stepSize = 2              -- 上升/下降步长
 local isFlying = false
 local tpwalking = false
 local notifs = {}
@@ -149,6 +149,10 @@ local flyMode = "屏幕"
 local activeMode = "fly"
 local speedModeEnabled = false
 local speedModeConnection = nil
+
+-- 移速模式专用变量
+local lockedSpeed = 16          -- 锁定的目标速度
+local speedStep = 1              -- 加速/减速步长
 
 -- 死亡自动关闭
 local autoDisableOnDeath = true
@@ -221,6 +225,14 @@ local function updateMainButtonText()
     end
 end
 
+local function updateSpeedButtonText()
+    if activeMode == "fly" then
+        speed.Text = tostring(speeds)
+    else
+        speed.Text = string.format("%.1f", lockedSpeed)
+    end
+end
+
 -- ==================== TP Walk ====================
 local function stopTpwalking()
     tpwalking = false
@@ -247,13 +259,10 @@ end
 -- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
+        -- 如果飞天正在开启，先关闭
         if isFlying then
             isFlying = false
-            if _G._flyData then
-                pcall(function() _G._flyData.bg:Destroy() end)
-                pcall(function() _G._flyData.bv:Destroy() end)
-                _G._flyData = nil
-            end
+            removeFly()
             local char = player.Character
             if char then
                 local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -268,6 +277,17 @@ local function applySpeedMode(enable)
             stopTpwalking()
         end
 
+        -- 初始化锁定速度为当前实际速度或默认16
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                lockedSpeed = hum.WalkSpeed
+            end
+        end
+        if lockedSpeed <= 0 then lockedSpeed = 16 end
+
+        -- 启动移速循环
         if speedModeConnection then
             speedModeConnection:Disconnect()
         end
@@ -277,18 +297,18 @@ local function applySpeedMode(enable)
             if char then
                 local hum = char:FindFirstChildWhichIsA("Humanoid")
                 if hum then
-                    local targetSpeed = 16 * speeds
-                    targetSpeed = clamp(targetSpeed, 1, 100)
-                    pcall(function() hum.WalkSpeed = targetSpeed end)
+                    pcall(function() hum.WalkSpeed = lockedSpeed end)
                 end
             end
         end)
-        tanchuangxiaoxi("已开启移速倍率: " .. tostring(speeds), "移速模式")
+
+        tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
+        -- 恢复默认移速（16）
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -299,6 +319,7 @@ local function applySpeedMode(enable)
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
     updateMainButtonText()
+    updateSpeedButtonText()
 end
 
 -- ==================== 飞天辅助函数 ====================
@@ -408,6 +429,7 @@ local function toggleFly(enable)
             char.Animate.Disabled = false
         end
     end
+    updateSpeedButtonText()
 end
 
 -- ==================== 角色重生处理 ====================
@@ -452,6 +474,7 @@ local function onCharacterAdded(char)
         end
     end
     stopTpwalking()
+    updateSpeedButtonText()
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
@@ -972,17 +995,19 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.6.3 更新内容：",
+                    "版本 7.7.0 更新内容：",
                     "",
-                    "1. 优化飞天重生逻辑",
-                    "2. 死亡自动关闭开启时，重生后自动关闭所有功能",
-                    "3. 死亡自动关闭关闭时，重生后自动恢复飞天/移速状态",
-                    "4. 修复各种潜在bug",
+                    "1. 移速模式增强：开启后显示当前实际速度，并可锁定",
+                    "2. 加减速按钮在移速模式下调整锁定速度值",
+                    "3. 速度标签显示当前锁定速度（移速模式）或倍率（飞天模式）",
+                    "4. 单击速度标签可手动设置锁定速度或倍率",
+                    "5. 长按速度标签可设置步长（移速模式）或上升步长（飞天模式）",
+                    "6. 优化了重生逻辑，保持原有飞天/移速状态",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
-                    "- 加速/减速：单击调速度，长按连续（支持小数，最小0.1）",
-                    "- 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
+                    "- 加速/减速：单击调速度，长按连续",
+                    "- 速度标签：根据不同模式显示不同内容，单击/长按可自定义",
                     "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
@@ -1105,8 +1130,9 @@ local function showMainMenu()
                     "   - 水平上下：世界Y轴（纯垂直）",
                     "   - 水平前后(屏幕)：基于相机前方的水平方向",
                     "   - 水平左右(屏幕)：基于相机右方的水平方向",
-                    "🔹 加速/减速：单击速度+1/-1，长按连续（支持小数，最小0.1）",
-                    "🔹 速度标签：单击设倍率（带飞行模式菜单），长按设步长（带移动模式菜单）",
+                    "🔹 加速/减速：单击调速度（飞天倍率/锁定速度），长按连续",
+                    "🔹 速度标签：飞天模式下显示倍率，移速模式下显示当前锁定速度",
+                    "   单击可手动设置值，长按可设置步长",
                     "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 UI按钮：纯标签，无功能",
@@ -1629,7 +1655,7 @@ do
     end)
 end
 
--- 加速按钮
+-- 加速按钮（根据模式修改 speeds 或 lockedSpeed）
 do
     local holding = false
     local longPressTask = nil
@@ -1638,8 +1664,13 @@ do
         if not holding then return end
         local interval = longPressSpeed
         while holding do
-            speeds = speeds + 1
-            speed.Text = tostring(speeds)
+            if activeMode == "fly" then
+                speeds = speeds + 1
+                speed.Text = tostring(speeds)
+            else
+                lockedSpeed = lockedSpeed + speedStep
+                speed.Text = string.format("%.1f", lockedSpeed)
+            end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
         end
@@ -1649,8 +1680,13 @@ do
         if holding then return end
         holding = true
 
-        speeds = speeds + 1
-        speed.Text = tostring(speeds)
+        if activeMode == "fly" then
+            speeds = speeds + 1
+            speed.Text = tostring(speeds)
+        else
+            lockedSpeed = lockedSpeed + speedStep
+            speed.Text = string.format("%.1f", lockedSpeed)
+        end
 
         longPressTask = task.delay(0.3, function()
             if holding then
@@ -1677,13 +1713,14 @@ do
     end)
 end
 
--- 减速按钮（修复类型错误）
+-- 减速按钮（根据模式修改 speeds 或 lockedSpeed）
 do
     local holding = false
     local longPressTask = nil
     local MIN_SPEED = 0.1
+    local MIN_LOCKED = 0.1
 
-    local function decreaseSpeed()
+    local function decreaseFlySpeed()
         local current = tonumber(speeds) or 0
         if current > 1 then
             current = current - 1
@@ -1700,11 +1737,32 @@ do
         return true
     end
 
+    local function decreaseLockedSpeed()
+        if lockedSpeed > 1 then
+            lockedSpeed = lockedSpeed - speedStep
+        elseif lockedSpeed > MIN_LOCKED then
+            lockedSpeed = MIN_LOCKED
+        else
+            speed.Text = "已达最小速度"
+            task.wait(1)
+            speed.Text = string.format("%.1f", lockedSpeed)
+            return false
+        end
+        speed.Text = string.format("%.1f", lockedSpeed)
+        return true
+    end
+
     local function startLongPress()
         if not holding then return end
         local interval = longPressSpeed
         while holding do
-            if not decreaseSpeed() then break end
+            local success = false
+            if activeMode == "fly" then
+                success = decreaseFlySpeed()
+            else
+                success = decreaseLockedSpeed()
+            end
+            if not success then break end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
         end
@@ -1713,9 +1771,17 @@ do
     mine.MouseButton1Down:Connect(function()
         if holding then return end
         holding = true
-        decreaseSpeed()
+
+        if activeMode == "fly" then
+            decreaseFlySpeed()
+        else
+            decreaseLockedSpeed()
+        end
+
         longPressTask = task.delay(0.3, function()
-            if holding then startLongPress() end
+            if holding then
+                startLongPress()
+            end
         end)
     end)
 
@@ -1737,79 +1803,135 @@ do
     end)
 end
 
--- 速度标签（单击和长按分别带模式选择菜单）
+-- 速度标签（根据模式不同行为）
 do
     local holding = false
     local longPressTask = nil
 
-    -- 长按处理（步长设置 + 移动模式选择菜单）
     speed.MouseButton1Down:Connect(function()
         if holding then return end
         holding = true
 
         longPressTask = task.delay(0.3, function()
             if holding then
-                showInputDialog(
-                    "设置上升/下降步长",
-                    tostring(stepSize),
-                    function(input)
-                        local num = tonumber(input)
-                        if num and num > 0 then
-                            stepSize = num
-                            tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
-                        else
-                            tanchuangxiaoxi("请输入大于0的数字", "错误")
-                        end
-                    end,
-                    {
-                        text = "移动模式: " .. moveMode,
-                        callback = function(btn)
-                            showMoveModeSelection(moveMode, function(newMode)
-                                moveMode = newMode
-                                btn.Text = "移动模式: " .. moveMode
-                                updateButtonText()
-                                tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
-                            end)
-                        end
-                    }
-                )
+                if activeMode == "fly" then
+                    -- 飞天模式：长按设置上升/下降步长
+                    showInputDialog(
+                        "设置上升/下降步长",
+                        tostring(stepSize),
+                        function(input)
+                            local num = tonumber(input)
+                            if num and num > 0 then
+                                stepSize = num
+                                tanchuangxiaoxi("步长已设为 " .. tostring(num), "步长设置")
+                            else
+                                tanchuangxiaoxi("请输入大于0的数字", "错误")
+                            end
+                        end,
+                        {
+                            text = "移动模式: " .. moveMode,
+                            callback = function(btn)
+                                showMoveModeSelection(moveMode, function(newMode)
+                                    moveMode = newMode
+                                    btn.Text = "移动模式: " .. moveMode
+                                    updateButtonText()
+                                    tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
+                                end)
+                            end
+                        }
+                    )
+                else
+                    -- 移速模式：长按设置移速步长（speedStep）
+                    showInputDialog(
+                        "设置移速步长",
+                        tostring(speedStep),
+                        function(input)
+                            local num = tonumber(input)
+                            if num and num > 0 then
+                                speedStep = num
+                                tanchuangxiaoxi("移速步长已设为 " .. tostring(num), "步长设置")
+                            else
+                                tanchuangxiaoxi("请输入大于0的数字", "错误")
+                            end
+                        end,
+                        {
+                            text = "移动模式: " .. moveMode,
+                            callback = function(btn)
+                                showMoveModeSelection(moveMode, function(newMode)
+                                    moveMode = newMode
+                                    btn.Text = "移动模式: " .. moveMode
+                                    updateButtonText()
+                                    tanchuangxiaoxi("移动模式已切换至: " .. moveMode, "快捷设置")
+                                end)
+                            end
+                        }
+                    )
+                end
                 holding = false
                 longPressTask = nil
             end
         end)
     end)
 
-    -- 单击处理（速度倍率设置 + 飞行模式选择菜单）
     local function onRelease()
         if holding then
             if longPressTask then
                 task.cancel(longPressTask)
                 longPressTask = nil
             end
-            showInputDialog(
-                "设置速度倍率",
-                tostring(speeds),
-                function(input)
-                    local num = tonumber(input)
-                    if num and num > 0 then
-                        speeds = num
-                        speed.Text = tostring(speeds)
-                        tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
-                    else
-                        tanchuangxiaoxi("请输入大于0的数字", "错误")
-                    end
-                end,
-                {
-                    text = "飞行模式: " .. flyMode,
-                    callback = function(btn)
-                        showFlyModeSelection(flyMode, function(newMode)
-                            flyMode = newMode
-                            btn.Text = "飞行模式: " .. flyMode
-                            tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
-                        end)
-                    end
-                }
-            )
+            if activeMode == "fly" then
+                -- 飞天模式：单击设置速度倍率
+                showInputDialog(
+                    "设置速度倍率",
+                    tostring(speeds),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num > 0 then
+                            speeds = num
+                            speed.Text = tostring(speeds)
+                            tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
+                    end,
+                    {
+                        text = "飞行模式: " .. flyMode,
+                        callback = function(btn)
+                            showFlyModeSelection(flyMode, function(newMode)
+                                flyMode = newMode
+                                btn.Text = "飞行模式: " .. flyMode
+                                tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
+            else
+                -- 移速模式：单击设置锁定速度
+                showInputDialog(
+                    "设置锁定速度",
+                    string.format("%.1f", lockedSpeed),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num > 0 then
+                            lockedSpeed = num
+                            speed.Text = string.format("%.1f", lockedSpeed)
+                            tanchuangxiaoxi("锁定速度已设为 " .. tostring(num), "速度设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
+                    end,
+                    {
+                        text = "飞行模式: " .. flyMode,
+                        callback = function(btn)
+                            showFlyModeSelection(flyMode, function(newMode)
+                                flyMode = newMode
+                                btn.Text = "飞行模式: " .. flyMode
+                                tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                            end)
+                        end
+                    }
+                )
+            end
             holding = false
         end
     end
@@ -1849,6 +1971,7 @@ do
                     end
                 end
                 updateMainButtonText()
+                updateSpeedButtonText()
                 tanchuangxiaoxi("已切换至" .. (activeMode == "fly" and "飞天模式" or "移速模式"), "模式切换")
                 holding = false
                 longPressTask = nil
@@ -2008,5 +2131,7 @@ main.Destroying:Connect(function()
     end
 end)
 
+-- 初始化按钮文本
 updateButtonText()
 updateMainButtonText()
+updateSpeedButtonText()
