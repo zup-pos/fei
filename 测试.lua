@@ -4,7 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（先断开连接再恢复速度）
+-- 修复：移速关闭后速度恢复错误（增加主动恢复）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -216,7 +216,7 @@ local function applyNoclip()
     local character = player.Character
     if not character then return end
     local parts = getAllParts(character)
-    for _, part in ipairs(parts) do   -- 修复：将 iparts 改为 ipairs
+    for _, part in ipairs(parts) do
         part.CanCollide = false
         pcall(function()
             part.CollisionGroup = "Ghost"
@@ -475,13 +475,23 @@ local function resetHumanoidAfterFly()
     char.Animate.Disabled = false
 end
 
--- ==================== 飞天开关 ====================
+-- ==================== 飞天开关（修复版：关闭移速后主动再次恢复速度）====================
 local function toggleFly(enable)
     if enable then
+        -- 如果移速正在开启，先关闭
         if speedModeEnabled then
             speedModeEnabled = false
             applySpeedMode(false)   -- 关闭移速并恢复速度
-            task.wait()             -- 等待一帧，让速度恢复生效
+            task.wait()             -- 等待一帧，确保移速完全清理
+
+            -- 主动再次恢复速度，确保万无一失
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    pcall(function() hum.WalkSpeed = originalSpeed end)
+                end
+            end
         end
         if isFlying then return end
         isFlying = true
@@ -501,7 +511,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（最终修复版：每次开启重新记录当前速度）====================
+-- ==================== 移速模式（最终修复版：先断开连接再恢复速度）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -549,7 +559,7 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：先断开连接，再恢复速度（避免被心跳覆盖）
+        -- 关闭移速：先断开连接，再恢复速度
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
