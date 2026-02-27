@@ -2,7 +2,7 @@
 -- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
 -- 新增：穿墙功能（独立开关，自动重生）
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
--- 修复：飞天关闭时恢复为 Running 状态，避免头部移动姿势
+-- 修复：飞天关闭后角色姿势异常问题
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -374,76 +374,6 @@ local function startTpwalking()
     end)
 end
 
--- ==================== 移速模式 ====================
-local function applySpeedMode(enable)
-    if enable then
-        -- 如果飞天正在开启，先关闭
-        if isFlying then
-            isFlying = false
-            removeFly()
-            local char = player.Character
-            if char then
-                local hum = char:FindFirstChildWhichIsA("Humanoid")
-                if hum then
-                    for _, state in ipairs(VALID_HUMANOD_STATES) do
-                        pcall(function() hum:SetStateEnabled(state, true) end)
-                    end
-                    -- 修复：改为 Running 状态
-                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
-                end
-                char.Animate.Disabled = false
-            end
-            stopTpwalking()
-        end
-
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                originalSpeed = hum.WalkSpeed
-            else
-                originalSpeed = 16
-            end
-        else
-            originalSpeed = 16
-        end
-        if originalSpeed <= 0 then originalSpeed = 16 end
-
-        lockedSpeed = originalSpeed
-
-        if speedModeConnection then
-            speedModeConnection:Disconnect()
-        end
-        speedModeConnection = RunService.Heartbeat:Connect(function()
-            if not speedModeEnabled then return end
-            local char = player.Character
-            if char then
-                local hum = char:FindFirstChildWhichIsA("Humanoid")
-                if hum then
-                    pcall(function() hum.WalkSpeed = lockedSpeed end)
-                end
-            end
-        end)
-
-        tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
-    else
-        if speedModeConnection then
-            speedModeConnection:Disconnect()
-            speedModeConnection = nil
-        end
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                pcall(function() hum.WalkSpeed = originalSpeed end)
-            end
-        end
-        tanchuangxiaoxi("已关闭移速模式", "移速模式")
-    end
-    updateMainButtonText()
-    updateSpeedButtonText()
-end
-
 -- ==================== 飞天辅助函数 ====================
 local function removeFly()
     if _G._flyData then
@@ -519,6 +449,30 @@ local function applyFly()
     return true
 end
 
+-- ==================== 统一飞天关闭后重置角色 ====================
+local function resetHumanoidAfterFly()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+
+    -- 启用所有Humanoid状态
+    for _, state in ipairs(VALID_HUMANOD_STATES) do
+        pcall(function() hum:SetStateEnabled(state, true) end)
+    end
+
+    -- 重置基本属性
+    hum.PlatformStand = false
+    hum.AutoRotate = true
+
+    -- 强制切换状态以刷新动画
+    hum:ChangeState(Enum.HumanoidStateType.Freefall)
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+
+    -- 启用动画
+    char.Animate.Disabled = false
+end
+
 -- ==================== 飞天开关 ====================
 local function toggleFly(enable)
     if enable then
@@ -539,19 +493,67 @@ local function toggleFly(enable)
         stopTpwalking()
         tanchuangxiaoxi("已关闭飞天", "飞天")
         removeFly()
+        resetHumanoidAfterFly()
+    end
+    updateSpeedButtonText()
+end
+
+-- ==================== 移速模式 ====================
+local function applySpeedMode(enable)
+    if enable then
+        -- 如果飞天正在开启，先关闭
+        if isFlying then
+            isFlying = false
+            removeFly()
+            resetHumanoidAfterFly()
+            stopTpwalking()
+        end
+
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                for _, state in ipairs(VALID_HUMANOD_STATES) do
-                    pcall(function() hum:SetStateEnabled(state, true) end)
-                end
-                -- 修复：改为 Running 状态
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
+                originalSpeed = hum.WalkSpeed
+            else
+                originalSpeed = 16
             end
-            char.Animate.Disabled = false
+        else
+            originalSpeed = 16
         end
+        if originalSpeed <= 0 then originalSpeed = 16 end
+
+        lockedSpeed = originalSpeed
+
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+        end
+        speedModeConnection = RunService.Heartbeat:Connect(function()
+            if not speedModeEnabled then return end
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    pcall(function() hum.WalkSpeed = lockedSpeed end)
+                end
+            end
+        end)
+
+        tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
+    else
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = originalSpeed end)
+            end
+        end
+        tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
+    updateMainButtonText()
     updateSpeedButtonText()
 end
 
@@ -566,15 +568,7 @@ local function onCharacterAdded(char)
             isFlying = false
             updateMainButtonText()
             removeFly()
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then
-                for _, state in ipairs(VALID_HUMANOD_STATES) do
-                    pcall(function() hum:SetStateEnabled(state, true) end)
-                end
-                -- 修复：改为 Running 状态
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
-            end
-            char.Animate.Disabled = false
+            resetHumanoidAfterFly()
         end
         if speedModeEnabled then
             speedModeEnabled = false
