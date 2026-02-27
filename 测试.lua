@@ -1,5 +1,6 @@
 -- Gui to Lua
 -- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
+-- 新增：穿墙功能（独立开关，自动重生）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -158,7 +159,92 @@ local originalSpeed = 16         -- 记录开启移速模式前的原始速度
 -- 死亡自动关闭
 local autoDisableOnDeath = true
 
--- 有效Humanoid状态
+-- ==================== 新增：穿墙相关变量 ====================
+local noclipEnabled = false
+local noclipMaintainConnection = nil
+local originalCollisions = {}
+
+-- 递归获取角色所有部件
+local function getAllParts(character)
+    local parts = {}
+    local function scan(instance)
+        if instance:IsA("BasePart") then
+            table.insert(parts, instance)
+        end
+        for _, child in ipairs(instance:GetChildren()) do
+            scan(child)
+        end
+    end
+    scan(character)
+    return parts
+end
+
+-- 保存原始碰撞状态
+local function saveOriginalCollisions(character)
+    local parts = getAllParts(character)
+    for _, part in ipairs(parts) do
+        originalCollisions[part] = {
+            CanCollide = part.CanCollide,
+            CollisionGroup = part.CollisionGroup
+        }
+    end
+end
+
+-- 恢复原始碰撞状态
+local function restoreOriginalCollisions()
+    for part, data in pairs(originalCollisions) do
+        if part and part.Parent then
+            part.CanCollide = data.CanCollide
+            pcall(function()
+                part.CollisionGroup = data.CollisionGroup
+            end)
+        end
+    end
+    originalCollisions = {}
+end
+
+-- 应用穿墙属性
+local function applyNoclip()
+    local character = player.Character
+    if not character then return end
+    local parts = getAllParts(character)
+    for _, part in ipairs(parts) do
+        part.CanCollide = false
+        pcall(function()
+            part.CollisionGroup = "Ghost"
+        end)
+    end
+end
+
+-- 开启穿墙
+local function enableNoclip()
+    if not player.Character then return end
+    if next(originalCollisions) == nil then
+        saveOriginalCollisions(player.Character)
+    end
+    applyNoclip()
+    if noclipMaintainConnection then
+        noclipMaintainConnection:Disconnect()
+    end
+    noclipMaintainConnection = RunService.Heartbeat:Connect(function()
+        if noclipEnabled and player.Character then
+            applyNoclip()
+        end
+    end)
+    noclipEnabled = true
+end
+
+-- 关闭穿墙
+local function disableNoclip()
+    if noclipMaintainConnection then
+        noclipMaintainConnection:Disconnect()
+        noclipMaintainConnection = nil
+    end
+    restoreOriginalCollisions()
+    noclipEnabled = false
+end
+
+-- ==================== 有效Humanoid状态 ====================
 local VALID_HUMANOD_STATES = {
     Enum.HumanoidStateType.Running,
     Enum.HumanoidStateType.RunningNoPhysics,
@@ -233,7 +319,6 @@ local function updateSpeedButtonText()
         if speedModeEnabled then
             speed.Text = string.format("%.1f", lockedSpeed)
         else
-            -- 显示实际速度
             local char = player.Character
             if char then
                 local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -275,7 +360,6 @@ end
 -- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
-        -- 如果飞天正在开启，先关闭
         if isFlying then
             isFlying = false
             removeFly()
@@ -293,7 +377,6 @@ local function applySpeedMode(enable)
             stopTpwalking()
         end
 
-        -- 记录当前速度作为原始速度
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -307,10 +390,8 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        -- 初始化锁定速度为原始速度
         lockedSpeed = originalSpeed
 
-        -- 启动移速循环
         if speedModeConnection then
             speedModeConnection:Disconnect()
         end
@@ -331,7 +412,6 @@ local function applySpeedMode(enable)
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
-        -- 恢复原始速度
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -455,11 +535,12 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 角色重生处理 ====================
+-- ==================== 角色重生处理（修改后）====================
 local function onCharacterAdded(char)
     task.wait(0.7)
     char.Animate.Disabled = false
 
+    -- 飞天/移速受死亡自动关闭控制
     if autoDisableOnDeath then
         if isFlying then
             isFlying = false
@@ -476,7 +557,7 @@ local function onCharacterAdded(char)
         end
         if speedModeEnabled then
             speedModeEnabled = false
-            applySpeedMode(false)  -- 关闭移速模式并恢复原始速度
+            applySpeedMode(false)
         end
     else
         if isFlying then
@@ -492,6 +573,13 @@ local function onCharacterAdded(char)
             applySpeedMode(true)
         end
     end
+
+    -- 穿墙独立：如果之前开启，重生后自动开启（不受死亡自动关闭影响）
+    if noclipEnabled then
+        originalCollisions = {}  -- 清空旧的引用
+        enableNoclip()
+    end
+
     stopTpwalking()
     updateSpeedButtonText()
 end
@@ -625,7 +713,7 @@ function tanchuangxiaoxi(msg, title)
     end)
 end
 
--- ==================== 输入对话框（支持第三个按钮） ====================
+-- ==================== 输入对话框 ====================
 local function showInputDialog(title, defaultText, callback, extraButton)
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -962,7 +1050,7 @@ local function showMoveModeSelection(currentMode, callback)
     createMenu("选择移动模式", buttons, nil)
 end
 
--- ==================== 主菜单显示函数 ====================
+-- ==================== 主菜单显示函数（修改后）====================
 local function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -1020,6 +1108,7 @@ local function showMainMenu()
                     "2. 现在移速模式关闭时会实时显示实际速度",
                     "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
                     "4. 优化界面显示",
+                    "5. 新增独立穿墙功能（设置中开启）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1028,7 +1117,8 @@ local function showMainMenu()
                     "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
-                    "- 死亡自动关闭：可控制角色死后是否自动停用当前模式",
+                    "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
+                    "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1155,7 +1245,8 @@ local function showMainMenu()
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
                     "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式",
+                    "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
+                    "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -1167,6 +1258,7 @@ local function showMainMenu()
                     "  上升/下降模式、",
                     "  飞行方向模式、",
                     "  死亡自动关闭",
+                    "  【新增】穿墙开关",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1276,12 +1368,25 @@ local function showMainMenu()
                                     if val and val > 0 then
                                         incStep = val
                                         tanchuangxiaoxi("增长量已设为 " .. val, "设置")
-                                        subMenu:Destroy()  -- 销毁当前菜单
-                                        createSettingMenu() -- 重新创建设置菜单以更新显示
+                                        subMenu:Destroy()
+                                        createSettingMenu()
                                     else
                                         tanchuangxiaoxi("请输入大于0的数字", "错误")
                                     end
                                 end)
+                            end
+                        },
+                        -- 新增：穿墙开关
+                        {
+                            text = noclipEnabled and "🧱 穿墙: 开启" or "🧱 穿墙: 关闭",
+                            callback = function(subMenu)
+                                if noclipEnabled then
+                                    disableNoclip()
+                                else
+                                    enableNoclip()
+                                end
+                                subMenu:Destroy()
+                                createSettingMenu()
                             end
                         },
                         -- 上升/下降模式
@@ -1487,6 +1592,7 @@ local function showMainMenu()
                         text = "确认",
                         callback = function(confirmMenu)
                             confirmMenu:Destroy()
+                            -- 关闭所有功能
                             isFlying = false
                             tpwalking = false
                             speedModeEnabled = false
@@ -1495,6 +1601,7 @@ local function showMainMenu()
                                 speedModeConnection = nil
                             end
                             removeFly()
+                            disableNoclip()  -- 关闭穿墙
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -1575,8 +1682,7 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 按钮长按逻辑 ====================
-
+-- ==================== 按钮长按逻辑（原样保留）====================
 -- 上升按钮
 do
     local holding = false
@@ -1689,7 +1795,7 @@ do
     end)
 end
 
--- 加速按钮（根据模式修改 speeds 或 lockedSpeed，使用 incStep 作为增量）
+-- 加速按钮
 do
     local holding = false
     local longPressTask = nil
@@ -1745,7 +1851,7 @@ do
     end)
 end
 
--- 减速按钮（根据模式修改 speeds 或 lockedSpeed，使用 incStep 作为减量）
+-- 减速按钮
 do
     local holding = false
     local longPressTask = nil
@@ -1845,11 +1951,10 @@ do
 
         longPressTask = task.delay(0.3, function()
             if holding then
-                -- 长按：设置移动步长 moveStep，并包含三个按钮
                 showInputDialog(
                     "设置移动步长（上升/下降距离）",
                     tostring(moveStep),
-                    function(input)  -- 确认按钮的回调
+                    function(input)
                         local num = tonumber(input)
                         if num and num > 0 then
                             moveStep = num
@@ -1858,7 +1963,7 @@ do
                             tanchuangxiaoxi("请输入大于0的数字", "错误")
                         end
                     end,
-                    {  -- 额外按钮（中间按钮）
+                    {
                         text = "移动模式: " .. moveMode,
                         callback = function(btn)
                             showMoveModeSelection(moveMode, function(newMode)
@@ -1883,7 +1988,6 @@ do
                 longPressTask = nil
             end
             if activeMode == "fly" then
-                -- 飞天模式：单击设置速度倍率
                 showInputDialog(
                     "设置速度倍率",
                     tostring(speeds),
@@ -1909,7 +2013,6 @@ do
                     }
                 )
             else
-                -- 移速模式：单击设置锁定速度
                 showInputDialog(
                     "设置锁定速度",
                     string.format("%.1f", lockedSpeed),
@@ -2125,13 +2228,14 @@ RunService.Heartbeat:Connect(function()
     updateSpeedButtonText()
 end)
 
--- ==================== 清理 ====================
+-- ==================== 清理（修改后）====================
 main.Destroying:Connect(function()
     if speedModeConnection then
         speedModeConnection:Disconnect()
         speedModeConnection = nil
     end
     removeFly()
+    disableNoclip()  -- 关闭穿墙
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
