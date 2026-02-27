@@ -4,7 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误
+-- 修复：移速关闭后速度恢复错误（先恢复速度再断开连接）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -216,7 +216,7 @@ local function applyNoclip()
     local character = player.Character
     if not character then return end
     local parts = getAllParts(character)
-    for _, part in ipairs(parts) do
+    for _, part in iparts(parts) do
         part.CanCollide = false
         pcall(function()
             part.CollisionGroup = "Ghost"
@@ -480,7 +480,7 @@ local function toggleFly(enable)
     if enable then
         if speedModeEnabled then
             speedModeEnabled = false
-            applySpeedMode(false)
+            applySpeedMode(false)   -- 关闭移速并恢复速度
         end
         if isFlying then return end
         isFlying = true
@@ -500,7 +500,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（修复版）====================
+-- ==================== 移速模式（修复版：关闭时先恢复速度再断开连接）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -545,17 +545,18 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        if speedModeConnection then
-            speedModeConnection:Disconnect()
-            speedModeConnection = nil
-        end
+        -- 关闭移速：先恢复速度，再断开连接
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                -- 恢复原始速度（而不是锁定速度）
                 pcall(function() hum.WalkSpeed = originalSpeed end)
+                print("移速关闭：恢复速度至 " .. originalSpeed)  -- 调试输出
             end
+        end
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
         end
         speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
