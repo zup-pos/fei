@@ -481,6 +481,7 @@ local function toggleFly(enable)
         if speedModeEnabled then
             speedModeEnabled = false
             applySpeedMode(false)   -- 关闭移速并恢复速度
+            task.wait()             -- 等待一帧，让速度恢复生效
         end
         if isFlying then return end
         isFlying = true
