@@ -1,10 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
--- 新增：穿墙功能（独立开关，自动重生）
--- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
--- 修复：飞天关闭后角色姿势异常问题
--- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（彻底重构互斥逻辑）
+-- Version: 7.7.1
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -132,9 +127,9 @@ local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- ==================== 全局变量 ====================
-local speeds = 1               -- 飞天倍率
-local moveStep = 2              -- 上升/下降移动步长（通过长按速度标签设置）
-local incStep = 1               -- 加速/减速增减量（通过设置菜单调整）
+local speeds = 1
+local moveStep = 2
+local incStep = 1
 local isFlying = false
 local tpwalking = false
 local notifs = {}
@@ -156,18 +151,17 @@ local modeIndex = 0
 local modeNames = { "fly", "speed", "noclip" }
 local modeDisplayNames = { "飞天", "移速", "穿墙" }
 
--- 各模式状态
 local speedModeEnabled = false
 local speedModeConnection = nil
 
 -- 移速模式专用变量
-local lockedSpeed = 16          -- 锁定的目标速度
-local originalSpeed = 16         -- 记录开启移速模式前的原始速度
+local lockedSpeed = 16
+local originalSpeed = 16
 
 -- 死亡自动关闭（仅影响飞天/移速）
 local autoDisableOnDeath = true
 
--- ==================== 新增：穿墙相关变量 ====================
+-- ==================== 穿墙相关变量 ====================
 local noclipEnabled = false
 local noclipMaintainConnection = nil
 local originalCollisions = {}
@@ -329,7 +323,6 @@ end
 -- 更新速度标签文字
 local function updateSpeedButtonText()
     if modeIndex == 0 then
-        -- 飞天模式：始终显示倍率（无论开关）
         speed.Text = tostring(speeds)
     elseif modeIndex == 1 then
         if speedModeEnabled then
@@ -348,7 +341,6 @@ local function updateSpeedButtonText()
             end
         end
     else
-        -- 穿墙模式：显示开启/关闭
         speed.Text = noclipEnabled and "开启" or "关闭"
     end
 end
@@ -458,32 +450,26 @@ local function resetHumanoidAfterFly()
     local hum = char:FindFirstChildWhichIsA("Humanoid")
     if not hum then return end
 
-    -- 启用所有Humanoid状态
     for _, state in ipairs(VALID_HUMANOD_STATES) do
         pcall(function() hum:SetStateEnabled(state, true) end)
     end
 
-    -- 重置基本属性
     hum.PlatformStand = false
     hum.AutoRotate = true
 
-    -- 强制切换状态以刷新动画
     hum:ChangeState(Enum.HumanoidStateType.Freefall)
     hum:ChangeState(Enum.HumanoidStateType.Running)
 
-    -- 启用动画
     char.Animate.Disabled = false
 end
 
 -- ==================== 强制关闭移速（独立函数）====================
 local function forceDisableSpeedMode()
     if speedModeEnabled then
-        -- 断开心跳连接
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
-        -- 恢复速度
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -491,10 +477,8 @@ local function forceDisableSpeedMode()
                 pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
-        -- 重置锁定速度为原始速度
         lockedSpeed = originalSpeed
         speedModeEnabled = false
-        -- 额外等待一帧确保恢复生效
         task.wait()
     end
 end
@@ -510,10 +494,9 @@ local function forceDisableFly()
     end
 end
 
--- ==================== 飞天开关（修复版）====================
+-- ==================== 飞天开关 ====================
 local function toggleFly(enable)
     if enable then
-        -- 强制关闭移速（无论是否开启，都执行恢复）
         forceDisableSpeedMode()
         if isFlying then return end
         isFlying = true
@@ -533,17 +516,16 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（修复版）====================
+-- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
-        -- 强制关闭飞天
         forceDisableFly()
 
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                originalSpeed = hum.WalkSpeed  -- 记录当前原始速度
+                originalSpeed = hum.WalkSpeed
             else
                 originalSpeed = 16
             end
@@ -552,7 +534,7 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        lockedSpeed = originalSpeed  -- 锁定速度从原始速度开始
+        lockedSpeed = originalSpeed
 
         if speedModeConnection then
             speedModeConnection:Disconnect()
@@ -571,7 +553,6 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：先断开连接，再恢复速度，并重置锁定速度
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
@@ -596,7 +577,6 @@ local function onCharacterAdded(char)
     task.wait(0.7)
     char.Animate.Disabled = false
 
-    -- 飞天/移速受死亡自动关闭控制
     if autoDisableOnDeath then
         if isFlying then
             isFlying = false
@@ -626,7 +606,6 @@ local function onCharacterAdded(char)
         end
     end
 
-    -- 穿墙独立：如果之前开启，重生后自动开启（不受死亡自动关闭影响）
     if noclipEnabled then
         originalCollisions = {}
         enableNoclip()
@@ -1411,7 +1390,6 @@ local function showMainMenu()
                                 end)
                             end
                         },
-                        -- 调整增长量（加速/减速步长）
                         {
                             text = "📈 调整增长量 (当前: " .. incStep .. ")",
                             callback = function(subMenu)
@@ -1427,7 +1405,6 @@ local function showMainMenu()
                                 end)
                             end
                         },
-                        -- 上升/下降模式
                         {
                             text = "⬆️ 上升/下降模式: " .. moveMode,
                             callback = function(parentMenu)
@@ -1534,7 +1511,6 @@ local function showMainMenu()
                                 }, nil)
                             end
                         },
-                        -- 飞行方向模式
                         {
                             text = "✈️ 飞行方向模式: " .. flyMode,
                             callback = function(parentMenu)
@@ -1606,7 +1582,6 @@ local function showMainMenu()
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
                             end
                         },
-                        -- 死亡后自动关闭开关
                         {
                             text = autoDisableOnDeath and "☠️ 死亡自动关闭: 开启" or "☠️ 死亡自动关闭: 关闭",
                             callback = function(parentMenu)
@@ -1630,7 +1605,6 @@ local function showMainMenu()
                         text = "确认",
                         callback = function(confirmMenu)
                             confirmMenu:Destroy()
-                            -- 关闭所有功能
                             isFlying = false
                             tpwalking = false
                             speedModeEnabled = false
@@ -1670,7 +1644,7 @@ end
 
 -- ==================== 辅助函数：根据当前模式获取移动向量 ====================
 local function getMoveVector(dir, rootPart)
-    local step = dir * moveStep   -- 使用 moveStep（上升/下降步长）
+    local step = dir * moveStep
     if moveMode == "角色上下" then
         return rootPart.CFrame.UpVector * step
     elseif moveMode == "角色前后" then
@@ -1721,7 +1695,6 @@ local function getMoveVector(dir, rootPart)
 end
 
 -- ==================== 按钮长按逻辑 ====================
-
 -- 上升按钮
 do
     local holding = false
@@ -1745,14 +1718,12 @@ do
     up.MouseButton1Down:Connect(function()
         if holding then return end
         holding = true
-
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local rootPart = char.HumanoidRootPart
             local delta = getMoveVector(1, rootPart)
             rootPart.CFrame = rootPart.CFrame + delta
         end
-
         longPressTask = task.delay(0.3, function()
             if holding then
                 startLongPress()
@@ -1801,14 +1772,12 @@ do
     down.MouseButton1Down:Connect(function()
         if holding then return end
         holding = true
-
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local rootPart = char.HumanoidRootPart
             local delta = getMoveVector(-1, rootPart)
             rootPart.CFrame = rootPart.CFrame + delta
         end
-
         longPressTask = task.delay(0.3, function()
             if holding then
                 startLongPress()
@@ -1834,7 +1803,7 @@ do
     end)
 end
 
--- 加速按钮（根据模式修改）
+-- 加速按钮（修改后：飞天模式无条件调整，移速模式仅开启时调整）
 do
     local holding = false
     local longPressTask = nil
@@ -1843,10 +1812,10 @@ do
         if not holding then return end
         local interval = longPressSpeed
         while holding do
-            if modeIndex == 0 and isFlying then
+            if modeIndex == 0 then
                 speeds = speeds + incStep
                 speed.Text = tostring(speeds)
-            elseif modeIndex == 1 then
+            elseif modeIndex == 1 and speedModeEnabled then
                 lockedSpeed = lockedSpeed + incStep
             end
             task.wait(interval)
@@ -1856,15 +1825,17 @@ do
 
     plus.MouseButton1Down:Connect(function()
         if holding then return end
+        -- 移速模式未开启时禁止操作
+        if modeIndex == 1 and not speedModeEnabled then
+            return
+        end
         holding = true
-
-        if modeIndex == 0 and isFlying then
+        if modeIndex == 0 then
             speeds = speeds + incStep
             speed.Text = tostring(speeds)
         elseif modeIndex == 1 then
             lockedSpeed = lockedSpeed + incStep
         end
-
         longPressTask = task.delay(0.3, function()
             if holding then
                 startLongPress()
@@ -1890,7 +1861,7 @@ do
     end)
 end
 
--- 减速按钮
+-- 减速按钮（修改后：飞天模式无条件调整，移速模式仅开启时调整）
 do
     local holding = false
     local longPressTask = nil
@@ -1933,9 +1904,9 @@ do
         local interval = longPressSpeed
         while holding do
             local success = false
-            if modeIndex == 0 and isFlying then
+            if modeIndex == 0 then
                 success = decreaseFlySpeed()
-            elseif modeIndex == 1 then
+            elseif modeIndex == 1 and speedModeEnabled then
                 success = decreaseLockedSpeed()
             end
             if not success then break end
@@ -1946,14 +1917,16 @@ do
 
     mine.MouseButton1Down:Connect(function()
         if holding then return end
+        -- 移速模式未开启时禁止操作
+        if modeIndex == 1 and not speedModeEnabled then
+            return
+        end
         holding = true
-
-        if modeIndex == 0 and isFlying then
+        if modeIndex == 0 then
             decreaseFlySpeed()
         elseif modeIndex == 1 then
             decreaseLockedSpeed()
         end
-
         longPressTask = task.delay(0.3, function()
             if holding then
                 startLongPress()
@@ -2088,7 +2061,7 @@ do
     end)
 end
 
--- ==================== 主按钮（onof）长按/单击逻辑（三模式循环）====================
+-- ==================== 主按钮长按/单击逻辑 ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2102,7 +2075,6 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                -- 长按：切换模式（0->1->2->0）
                 modeIndex = (modeIndex + 1) % 3
                 updateMainButtonText()
                 updateSpeedButtonText()
@@ -2120,7 +2092,6 @@ do
                 longPressTask = nil
             end
             if not isLongPress then
-                -- 单击：开关当前模式
                 if modeIndex == 0 then
                     toggleFly(not isFlying)
                 elseif modeIndex == 1 then
