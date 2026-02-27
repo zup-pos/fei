@@ -4,7 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（每次开启重新记录当前速度）
+-- 修复：移速关闭后速度恢复错误（先断开连接再恢复速度）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -548,17 +548,17 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：恢复速度到原始记录，但不清除记录（为下次开启保留）
+        -- 关闭移速：先断开连接，再恢复速度（避免被心跳覆盖）
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
                 pcall(function() hum.WalkSpeed = originalSpeed end)
             end
-        end
-        if speedModeConnection then
-            speedModeConnection:Disconnect()
-            speedModeConnection = nil
         end
         speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
