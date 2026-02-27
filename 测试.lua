@@ -4,8 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（先恢复速度再断开连接）
--- 修复：穿墙函数拼写错误导致崩溃
+-- 修复：移速关闭后速度恢复错误（每次开启重新记录当前速度）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -501,7 +500,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（修复版：关闭时先恢复速度再断开连接，移除调试日志）====================
+-- ==================== 移速模式（最终修复版：每次开启重新记录当前速度）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -510,7 +509,6 @@ local function applySpeedMode(enable)
             removeFly()
             resetHumanoidAfterFly()
             stopTpwalking()
-            -- 等待一帧，确保飞天完全关闭
             task.wait()
         end
 
@@ -518,8 +516,10 @@ local function applySpeedMode(enable)
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                originalSpeed = hum.WalkSpeed  -- 记录当前原始速度
+                -- ★ 重要：每次开启时，从当前Humanoid读取速度作为原始速度
+                originalSpeed = hum.WalkSpeed
             else
+                -- 如果找不到Humanoid（极罕见情况），回退到16，但不作为默认值
                 originalSpeed = 16
             end
         else
@@ -527,8 +527,10 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        lockedSpeed = originalSpeed  -- 初始锁定速度等于原始速度
+        -- 锁定速度从原始速度开始
+        lockedSpeed = originalSpeed
 
+        -- 启动心跳锁定循环
         if speedModeConnection then
             speedModeConnection:Disconnect()
         end
@@ -546,13 +548,12 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：先恢复速度，再断开连接（移除调试输出）
+        -- 关闭移速：恢复速度到原始记录，但不清除记录（为下次开启保留）
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
                 pcall(function() hum.WalkSpeed = originalSpeed end)
-                -- 调试日志已移除
             end
         end
         if speedModeConnection then
