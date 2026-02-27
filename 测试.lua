@@ -309,7 +309,7 @@ local function updateButtonText()
     end
 end
 
--- 更新主按钮文字（新逻辑）
+-- 更新主按钮文字
 local function updateMainButtonText()
     local modeName = modeDisplayNames[modeIndex + 1]
     local state = false
@@ -323,8 +323,10 @@ local function updateMainButtonText()
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
 
+-- 更新速度标签文字（修复版）
 local function updateSpeedButtonText()
-    if modeIndex == 0 and isFlying then
+    if modeIndex == 0 then
+        -- 飞天模式：始终显示倍率（无论开关）
         speed.Text = tostring(speeds)
     elseif modeIndex == 1 then
         if speedModeEnabled then
@@ -343,7 +345,7 @@ local function updateSpeedButtonText()
             end
         end
     else
-        -- 穿墙模式显示状态
+        -- 穿墙模式：显示开启/关闭
         speed.Text = noclipEnabled and "开启" or "关闭"
     end
 end
@@ -2051,7 +2053,7 @@ do
     end)
 end
 
--- ==================== 主按钮（onof）长按/单击逻辑（新：三模式循环）====================
+-- ==================== 主按钮（onof）长按/单击逻辑（三模式循环）====================
 do
     local holding = false
     local longPressTask = nil
@@ -2111,7 +2113,7 @@ do
     end)
 end
 
--- 隐藏按钮（保持不变）
+-- 隐藏按钮
 do
     local holding = false
     local longPressTask = nil
