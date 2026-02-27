@@ -1803,7 +1803,7 @@ do
     end)
 end
 
--- 加速按钮（修改后：飞天模式无条件调整，移速模式仅开启时调整）
+-- 加速按钮
 do
     local holding = false
     local longPressTask = nil
@@ -1861,7 +1861,7 @@ do
     end)
 end
 
--- 减速按钮（修改后：飞天模式无条件调整，移速模式仅开启时调整）
+-- 减速按钮
 do
     local holding = false
     local longPressTask = nil
@@ -1952,7 +1952,7 @@ do
     end)
 end
 
--- 速度标签
+-- 速度标签（长按设置移动步长，单击设置速度值）
 do
     local holding = false
     local longPressTask = nil
@@ -1999,7 +1999,8 @@ do
                 task.cancel(longPressTask)
                 longPressTask = nil
             end
-            if modeIndex == 0 and isFlying then
+            if modeIndex == 0 then
+                -- 飞天模式：单击设置速度倍率（无论开关）
                 showInputDialog(
                     "设置速度倍率",
                     tostring(speeds),
@@ -2024,7 +2025,8 @@ do
                         end
                     }
                 )
-            elseif modeIndex == 1 then
+            elseif modeIndex == 1 and speedModeEnabled then
+                -- 移速模式：仅当开启时设置锁定速度
                 showInputDialog(
                     "设置锁定速度",
                     string.format("%.1f", lockedSpeed),
