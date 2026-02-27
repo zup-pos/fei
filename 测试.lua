@@ -1,6 +1,7 @@
 -- Gui to Lua
 -- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
 -- 新增：穿墙功能（独立开关，自动重生）
+-- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -147,8 +148,12 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "屏幕"
 
--- 模式切换
-local activeMode = "fly"
+-- 模式切换（0=飞天, 1=移速, 2=穿墙）
+local modeIndex = 0
+local modeNames = { "fly", "speed", "noclip" }
+local modeDisplayNames = { "飞天", "移速", "穿墙" }
+
+-- 各模式状态
 local speedModeEnabled = false
 local speedModeConnection = nil
 
@@ -156,7 +161,7 @@ local speedModeConnection = nil
 local lockedSpeed = 16          -- 锁定的目标速度
 local originalSpeed = 16         -- 记录开启移速模式前的原始速度
 
--- 死亡自动关闭
+-- 死亡自动关闭（仅影响飞天/移速）
 local autoDisableOnDeath = true
 
 -- ==================== 新增：穿墙相关变量 ====================
@@ -304,18 +309,24 @@ local function updateButtonText()
     end
 end
 
+-- 更新主按钮文字（新逻辑）
 local function updateMainButtonText()
-    if activeMode == "fly" then
-        onof.Text = isFlying and "飞天(开启)" or "飞天(关闭)"
+    local modeName = modeDisplayNames[modeIndex + 1]
+    local state = false
+    if modeIndex == 0 then
+        state = isFlying
+    elseif modeIndex == 1 then
+        state = speedModeEnabled
     else
-        onof.Text = speedModeEnabled and "移速(开启)" or "移速(关闭)"
+        state = noclipEnabled
     end
+    onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
 
 local function updateSpeedButtonText()
-    if activeMode == "fly" then
+    if modeIndex == 0 and isFlying then
         speed.Text = tostring(speeds)
-    else
+    elseif modeIndex == 1 then
         if speedModeEnabled then
             speed.Text = string.format("%.1f", lockedSpeed)
         else
@@ -331,6 +342,9 @@ local function updateSpeedButtonText()
                 speed.Text = "0.0"
             end
         end
+    else
+        -- 穿墙模式显示状态
+        speed.Text = noclipEnabled and "开启" or "关闭"
     end
 end
 
@@ -360,6 +374,7 @@ end
 -- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
+        -- 如果飞天正在开启，先关闭
         if isFlying then
             isFlying = false
             removeFly()
@@ -535,7 +550,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 角色重生处理（修改后）====================
+-- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
     char.Animate.Disabled = false
@@ -1050,7 +1065,7 @@ local function showMoveModeSelection(currentMode, callback)
     createMenu("选择移动模式", buttons, nil)
 end
 
--- ==================== 主菜单显示函数（修改后）====================
+-- ==================== 主菜单显示函数 ====================
 local function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -1108,13 +1123,13 @@ local function showMainMenu()
                     "2. 现在移速模式关闭时会实时显示实际速度",
                     "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
                     "4. 优化界面显示",
-                    "5. 新增独立穿墙功能（设置中开启）",
+                    "5. 新增独立穿墙功能（长按主按钮切换）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
                     "- 速度标签：单击可手动设置当前值，长按可设置上升/下降步长",
-                    "- 主按钮：长按切换飞天/移速模式，单击开关当前模式",
+                    "- 主按钮：长按切换飞天/移速/穿墙模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
@@ -1243,7 +1258,7 @@ local function showMainMenu()
                     "🔹 速度标签：",
                     "   - 单击：手动设置当前值（飞天倍率/锁定速度）",
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
-                    "🔹 主按钮：长按切换飞天/移速模式，单击开关当前模式",
+                    "🔹 主按钮：长按切换飞天/移速/穿墙模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
@@ -1258,7 +1273,6 @@ local function showMainMenu()
                     "  上升/下降模式、",
                     "  飞行方向模式、",
                     "  死亡自动关闭",
-                    "  【新增】穿墙开关",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -1374,19 +1388,6 @@ local function showMainMenu()
                                         tanchuangxiaoxi("请输入大于0的数字", "错误")
                                     end
                                 end)
-                            end
-                        },
-                        -- 新增：穿墙开关
-                        {
-                            text = noclipEnabled and "🧱 穿墙: 开启" or "🧱 穿墙: 关闭",
-                            callback = function(subMenu)
-                                if noclipEnabled then
-                                    disableNoclip()
-                                else
-                                    enableNoclip()
-                                end
-                                subMenu:Destroy()
-                                createSettingMenu()
                             end
                         },
                         -- 上升/下降模式
@@ -1601,7 +1602,7 @@ local function showMainMenu()
                                 speedModeConnection = nil
                             end
                             removeFly()
-                            disableNoclip()  -- 关闭穿墙
+                            disableNoclip()
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -1682,7 +1683,8 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 按钮长按逻辑（原样保留）====================
+-- ==================== 按钮长按逻辑 ====================
+
 -- 上升按钮
 do
     local holding = false
@@ -1795,7 +1797,7 @@ do
     end)
 end
 
--- 加速按钮
+-- 加速按钮（根据模式修改）
 do
     local holding = false
     local longPressTask = nil
@@ -1804,10 +1806,10 @@ do
         if not holding then return end
         local interval = longPressSpeed
         while holding do
-            if activeMode == "fly" then
+            if modeIndex == 0 and isFlying then
                 speeds = speeds + incStep
                 speed.Text = tostring(speeds)
-            else
+            elseif modeIndex == 1 then
                 lockedSpeed = lockedSpeed + incStep
             end
             task.wait(interval)
@@ -1819,10 +1821,10 @@ do
         if holding then return end
         holding = true
 
-        if activeMode == "fly" then
+        if modeIndex == 0 and isFlying then
             speeds = speeds + incStep
             speed.Text = tostring(speeds)
-        else
+        elseif modeIndex == 1 then
             lockedSpeed = lockedSpeed + incStep
         end
 
@@ -1894,9 +1896,9 @@ do
         local interval = longPressSpeed
         while holding do
             local success = false
-            if activeMode == "fly" then
+            if modeIndex == 0 and isFlying then
                 success = decreaseFlySpeed()
-            else
+            elseif modeIndex == 1 then
                 success = decreaseLockedSpeed()
             end
             if not success then break end
@@ -1909,9 +1911,9 @@ do
         if holding then return end
         holding = true
 
-        if activeMode == "fly" then
+        if modeIndex == 0 and isFlying then
             decreaseFlySpeed()
-        else
+        elseif modeIndex == 1 then
             decreaseLockedSpeed()
         end
 
@@ -1940,7 +1942,7 @@ do
     end)
 end
 
--- 速度标签（长按设置移动步长，单击设置速度值）
+-- 速度标签
 do
     local holding = false
     local longPressTask = nil
@@ -1987,7 +1989,7 @@ do
                 task.cancel(longPressTask)
                 longPressTask = nil
             end
-            if activeMode == "fly" then
+            if modeIndex == 0 and isFlying then
                 showInputDialog(
                     "设置速度倍率",
                     tostring(speeds),
@@ -2012,7 +2014,7 @@ do
                         end
                     }
                 )
-            else
+            elseif modeIndex == 1 then
                 showInputDialog(
                     "设置锁定速度",
                     string.format("%.1f", lockedSpeed),
@@ -2049,7 +2051,7 @@ do
     end)
 end
 
--- ==================== 主按钮（onof）长按/单击逻辑（模式切换）====================
+-- ==================== 主按钮（onof）长按/单击逻辑（新：三模式循环）====================
 do
     local holding = false
     local longPressTask = nil
@@ -2063,21 +2065,11 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                if activeMode == "fly" then
-                    activeMode = "speed"
-                    if isFlying then
-                        toggleFly(false)
-                    end
-                else
-                    activeMode = "fly"
-                    if speedModeEnabled then
-                        speedModeEnabled = false
-                        applySpeedMode(false)
-                    end
-                end
+                -- 长按：切换模式（0->1->2->0）
+                modeIndex = (modeIndex + 1) % 3
                 updateMainButtonText()
                 updateSpeedButtonText()
-                tanchuangxiaoxi("已切换至" .. (activeMode == "fly" and "飞天模式" or "移速模式"), "模式切换")
+                tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
                 holding = false
                 longPressTask = nil
             end
@@ -2091,11 +2083,20 @@ do
                 longPressTask = nil
             end
             if not isLongPress then
-                if activeMode == "fly" then
+                -- 单击：开关当前模式
+                if modeIndex == 0 then
                     toggleFly(not isFlying)
-                else
+                elseif modeIndex == 1 then
                     speedModeEnabled = not speedModeEnabled
                     applySpeedMode(speedModeEnabled)
+                else
+                    if noclipEnabled then
+                        disableNoclip()
+                    else
+                        enableNoclip()
+                    end
+                    updateMainButtonText()
+                    updateSpeedButtonText()
                 end
             end
             holding = false
@@ -2110,7 +2111,7 @@ do
     end)
 end
 
--- 隐藏按钮
+-- 隐藏按钮（保持不变）
 do
     local holding = false
     local longPressTask = nil
@@ -2228,14 +2229,14 @@ RunService.Heartbeat:Connect(function()
     updateSpeedButtonText()
 end)
 
--- ==================== 清理（修改后）====================
+-- ==================== 清理 ====================
 main.Destroying:Connect(function()
     if speedModeConnection then
         speedModeConnection:Disconnect()
         speedModeConnection = nil
     end
     removeFly()
-    disableNoclip()  -- 关闭穿墙
+    disableNoclip()
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
