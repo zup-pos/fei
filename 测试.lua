@@ -4,7 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（强制主动恢复 + 同步锁定速度）
+-- 修复：移速关闭后速度恢复错误（彻底重构互斥逻辑）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -475,24 +475,46 @@ local function resetHumanoidAfterFly()
     char.Animate.Disabled = false
 end
 
--- ==================== 飞天开关（修复版：关闭移速后强制再恢复）====================
-local function toggleFly(enable)
-    if enable then
-        -- 如果移速正在开启，先关闭
-        if speedModeEnabled then
-            speedModeEnabled = false
-            applySpeedMode(false)   -- 关闭移速并恢复速度
-            task.wait()             -- 等待一帧，确保移速完全清理
-
-            -- 再次强制恢复速度，确保万无一失
-            local char = player.Character
-            if char then
-                local hum = char:FindFirstChildWhichIsA("Humanoid")
-                if hum then
-                    pcall(function() hum.WalkSpeed = originalSpeed end)
-                end
+-- ==================== 强制关闭移速（独立函数）====================
+local function forceDisableSpeedMode()
+    if speedModeEnabled then
+        -- 断开心跳连接
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        -- 恢复速度
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
+        -- 重置锁定速度为原始速度
+        lockedSpeed = originalSpeed
+        speedModeEnabled = false
+        -- 额外等待一帧确保恢复生效
+        task.wait()
+    end
+end
+
+-- ==================== 强制关闭飞天（独立函数）====================
+local function forceDisableFly()
+    if isFlying then
+        removeFly()
+        resetHumanoidAfterFly()
+        stopTpwalking()
+        isFlying = false
+        task.wait()
+    end
+end
+
+-- ==================== 飞天开关（修复版）====================
+local function toggleFly(enable)
+    if enable then
+        -- 强制关闭移速（无论是否开启，都执行恢复）
+        forceDisableSpeedMode()
         if isFlying then return end
         isFlying = true
         updateMainButtonText()
@@ -511,24 +533,17 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（最终修复版：关闭时同步锁定速度）====================
+-- ==================== 移速模式（修复版）====================
 local function applySpeedMode(enable)
     if enable then
-        -- 如果飞天正在开启，先关闭
-        if isFlying then
-            isFlying = false
-            removeFly()
-            resetHumanoidAfterFly()
-            stopTpwalking()
-            task.wait()
-        end
+        -- 强制关闭飞天
+        forceDisableFly()
 
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                -- ★ 重要：每次开启时，从当前Humanoid读取速度作为原始速度
-                originalSpeed = hum.WalkSpeed
+                originalSpeed = hum.WalkSpeed  -- 记录当前原始速度
             else
                 originalSpeed = 16
             end
@@ -568,7 +583,7 @@ local function applySpeedMode(enable)
                 pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
-        lockedSpeed = originalSpeed  -- 重置锁定速度为原始速度，避免下次开启残留
+        lockedSpeed = originalSpeed
         speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
@@ -591,7 +606,6 @@ local function onCharacterAdded(char)
         end
         if speedModeEnabled then
             speedModeEnabled = false
-            -- 直接停止循环，但不需要恢复速度（角色已重生）
             if speedModeConnection then
                 speedModeConnection:Disconnect()
                 speedModeConnection = nil
@@ -614,7 +628,7 @@ local function onCharacterAdded(char)
 
     -- 穿墙独立：如果之前开启，重生后自动开启（不受死亡自动关闭影响）
     if noclipEnabled then
-        originalCollisions = {}  -- 清空旧的引用
+        originalCollisions = {}
         enableNoclip()
     end
 
