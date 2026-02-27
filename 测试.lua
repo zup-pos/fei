@@ -4,7 +4,7 @@
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
--- 修复：移速关闭后速度恢复错误（增加主动恢复）
+-- 修复：移速关闭后速度恢复错误（强制主动恢复 + 同步锁定速度）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -475,7 +475,7 @@ local function resetHumanoidAfterFly()
     char.Animate.Disabled = false
 end
 
--- ==================== 飞天开关（修复版：关闭移速后主动再次恢复速度）====================
+-- ==================== 飞天开关（修复版：关闭移速后强制再恢复）====================
 local function toggleFly(enable)
     if enable then
         -- 如果移速正在开启，先关闭
@@ -484,7 +484,7 @@ local function toggleFly(enable)
             applySpeedMode(false)   -- 关闭移速并恢复速度
             task.wait()             -- 等待一帧，确保移速完全清理
 
-            -- 主动再次恢复速度，确保万无一失
+            -- 再次强制恢复速度，确保万无一失
             local char = player.Character
             if char then
                 local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -511,7 +511,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（最终修复版：先断开连接再恢复速度）====================
+-- ==================== 移速模式（最终修复版：关闭时同步锁定速度）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -530,7 +530,6 @@ local function applySpeedMode(enable)
                 -- ★ 重要：每次开启时，从当前Humanoid读取速度作为原始速度
                 originalSpeed = hum.WalkSpeed
             else
-                -- 如果找不到Humanoid（极罕见情况），回退到16，但不作为默认值
                 originalSpeed = 16
             end
         else
@@ -538,10 +537,8 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        -- 锁定速度从原始速度开始
-        lockedSpeed = originalSpeed
+        lockedSpeed = originalSpeed  -- 锁定速度从原始速度开始
 
-        -- 启动心跳锁定循环
         if speedModeConnection then
             speedModeConnection:Disconnect()
         end
@@ -559,7 +556,7 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：先断开连接，再恢复速度
+        -- 关闭移速：先断开连接，再恢复速度，并重置锁定速度
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
@@ -571,6 +568,7 @@ local function applySpeedMode(enable)
                 pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
+        lockedSpeed = originalSpeed  -- 重置锁定速度为原始速度，避免下次开启残留
         speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
