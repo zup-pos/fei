@@ -2,6 +2,7 @@
 -- Version: 7.7.1 (修复移速模式关闭时速度不刷新)
 -- 新增：穿墙功能（独立开关，自动重生）
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
+-- 修复：飞天关闭时恢复为 Running 状态，避免头部移动姿势
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -323,7 +324,7 @@ local function updateMainButtonText()
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
 
--- 更新速度标签文字（修复版）
+-- 更新速度标签文字
 local function updateSpeedButtonText()
     if modeIndex == 0 then
         -- 飞天模式：始终显示倍率（无论开关）
@@ -387,7 +388,8 @@ local function applySpeedMode(enable)
                     for _, state in ipairs(VALID_HUMANOD_STATES) do
                         pcall(function() hum:SetStateEnabled(state, true) end)
                     end
-                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+                    -- 修复：改为 Running 状态
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
                 end
                 char.Animate.Disabled = false
             end
@@ -544,7 +546,8 @@ local function toggleFly(enable)
                 for _, state in ipairs(VALID_HUMANOD_STATES) do
                     pcall(function() hum:SetStateEnabled(state, true) end)
                 end
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+                -- 修复：改为 Running 状态
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
             end
             char.Animate.Disabled = false
         end
@@ -568,7 +571,8 @@ local function onCharacterAdded(char)
                 for _, state in ipairs(VALID_HUMANOD_STATES) do
                     pcall(function() hum:SetStateEnabled(state, true) end)
                 end
-                pcall(function() hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics); hum.PlatformStand = false end)
+                -- 修复：改为 Running 状态
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running); hum.PlatformStand = false end)
             end
             char.Animate.Disabled = false
         end
