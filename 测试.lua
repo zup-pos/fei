@@ -3,6 +3,8 @@
 -- 新增：穿墙功能（独立开关，自动重生）
 -- 修改：长按主按钮可在飞天/移速/穿墙三模式间循环
 -- 修复：飞天关闭后角色姿势异常问题
+-- 修复：移速开启时飞天未自动关闭
+-- 修复：移速关闭后速度恢复错误
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -498,7 +500,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式 ====================
+-- ==================== 移速模式（修复版）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -507,13 +509,15 @@ local function applySpeedMode(enable)
             removeFly()
             resetHumanoidAfterFly()
             stopTpwalking()
+            -- 等待一帧，确保飞天完全关闭
+            task.wait()
         end
 
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
-                originalSpeed = hum.WalkSpeed
+                originalSpeed = hum.WalkSpeed  -- 记录当前原始速度
             else
                 originalSpeed = 16
             end
@@ -522,7 +526,7 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        lockedSpeed = originalSpeed
+        lockedSpeed = originalSpeed  -- 初始锁定速度等于原始速度
 
         if speedModeConnection then
             speedModeConnection:Disconnect()
@@ -538,6 +542,7 @@ local function applySpeedMode(enable)
             end
         end)
 
+        speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
         if speedModeConnection then
@@ -548,9 +553,11 @@ local function applySpeedMode(enable)
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
+                -- 恢复原始速度（而不是锁定速度）
                 pcall(function() hum.WalkSpeed = originalSpeed end)
             end
         end
+        speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
     updateMainButtonText()
@@ -572,7 +579,11 @@ local function onCharacterAdded(char)
         end
         if speedModeEnabled then
             speedModeEnabled = false
-            applySpeedMode(false)
+            -- 直接停止循环，但不需要恢复速度（角色已重生）
+            if speedModeConnection then
+                speedModeConnection:Disconnect()
+                speedModeConnection = nil
+            end
         end
     else
         if isFlying then
