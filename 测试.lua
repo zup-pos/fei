@@ -5,6 +5,7 @@
 -- 修复：飞天关闭后角色姿势异常问题
 -- 修复：移速开启时飞天未自动关闭
 -- 修复：移速关闭后速度恢复错误（先恢复速度再断开连接）
+-- 修复：穿墙函数拼写错误导致崩溃
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -216,7 +217,7 @@ local function applyNoclip()
     local character = player.Character
     if not character then return end
     local parts = getAllParts(character)
-    for _, part in iparts(parts) do
+    for _, part in ipairs(parts) do   -- 修复：将 iparts 改为 ipairs
         part.CanCollide = false
         pcall(function()
             part.CollisionGroup = "Ghost"
@@ -500,7 +501,7 @@ local function toggleFly(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（修复版：关闭时先恢复速度再断开连接）====================
+-- ==================== 移速模式（修复版：关闭时先恢复速度再断开连接，移除调试日志）====================
 local function applySpeedMode(enable)
     if enable then
         -- 如果飞天正在开启，先关闭
@@ -545,13 +546,13 @@ local function applySpeedMode(enable)
         speedModeEnabled = true
         tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
     else
-        -- 关闭移速：先恢复速度，再断开连接
+        -- 关闭移速：先恢复速度，再断开连接（移除调试输出）
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then
                 pcall(function() hum.WalkSpeed = originalSpeed end)
-                print("移速关闭：恢复速度至 " .. originalSpeed)  -- 调试输出
+                -- 调试日志已移除
             end
         end
         if speedModeConnection then
