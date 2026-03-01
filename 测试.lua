@@ -176,6 +176,765 @@ local nightVisionBrightness = 2.5
 local originalLighting = {}
 local nightVisionMaintainConnection = nil
 
+-- ==================== 辅助函数 ====================
+local function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
+end
+
+local function getScreenSize()
+    if customWidth and customHeight then
+        return Vector2.new(customWidth, customHeight)
+    end
+    local camera = workspace.CurrentCamera
+    if camera and camera.ViewportSize then
+        return camera.ViewportSize
+    else
+        return Vector2.new(1920, 1080)
+    end
+end
+
+local function updateButtonText()
+    if moveMode == "角色上下" or moveMode == "屏幕上下" or moveMode == "水平上下" then
+        up.Text = "上升"
+        down.Text = "下降"
+    elseif moveMode == "角色前后" or moveMode == "屏幕前后" or moveMode == "水平前后(屏幕)" then
+        up.Text = "前移"
+        down.Text = "后移"
+    elseif moveMode == "角色左右" or moveMode == "屏幕左右" or moveMode == "水平左右(屏幕)" then
+        up.Text = "左移"
+        down.Text = "右移"
+    else
+        up.Text = "上升"
+        down.Text = "下降"
+    end
+end
+
+-- 更新主按钮文字
+local function updateMainButtonText()
+    local modeName = modeDisplayNames[modeIndex + 1]
+    local state = false
+    if modeIndex == 0 then
+        state = isFlying
+    elseif modeIndex == 1 then
+        state = speedModeEnabled
+    elseif modeIndex == 2 then
+        state = noclipEnabled
+    elseif modeIndex == 3 then
+        state = nightVisionEnabled
+    end
+    onof.Text = modeName .. (state and "(开启)" or "(关闭)")
+end
+
+-- 更新速度标签文字
+local function updateSpeedButtonText()
+    if modeIndex == 0 then
+        speed.Text = tostring(speeds)
+    elseif modeIndex == 1 then
+        if speedModeEnabled then
+            speed.Text = string.format("%.1f", lockedSpeed)
+        else
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    speed.Text = string.format("%.1f", hum.WalkSpeed)
+                else
+                    speed.Text = "0.0"
+                end
+            else
+                speed.Text = "0.0"
+            end
+        end
+    elseif modeIndex == 2 then
+        speed.Text = noclipEnabled and "开启" or "关闭"
+    elseif modeIndex == 3 then
+        speed.Text = string.format("%.2f", nightVisionBrightness)
+    end
+end
+
+-- ==================== TP Walk ====================
+local function stopTpwalking()
+    tpwalking = false
+end
+
+local function startTpwalking()
+    if tpwalking then return end
+    tpwalking = true
+    task.spawn(function()
+        local hb = RunService.Heartbeat
+        while tpwalking do
+            hb:Wait()
+            local chr = player.Character
+            if chr then
+                local hum = chr:FindFirstChildWhichIsA("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    chr:TranslateBy(hum.MoveDirection * speeds)
+                end
+            end
+        end
+    end)
+end
+
+-- ==================== 飞天辅助函数 ====================
+local function removeFly()
+    if _G._flyData then
+        pcall(function() _G._flyData.bg:Destroy() end)
+        pcall(function() _G._flyData.bv:Destroy() end)
+        _G._flyData = nil
+    end
+end
+
+local function applyFly()
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return false end
+
+    char.Animate.Disabled = true
+    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+        track:AdjustSpeed(0)
+    end
+
+    for _, state in ipairs(VALID_HUMANOD_STATES) do
+        pcall(function() hum:SetStateEnabled(state, false) end)
+    end
+    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
+    if not torso then return false end
+
+    local startY = torso.Position.Y
+
+    local bg = Instance.new("BodyGyro")
+    bg.P = 9e4
+    bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bg.CFrame = torso.CFrame
+    bg.Parent = torso
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Velocity = Vector3.new(0, 0.1, 0)
+    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bv.Parent = torso
+
+    _G._flyData = { bg = bg, bv = bv, torso = torso, startY = startY }
+
+    task.spawn(function()
+        while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
+            RunService.Heartbeat:Wait()
+            local camera = workspace.CurrentCamera
+            if camera then
+                local moveDir = hum.MoveDirection
+                local maxspeed = 50 * speeds
+
+                if flyMode == "屏幕" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                elseif flyMode == "悬空" then
+                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                elseif flyMode == "绝对锁高" then
+                    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
+                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                    bg.CFrame = camera.CFrame
+                    local pos = torso.Position
+                    torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
+                end
+            end
+        end
+        removeFly()
+    end)
+    return true
+end
+
+-- ==================== 统一飞天关闭后重置角色 ====================
+local function resetHumanoidAfterFly()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+
+    for _, state in ipairs(VALID_HUMANOD_STATES) do
+        pcall(function() hum:SetStateEnabled(state, true) end)
+    end
+
+    hum.PlatformStand = false
+    hum.AutoRotate = true
+
+    hum:ChangeState(Enum.HumanoidStateType.Freefall)
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+
+    char.Animate.Disabled = false
+end
+
+-- ==================== 强制关闭移速（独立函数）====================
+local function forceDisableSpeedMode()
+    if speedModeEnabled then
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = originalSpeed end)
+            end
+        end
+        lockedSpeed = originalSpeed
+        speedModeEnabled = false
+        task.wait()
+    end
+end
+
+-- ==================== 强制关闭飞天（独立函数）====================
+local function forceDisableFly()
+    if isFlying then
+        removeFly()
+        resetHumanoidAfterFly()
+        stopTpwalking()
+        isFlying = false
+        task.wait()
+    end
+end
+
+-- ==================== 飞天开关 ====================
+local function toggleFly(enable)
+    if enable then
+        forceDisableSpeedMode()
+        if isFlying then return end
+        isFlying = true
+        updateMainButtonText()
+        stopTpwalking()
+        tanchuangxiaoxi("已开启飞天", "飞天")
+        applyFly()
+    else
+        if not isFlying then return end
+        isFlying = false
+        updateMainButtonText()
+        stopTpwalking()
+        tanchuangxiaoxi("已关闭飞天", "飞天")
+        removeFly()
+        resetHumanoidAfterFly()
+    end
+    updateSpeedButtonText()
+end
+
+-- ==================== 移速模式 ====================
+local function applySpeedMode(enable)
+    if enable then
+        forceDisableFly()
+
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                originalSpeed = hum.WalkSpeed
+            else
+                originalSpeed = 16
+            end
+        else
+            originalSpeed = 16
+        end
+        if originalSpeed <= 0 then originalSpeed = 16 end
+
+        lockedSpeed = originalSpeed
+
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+        end
+        speedModeConnection = RunService.Heartbeat:Connect(function()
+            if not speedModeEnabled then return end
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    pcall(function() hum.WalkSpeed = lockedSpeed end)
+                end
+            end
+        end)
+
+        speedModeEnabled = true
+        tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
+    else
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                pcall(function() hum.WalkSpeed = originalSpeed end)
+            end
+        end
+        lockedSpeed = originalSpeed
+        speedModeEnabled = false
+        tanchuangxiaoxi("已关闭移速模式", "移速模式")
+    end
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+-- ==================== 透视功能 ====================
+
+-- 保存原始照明值
+local function saveOriginalLighting()
+    local Lighting = game:GetService("Lighting")
+    originalLighting = {
+        Brightness = Lighting.Brightness,
+        Ambient = Lighting.Ambient,
+        OutdoorAmbient = Lighting.OutdoorAmbient,
+        ColorShift_Bottom = Lighting.ColorShift_Bottom,
+        ColorShift_Top = Lighting.ColorShift_Top,
+        FogEnd = Lighting.FogEnd,
+        FogStart = Lighting.FogStart,
+        GlobalShadows = Lighting.GlobalShadows,
+    }
+end
+
+-- 恢复原始照明
+local function restoreLighting()
+    local Lighting = game:GetService("Lighting")
+    for prop, val in pairs(originalLighting) do
+        pcall(function() Lighting[prop] = val end)
+    end
+end
+
+-- 应用透视效果
+local function applyNightVision()
+    local Lighting = game:GetService("Lighting")
+    Lighting.Brightness = nightVisionBrightness
+    Lighting.Ambient = Color3.new(1, 1, 1)
+    Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+    Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+    Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+    Lighting.FogEnd = 100000
+    Lighting.FogStart = 0
+    Lighting.GlobalShadows = false
+end
+
+-- 自定义亮度对话框（包含输入框和滑块，范围 0.01~100）
+local function showBrightnessDialog()
+    local screenSize = getScreenSize()
+    local dialogWidth = math.min(400, screenSize.X * 0.6)
+    local dialogHeight = 250
+
+    local dialog = Instance.new("ScreenGui")
+    dialog.Parent = playerGui
+    dialog.IgnoreGuiInset = true
+    dialog.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = dialog
+    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Parent = bg
+    titleLabel.Size = UDim2.new(1, -20, 0, 30)
+    titleLabel.Position = UDim2.new(0, 10, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "设置透视亮度"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 16
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- 输入框
+    local textBox = Instance.new("TextBox")
+    textBox.Parent = bg
+    textBox.Size = UDim2.new(0.6, 0, 0, 40)
+    textBox.Position = UDim2.new(0.2, 0, 0, 50)
+    textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    textBox.TextColor3 = Color3.new(1, 1, 1)
+    textBox.PlaceholderText = "亮度 (0.01~100)"  -- 提示改为 100
+    textBox.Text = string.format("%.2f", nightVisionBrightness)
+    textBox.Font = Enum.Font.Gotham
+    textBox.TextSize = 14
+    textBox.ClearTextOnFocus = false  -- 不自动清空
+
+    local line = Instance.new("Frame")
+    line.Parent = textBox
+    line.Size = UDim2.new(1, 0, 0, 1)
+    line.Position = UDim2.new(0, 0, 1, 0)
+    line.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    line.BorderSizePixel = 0
+
+    -- 滑块轨道
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Parent = bg
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 120)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 2)
+    sliderCorner.Parent = sliderBg
+
+    -- 滑块按钮
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 20, 0, 20)
+    local minBright = 0.01
+    local maxBright = 100  -- 改为 100
+    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+    knob.Position = UDim2.new(percent, -10, 0, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.Text = ""
+    knob.Parent = sliderBg
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if dragging then
+            local mousePos = UserInputService:GetMouseLocation()
+            local absPos = sliderBg.AbsolutePosition
+            local absSize = sliderBg.AbsoluteSize.X
+            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
+            local percent = relX / absSize
+            knob.Position = UDim2.new(percent, -10, 0, -8)
+            local newBrightness = minBright + percent * (maxBright - minBright)
+            newBrightness = math.floor(newBrightness * 100) / 100  -- 保留两位小数
+            textBox.Text = string.format("%.2f", newBrightness)
+        end
+    end)
+
+    textBox.FocusLost:Connect(function()
+        local num = tonumber(textBox.Text)
+        if num then
+            num = clamp(num, minBright, maxBright)
+            num = math.floor(num * 100) / 100
+            textBox.Text = string.format("%.2f", num)
+            local newPercent = (num - minBright) / (maxBright - minBright)
+            knob.Position = UDim2.new(newPercent, -10, 0, -8)
+        else
+            textBox.Text = string.format("%.2f", nightVisionBrightness)
+        end
+    end)
+
+    local buttonFrame = Instance.new("Frame")
+    buttonFrame.Parent = bg
+    buttonFrame.Size = UDim2.new(1, -20, 0, 40)
+    buttonFrame.Position = UDim2.new(0, 10, 1, -50)
+    buttonFrame.BackgroundTransparency = 1
+
+    local cancelBtn = Instance.new("TextButton")
+    cancelBtn.Parent = buttonFrame
+    cancelBtn.Size = UDim2.new(0.4, -5, 1, 0)
+    cancelBtn.Position = UDim2.new(0.1, 0, 0, 0)
+    cancelBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    cancelBtn.Text = "取消"
+    cancelBtn.TextColor3 = Color3.new(1, 1, 1)
+    cancelBtn.Font = Enum.Font.GothamBold
+    cancelBtn.TextSize = 14
+    local cancelCorner = Instance.new("UICorner")
+    cancelCorner.CornerRadius = UDim.new(0, 6)
+    cancelCorner.Parent = cancelBtn
+
+    local confirmBtn = Instance.new("TextButton")
+    confirmBtn.Parent = buttonFrame
+    confirmBtn.Size = UDim2.new(0.4, -5, 1, 0)
+    confirmBtn.Position = UDim2.new(0.5, 5, 0, 0)
+    confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    confirmBtn.Text = "确认"
+    confirmBtn.TextColor3 = Color3.new(1, 1, 1)
+    confirmBtn.Font = Enum.Font.GothamBold
+    confirmBtn.TextSize = 14
+    local confirmCorner = Instance.new("UICorner")
+    confirmCorner.CornerRadius = UDim.new(0, 6)
+    confirmCorner.Parent = confirmBtn
+
+    cancelBtn.MouseButton1Click:Connect(function()
+        conn:Disconnect()
+        dialog:Destroy()
+    end)
+
+    confirmBtn.MouseButton1Click:Connect(function()
+        local num = tonumber(textBox.Text)
+        if num then
+            num = clamp(num, minBright, maxBright)
+            num = math.floor(num * 100) / 100
+            nightVisionBrightness = num
+            if nightVisionEnabled then
+                applyNightVision()
+            end
+            tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
+        end
+        conn:Disconnect()
+        dialog:Destroy()
+    end)
+end
+
+-- ==================== 新增：穿墙模式悬浮窗 ====================
+local function createNoclipWindow()
+    local screenSize = getScreenSize()
+    local winWidth = 300
+    local winHeight = 100
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NoclipWindow"
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local bg = Instance.new("Frame")
+    bg.Parent = sg
+    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
+    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.Draggable = true  -- 可拖动
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    -- 标题
+    local title = Instance.new("TextLabel")
+    title.Parent = bg
+    title.Size = UDim2.new(1, -30, 0, 25)
+    title.Position = UDim2.new(0, 5, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "穿墙模式"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- 关闭按钮 (右上角小叉)
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 25, 0, 25)
+    closeBtn.Position = UDim2.new(1, -30, 0, 5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 16
+    closeBtn.AutoButtonColor = false
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 4)
+    closeCorner.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function()
+        disableNoclip()  -- 关闭穿墙，自动销毁窗口
+    end)
+
+    -- 应急按钮
+    local emergencyBtn = Instance.new("TextButton")
+    emergencyBtn.Parent = bg
+    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 40)
+    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 40)
+    emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+    emergencyBtn.Text = "应急按钮"
+    emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
+    emergencyBtn.Font = Enum.Font.GothamBold
+    emergencyBtn.TextSize = 16
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = emergencyBtn
+
+    emergencyBtn.MouseButton1Click:Connect(function()
+        -- 应急操作：开启飞天，上升5秒，关闭穿墙和飞天
+        local char = player.Character
+        if not char then return end
+        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+
+        -- 开启飞天（如果未开启）
+        if not isFlying then
+            toggleFly(true)
+            task.wait(0.1)  -- 等待飞天初始化
+        end
+
+        -- 持续上升5秒
+        local startTime = tick()
+        local duration = 5
+        local step = moveStep
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            if tick() - startTime >= duration then
+                connection:Disconnect()
+                return
+            end
+            if rootPart and rootPart.Parent then
+                rootPart.CFrame = rootPart.CFrame + Vector3.new(0, step, 0)  -- 水平上下
+            else
+                connection:Disconnect()
+            end
+        end)
+
+        -- 等待5秒
+        task.wait(duration)
+
+        -- 关闭穿墙和飞天
+        if noclipEnabled then
+            disableNoclip()
+        end
+        if isFlying then
+            toggleFly(false)
+        end
+    end)
+
+    return sg
+end
+
+-- ==================== 新增：透视模式悬浮窗 ====================
+local function createNightVisionWindow()
+    local screenSize = getScreenSize()
+    local winWidth = 300
+    local winHeight = 150
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NightVisionWindow"
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local bg = Instance.new("Frame")
+    bg.Parent = sg
+    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
+    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.Draggable = true
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    -- 标题
+    local title = Instance.new("TextLabel")
+    title.Parent = bg
+    title.Size = UDim2.new(1, -30, 0, 25)
+    title.Position = UDim2.new(0, 5, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "透视模式"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- 关闭按钮
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 25, 0, 25)
+    closeBtn.Position = UDim2.new(1, -30, 0, 5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 16
+    closeBtn.AutoButtonColor = false
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 4)
+    closeCorner.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function()
+        disableNightVision()
+    end)
+
+    -- 当前亮度显示
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Parent = bg
+    valueLabel.Size = UDim2.new(1, -20, 0, 30)
+    valueLabel.Position = UDim2.new(0, 10, 0, 35)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
+    valueLabel.TextColor3 = Color3.new(1, 1, 1)
+    valueLabel.Font = Enum.Font.Gotham
+    valueLabel.TextSize = 16
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- 滑块轨道
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Parent = bg
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 80)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 2)
+    sliderCorner.Parent = sliderBg
+
+    -- 滑块按钮
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 20, 0, 20)
+    local minBright = 0.01
+    local maxBright = 100
+    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+    knob.Position = UDim2.new(percent, -10, 0, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.Text = ""
+    knob.Parent = sliderBg
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if dragging then
+            local mousePos = UserInputService:GetMouseLocation()
+            local absPos = sliderBg.AbsolutePosition
+            local absSize = sliderBg.AbsoluteSize.X
+            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
+            local percent = relX / absSize
+            knob.Position = UDim2.new(percent, -10, 0, -8)
+            local newBrightness = minBright + percent * (maxBright - minBright)
+            newBrightness = math.floor(newBrightness * 100) / 100
+            nightVisionBrightness = newBrightness
+            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
+            if nightVisionEnabled then
+                applyNightVision()  -- 立即生效
+            end
+        end
+    end)
+
+    -- 窗口销毁时断开连接
+    sg.Destroying:Connect(function()
+        if conn then conn:Disconnect() end
+    end)
+
+    return sg
+end
+
 -- 递归获取角色所有部件
 local function getAllParts(character)
     local parts = {}
