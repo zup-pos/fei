@@ -650,7 +650,7 @@ local function disableNightVision()
     tanchuangxiaoxi("已关闭透视", "透视")
 end
 
--- 自定义亮度对话框（包含输入框和滑块，范围 0.1~10）
+-- 自定义亮度对话框（包含输入框和滑块，范围 0.01~5）
 local function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -692,8 +692,8 @@ local function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (0.1~10)"
-    textBox.Text = string.format("%.1f", nightVisionBrightness)
+    textBox.PlaceholderText = "亮度 (0.01~5)"
+    textBox.Text = string.format("%.2f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
     textBox.ClearTextOnFocus = true
@@ -718,8 +718,8 @@ local function showBrightnessDialog()
     -- 滑块按钮
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local minBright = 0.1
-    local maxBright = 10
+    local minBright = 0.01
+    local maxBright = 5
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
@@ -749,8 +749,8 @@ local function showBrightnessDialog()
             local percent = relX / absSize
             knob.Position = UDim2.new(percent, -10, 0, -8)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 10) / 10
-            textBox.Text = string.format("%.1f", newBrightness)
+            newBrightness = math.floor(newBrightness * 100) / 100  -- 保留两位小数
+            textBox.Text = string.format("%.2f", newBrightness)
         end
     end)
 
@@ -758,12 +758,12 @@ local function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = math.clamp(num, minBright, maxBright)
-            num = math.floor(num * 10) / 10
-            textBox.Text = string.format("%.1f", num)
+            num = math.floor(num * 100) / 100
+            textBox.Text = string.format("%.2f", num)
             local newPercent = (num - minBright) / (maxBright - minBright)
             knob.Position = UDim2.new(newPercent, -10, 0, -8)
         else
-            textBox.Text = string.format("%.1f", nightVisionBrightness)
+            textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
     end)
 
@@ -808,7 +808,7 @@ local function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = math.clamp(num, minBright, maxBright)
-            num = math.floor(num * 10) / 10
+            num = math.floor(num * 100) / 100
             nightVisionBrightness = num
             if nightVisionEnabled then
                 applyNightVision()
