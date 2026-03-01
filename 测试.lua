@@ -248,7 +248,7 @@ local function enableNoclip()
                         local look = root.CFrame.LookVector
                         
                         -- 计算新的右向量：使向上方向为世界Y轴
-                        local newRight = Vector3.new(0,1,0):Cross(look).Unit
+                        local newRight = Vector3.new(0,0,0):Cross(look).Unit
                         -- 重新计算新的向上向量（保证正交）
                         local newUp = look:Cross(newRight).Unit
                         
