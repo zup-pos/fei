@@ -237,6 +237,16 @@ local function enableNoclip()
     noclipMaintainConnection = RunService.Heartbeat:Connect(function()
         if noclipEnabled and player.Character then
             applyNoclip()
+            -- 不倒翁逻辑：穿墙开启且飞天关闭时保持角色直立
+            if not isFlying then
+                local char = player.Character
+                if char then
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        root.CFrame = CFrame.new(root.Position)
+                    end
+                end
+            end
         end
     end)
     noclipEnabled = true
@@ -351,7 +361,7 @@ local function updateSpeedButtonText()
     elseif modeIndex == 2 then
         speed.Text = noclipEnabled and "开启" or "关闭"
     elseif modeIndex == 3 then
-        speed.Text = string.format("%.1f", nightVisionBrightness)
+        speed.Text = string.format("%.2f", nightVisionBrightness)
     end
 end
 
@@ -650,7 +660,7 @@ local function disableNightVision()
     tanchuangxiaoxi("已关闭透视", "透视")
 end
 
--- 自定义亮度对话框（包含输入框和滑块，范围 0.01~5）
+-- 自定义亮度对话框（包含输入框和滑块，范围 0.01~100）
 local function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -692,11 +702,11 @@ local function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (0.01~5)"
+    textBox.PlaceholderText = "亮度 (0.01~100)"  -- 提示改为 100
     textBox.Text = string.format("%.2f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
-    textBox.ClearTextOnFocus = true
+    textBox.ClearTextOnFocus = false  -- 不自动清空
 
     local line = Instance.new("Frame")
     line.Parent = textBox
@@ -719,7 +729,7 @@ local function showBrightnessDialog()
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
     local minBright = 0.01
-    local maxBright = 5
+    local maxBright = 100  -- 改为 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
