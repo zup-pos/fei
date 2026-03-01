@@ -650,7 +650,7 @@ local function disableNightVision()
     tanchuangxiaoxi("已关闭透视", "透视")
 end
 
--- 自定义亮度对话框（包含输入框和滑块）
+-- 自定义亮度对话框（包含输入框和滑块，范围 0.1~10）
 local function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -692,7 +692,7 @@ local function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (1~5)"
+    textBox.PlaceholderText = "亮度 (0.1~10)"
     textBox.Text = string.format("%.1f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
@@ -718,7 +718,9 @@ local function showBrightnessDialog()
     -- 滑块按钮
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local percent = (nightVisionBrightness - 1) / 4
+    local minBright = 0.1
+    local maxBright = 10
+    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
@@ -746,7 +748,7 @@ local function showBrightnessDialog()
             local relX = math.clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
             knob.Position = UDim2.new(percent, -10, 0, -8)
-            local newBrightness = 1 + percent * 4
+            local newBrightness = minBright + percent * (maxBright - minBright)
             newBrightness = math.floor(newBrightness * 10) / 10
             textBox.Text = string.format("%.1f", newBrightness)
         end
@@ -755,10 +757,10 @@ local function showBrightnessDialog()
     textBox.FocusLost:Connect(function()
         local num = tonumber(textBox.Text)
         if num then
-            num = math.clamp(num, 1, 5)
+            num = math.clamp(num, minBright, maxBright)
             num = math.floor(num * 10) / 10
             textBox.Text = string.format("%.1f", num)
-            local newPercent = (num - 1) / 4
+            local newPercent = (num - minBright) / (maxBright - minBright)
             knob.Position = UDim2.new(newPercent, -10, 0, -8)
         else
             textBox.Text = string.format("%.1f", nightVisionBrightness)
@@ -805,7 +807,7 @@ local function showBrightnessDialog()
     confirmBtn.MouseButton1Click:Connect(function()
         local num = tonumber(textBox.Text)
         if num then
-            num = math.clamp(num, 1, 5)
+            num = math.clamp(num, minBright, maxBright)
             num = math.floor(num * 10) / 10
             nightVisionBrightness = num
             if nightVisionEnabled then
