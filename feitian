@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1
+-- Version: 7.7.1 (新增透视模式)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -146,10 +146,10 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "屏幕"
 
--- 模式切换（0=飞天, 1=移速, 2=穿墙）
+-- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=透视）
 local modeIndex = 0
-local modeNames = { "fly", "speed", "noclip" }
-local modeDisplayNames = { "飞天", "移速", "穿墙" }
+local modeNames = { "fly", "speed", "noclip", "nightvision" }
+local modeDisplayNames = { "飞天", "移速", "穿墙", "透视" }
 
 local speedModeEnabled = false
 local speedModeConnection = nil
@@ -165,6 +165,12 @@ local autoDisableOnDeath = true
 local noclipEnabled = false
 local noclipMaintainConnection = nil
 local originalCollisions = {}
+
+-- ==================== 透视相关变量 ====================
+local nightVisionEnabled = false
+local nightVisionBrightness = 2.5
+local originalLighting = {}
+local nightVisionMaintainConnection = nil
 
 -- 递归获取角色所有部件
 local function getAllParts(character)
@@ -314,8 +320,10 @@ local function updateMainButtonText()
         state = isFlying
     elseif modeIndex == 1 then
         state = speedModeEnabled
-    else
+    elseif modeIndex == 2 then
         state = noclipEnabled
+    elseif modeIndex == 3 then
+        state = nightVisionEnabled
     end
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
@@ -340,8 +348,10 @@ local function updateSpeedButtonText()
                 speed.Text = "0.0"
             end
         end
-    else
+    elseif modeIndex == 2 then
         speed.Text = noclipEnabled and "开启" or "关闭"
+    elseif modeIndex == 3 then
+        speed.Text = string.format("%.2f", nightVisionBrightness)
     end
 end
 
@@ -572,6 +582,244 @@ local function applySpeedMode(enable)
     updateSpeedButtonText()
 end
 
+-- ==================== 透视功能 ====================
+
+-- 保存原始照明值
+local function saveOriginalLighting()
+    local Lighting = game:GetService("Lighting")
+    originalLighting = {
+        Brightness = Lighting.Brightness,
+        Ambient = Lighting.Ambient,
+        OutdoorAmbient = Lighting.OutdoorAmbient,
+        ColorShift_Bottom = Lighting.ColorShift_Bottom,
+        ColorShift_Top = Lighting.ColorShift_Top,
+        FogEnd = Lighting.FogEnd,
+        FogStart = Lighting.FogStart,
+        GlobalShadows = Lighting.GlobalShadows,
+    }
+end
+
+-- 恢复原始照明
+local function restoreLighting()
+    local Lighting = game:GetService("Lighting")
+    for prop, val in pairs(originalLighting) do
+        pcall(function() Lighting[prop] = val end)
+    end
+end
+
+-- 应用透视效果
+local function applyNightVision()
+    local Lighting = game:GetService("Lighting")
+    Lighting.Brightness = nightVisionBrightness
+    Lighting.Ambient = Color3.new(1, 1, 1)
+    Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+    Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+    Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+    Lighting.FogEnd = 100000
+    Lighting.FogStart = 0
+    Lighting.GlobalShadows = false
+end
+
+-- 开启透视
+local function enableNightVision()
+    if nightVisionEnabled then return end
+    saveOriginalLighting()
+    applyNightVision()
+    -- 启动维护循环
+    if nightVisionMaintainConnection then
+        nightVisionMaintainConnection:Disconnect()
+    end
+    nightVisionMaintainConnection = RunService.Heartbeat:Connect(function()
+        if nightVisionEnabled then
+            applyNightVision()
+        end
+    end)
+    nightVisionEnabled = true
+    tanchuangxiaoxi("已开启透视", "透视")
+end
+
+-- 关闭透视
+local function disableNightVision()
+    if not nightVisionEnabled then return end
+    if nightVisionMaintainConnection then
+        nightVisionMaintainConnection:Disconnect()
+        nightVisionMaintainConnection = nil
+    end
+    restoreLighting()
+    nightVisionEnabled = false
+    tanchuangxiaoxi("已关闭透视", "透视")
+end
+
+-- 自定义亮度对话框（包含输入框和滑块，范围 0.01~5）
+local function showBrightnessDialog()
+    local screenSize = getScreenSize()
+    local dialogWidth = math.min(400, screenSize.X * 0.6)
+    local dialogHeight = 250
+
+    local dialog = Instance.new("ScreenGui")
+    dialog.Parent = playerGui
+    dialog.IgnoreGuiInset = true
+    dialog.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = dialog
+    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Parent = bg
+    titleLabel.Size = UDim2.new(1, -20, 0, 30)
+    titleLabel.Position = UDim2.new(0, 10, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "设置透视亮度"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 16
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- 输入框
+    local textBox = Instance.new("TextBox")
+    textBox.Parent = bg
+    textBox.Size = UDim2.new(0.6, 0, 0, 40)
+    textBox.Position = UDim2.new(0.2, 0, 0, 50)
+    textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    textBox.TextColor3 = Color3.new(1, 1, 1)
+    textBox.PlaceholderText = "亮度 (0.01~5)"
+    textBox.Text = string.format("%.2f", nightVisionBrightness)
+    textBox.Font = Enum.Font.Gotham
+    textBox.TextSize = 14
+    textBox.ClearTextOnFocus = true
+
+    local line = Instance.new("Frame")
+    line.Parent = textBox
+    line.Size = UDim2.new(1, 0, 0, 1)
+    line.Position = UDim2.new(0, 0, 1, 0)
+    line.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    line.BorderSizePixel = 0
+
+    -- 滑块轨道
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Parent = bg
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 120)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 2)
+    sliderCorner.Parent = sliderBg
+
+    -- 滑块按钮
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 20, 0, 20)
+    local minBright = 0.01
+    local maxBright = 5
+    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+    knob.Position = UDim2.new(percent, -10, 0, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.Text = ""
+    knob.Parent = sliderBg
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if dragging then
+            local mousePos = UserInputService:GetMouseLocation()
+            local absPos = sliderBg.AbsolutePosition
+            local absSize = sliderBg.AbsoluteSize.X
+            local relX = math.clamp(mousePos.X - absPos.X, 0, absSize)
+            local percent = relX / absSize
+            knob.Position = UDim2.new(percent, -10, 0, -8)
+            local newBrightness = minBright + percent * (maxBright - minBright)
+            newBrightness = math.floor(newBrightness * 100) / 100  -- 保留两位小数
+            textBox.Text = string.format("%.2f", newBrightness)
+        end
+    end)
+
+    textBox.FocusLost:Connect(function()
+        local num = tonumber(textBox.Text)
+        if num then
+            num = math.clamp(num, minBright, maxBright)
+            num = math.floor(num * 100) / 100
+            textBox.Text = string.format("%.2f", num)
+            local newPercent = (num - minBright) / (maxBright - minBright)
+            knob.Position = UDim2.new(newPercent, -10, 0, -8)
+        else
+            textBox.Text = string.format("%.2f", nightVisionBrightness)
+        end
+    end)
+
+    local buttonFrame = Instance.new("Frame")
+    buttonFrame.Parent = bg
+    buttonFrame.Size = UDim2.new(1, -20, 0, 40)
+    buttonFrame.Position = UDim2.new(0, 10, 1, -50)
+    buttonFrame.BackgroundTransparency = 1
+
+    local cancelBtn = Instance.new("TextButton")
+    cancelBtn.Parent = buttonFrame
+    cancelBtn.Size = UDim2.new(0.4, -5, 1, 0)
+    cancelBtn.Position = UDim2.new(0.1, 0, 0, 0)
+    cancelBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    cancelBtn.Text = "取消"
+    cancelBtn.TextColor3 = Color3.new(1, 1, 1)
+    cancelBtn.Font = Enum.Font.GothamBold
+    cancelBtn.TextSize = 14
+    local cancelCorner = Instance.new("UICorner")
+    cancelCorner.CornerRadius = UDim.new(0, 6)
+    cancelCorner.Parent = cancelBtn
+
+    local confirmBtn = Instance.new("TextButton")
+    confirmBtn.Parent = buttonFrame
+    confirmBtn.Size = UDim2.new(0.4, -5, 1, 0)
+    confirmBtn.Position = UDim2.new(0.5, 5, 0, 0)
+    confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    confirmBtn.Text = "确认"
+    confirmBtn.TextColor3 = Color3.new(1, 1, 1)
+    confirmBtn.Font = Enum.Font.GothamBold
+    confirmBtn.TextSize = 14
+    local confirmCorner = Instance.new("UICorner")
+    confirmCorner.CornerRadius = UDim.new(0, 6)
+    confirmCorner.Parent = confirmBtn
+
+    cancelBtn.MouseButton1Click:Connect(function()
+        conn:Disconnect()
+        dialog:Destroy()
+    end)
+
+    confirmBtn.MouseButton1Click:Connect(function()
+        local num = tonumber(textBox.Text)
+        if num then
+            num = math.clamp(num, minBright, maxBright)
+            num = math.floor(num * 100) / 100
+            nightVisionBrightness = num
+            if nightVisionEnabled then
+                applyNightVision()
+            end
+            tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
+        end
+        conn:Disconnect()
+        dialog:Destroy()
+    end)
+end
+
 -- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
@@ -609,6 +857,10 @@ local function onCharacterAdded(char)
     if noclipEnabled then
         originalCollisions = {}
         enableNoclip()
+    end
+
+    if nightVisionEnabled then
+        enableNightVision()
     end
 
     stopTpwalking()
@@ -1140,16 +1392,18 @@ local function showMainMenu()
                     "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
                     "4. 优化界面显示",
                     "5. 新增独立穿墙功能（长按主按钮切换）",
+                    "6. 新增透视模式（长按主按钮第4次）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：单击可手动设置当前值，长按可设置上升/下降步长",
-                    "- 主按钮：长按切换飞天/移速/穿墙模式，单击开关当前模式",
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/透视亮度），长按可设置上升/下降步长",
+                    "- 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1272,12 +1526,13 @@ local function showMainMenu()
                     "   - 飞天模式：调整倍率，每次增减 incStep（可在设置中调整）",
                     "   - 移速模式：调整锁定速度，每次增减 incStep",
                     "🔹 速度标签：",
-                    "   - 单击：手动设置当前值（飞天倍率/锁定速度）",
+                    "   - 飞天/移速/透视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
-                    "🔹 主按钮：长按切换飞天/移速/穿墙模式，单击开关当前模式",
+                    "🔹 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -1614,6 +1869,7 @@ local function showMainMenu()
                             end
                             removeFly()
                             disableNoclip()
+                            disableNightVision()
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -2000,7 +2256,6 @@ do
                 longPressTask = nil
             end
             if modeIndex == 0 then
-                -- 飞天模式：单击设置速度倍率（无论开关）
                 showInputDialog(
                     "设置速度倍率",
                     tostring(speeds),
@@ -2026,7 +2281,6 @@ do
                     }
                 )
             elseif modeIndex == 1 and speedModeEnabled then
-                -- 移速模式：仅当开启时设置锁定速度
                 showInputDialog(
                     "设置锁定速度",
                     string.format("%.1f", lockedSpeed),
@@ -2050,6 +2304,8 @@ do
                         end
                     }
                 )
+            elseif modeIndex == 3 then
+                showBrightnessDialog()
             end
             holding = false
         end
@@ -2077,7 +2333,7 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                modeIndex = (modeIndex + 1) % 3
+                modeIndex = (modeIndex + 1) % 4  -- 改为4个模式循环
                 updateMainButtonText()
                 updateSpeedButtonText()
                 tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
@@ -2099,11 +2355,19 @@ do
                 elseif modeIndex == 1 then
                     speedModeEnabled = not speedModeEnabled
                     applySpeedMode(speedModeEnabled)
-                else
+                elseif modeIndex == 2 then
                     if noclipEnabled then
                         disableNoclip()
                     else
                         enableNoclip()
+                    end
+                    updateMainButtonText()
+                    updateSpeedButtonText()
+                elseif modeIndex == 3 then
+                    if nightVisionEnabled then
+                        disableNightVision()
+                    else
+                        enableNightVision()
                     end
                     updateMainButtonText()
                     updateSpeedButtonText()
@@ -2247,6 +2511,13 @@ main.Destroying:Connect(function()
     end
     removeFly()
     disableNoclip()
+    if nightVisionMaintainConnection then
+        nightVisionMaintainConnection:Disconnect()
+        nightVisionMaintainConnection = nil
+    end
+    if nightVisionEnabled then
+        restoreLighting()
+    end
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
