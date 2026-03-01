@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1 (重构版)
+-- Version: 7.7.1 (最终修复版)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -506,9 +506,7 @@ local function applySpeedMode(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 透视功能 ====================
-
--- 保存原始照明值
+-- ==================== 透视基础 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -523,7 +521,6 @@ local function saveOriginalLighting()
     }
 end
 
--- 恢复原始照明
 local function restoreLighting()
     local Lighting = game:GetService("Lighting")
     for prop, val in pairs(originalLighting) do
@@ -531,7 +528,6 @@ local function restoreLighting()
     end
 end
 
--- 应用透视效果
 local function applyNightVision()
     local Lighting = game:GetService("Lighting")
     Lighting.Brightness = nightVisionBrightness
@@ -595,38 +591,45 @@ end
 
 -- 关闭穿墙
 local function disableNoclip()
-    if noclipWindow then
-        noclipWindow:Destroy()
-        noclipWindow = nil
+    if noclipEnabled then
+        if noclipWindow then
+            noclipWindow:Destroy()
+            noclipWindow = nil
+        end
+        if noclipMaintainConnection then
+            noclipMaintainConnection:Disconnect()
+            noclipMaintainConnection = nil
+        end
+        restoreOriginalCollisions()
+        noclipEnabled = false
+        updateMainButtonText()
+        updateSpeedButtonText()
     end
-    if noclipMaintainConnection then
-        noclipMaintainConnection:Disconnect()
-        noclipMaintainConnection = nil
-    end
-    restoreOriginalCollisions()
-    noclipEnabled = false
 end
 
 -- 关闭透视
 local function disableNightVision()
-    if not nightVisionEnabled then return end
-    if nightVisionWindow then
-        nightVisionWindow:Destroy()
-        nightVisionWindow = nil
+    if nightVisionEnabled then
+        if nightVisionWindow then
+            nightVisionWindow:Destroy()
+            nightVisionWindow = nil
+        end
+        if nightVisionMaintainConnection then
+            nightVisionMaintainConnection:Disconnect()
+            nightVisionMaintainConnection = nil
+        end
+        restoreLighting()
+        nightVisionEnabled = false
+        tanchuangxiaoxi("已关闭透视", "透视")
+        updateMainButtonText()
+        updateSpeedButtonText()
     end
-    if nightVisionMaintainConnection then
-        nightVisionMaintainConnection:Disconnect()
-        nightVisionMaintainConnection = nil
-    end
-    restoreLighting()
-    nightVisionEnabled = false
-    tanchuangxiaoxi("已关闭透视", "透视")
 end
 
--- ==================== 创建穿墙悬浮窗（依赖 disableNoclip, toggleFly 等）====================
+-- ==================== 创建穿墙悬浮窗（极致压缩）====================
 local function createNoclipWindow()
-    local winWidth = 180
-    local winHeight = 70
+    local winWidth = 150
+    local winHeight = 60
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"
@@ -645,50 +648,50 @@ local function createNoclipWindow()
     bg.Draggable = true
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
+    corner.CornerRadius = UDim.new(0, 5)
     corner.Parent = bg
 
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 18)
+    title.Size = UDim2.new(1, -25, 0, 16)
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "穿墙"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
+    title.TextSize = 11
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 20, 0, 20)
-    closeBtn.Position = UDim2.new(1, -22, 0, 2)
+    closeBtn.Size = UDim2.new(0, 18, 0, 18)
+    closeBtn.Position = UDim2.new(1, -20, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
+    closeBtn.TextSize = 10
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 3)
+    closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
-    closeBtn.MouseButton1Click:Connect(function() disableNoclip() end)
+    closeBtn.MouseButton1Click:Connect(disableNoclip)
 
     -- 应急按钮
     local emergencyBtn = Instance.new("TextButton")
     emergencyBtn.Parent = bg
-    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 28)
-    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 25)
+    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 24)
+    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 22)
     emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
     emergencyBtn.Text = "应急"
     emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
     emergencyBtn.Font = Enum.Font.GothamBold
-    emergencyBtn.TextSize = 12
+    emergencyBtn.TextSize = 10
     local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 4)
+    btnCorner.CornerRadius = UDim.new(0, 3)
     btnCorner.Parent = emergencyBtn
 
     emergencyBtn.MouseButton1Click:Connect(function()
@@ -727,10 +730,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（依赖 disableNightVision, nightVisionBrightness, applyNightVision）====================
+-- ==================== 创建透视悬浮窗（极致压缩）====================
 local function createNightVisionWindow()
-    local winWidth = 200
-    local winHeight = 80  -- 极致压缩高度
+    local winWidth = 180
+    local winHeight = 70
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -749,67 +752,67 @@ local function createNightVisionWindow()
     bg.Draggable = true
 
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
+    corner.CornerRadius = UDim.new(0, 5)
     corner.Parent = bg
 
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 18)
+    title.Size = UDim2.new(1, -25, 0, 16)
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "透视"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
+    title.TextSize = 11
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 20, 0, 20)
-    closeBtn.Position = UDim2.new(1, -22, 0, 2)
+    closeBtn.Size = UDim2.new(0, 18, 0, 18)
+    closeBtn.Position = UDim2.new(1, -20, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
+    closeBtn.TextSize = 10
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 3)
+    closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
-    closeBtn.MouseButton1Click:Connect(function() disableNightVision() end)
+    closeBtn.MouseButton1Click:Connect(disableNightVision)
 
     -- 亮度显示
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -10, 0, 16)
-    valueLabel.Position = UDim2.new(0, 5, 0, 18)
+    valueLabel.Size = UDim2.new(1, -10, 0, 14)
+    valueLabel.Position = UDim2.new(0, 5, 0, 16)
     valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
     valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 9
+    valueLabel.TextSize = 8
     valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 滑块轨道
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 40)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 35)
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     local sliderCorner = Instance.new("UICorner")
-    sliderCorner.CornerRadius = UDim.new(0, 2)
+    sliderCorner.CornerRadius = UDim.new(0, 1)
     sliderCorner.Parent = sliderBg
 
     -- 滑块按钮
     local knob = Instance.new("TextButton")
-    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Size = UDim2.new(0, 12, 0, 12)
     local minBright = 0.01
     local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-    knob.Position = UDim2.new(percent, -7, 0, -5.5)
+    knob.Position = UDim2.new(percent, -6, 0, -4.5)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -835,7 +838,7 @@ local function createNightVisionWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -7, 0, -5.5)
+            knob.Position = UDim2.new(percent, -6, 0, -4.5)
             local newBrightness = minBright + percent * (maxBright - minBright)
             newBrightness = math.floor(newBrightness * 100) / 100
             nightVisionBrightness = newBrightness
@@ -853,9 +856,11 @@ local function createNightVisionWindow()
     return sg
 end
 
--- ==================== 开启穿墙（依赖 createNoclipWindow）====================
+-- ==================== 开启穿墙 ====================
 local function enableNoclip()
     if not player.Character then return end
+    if noclipEnabled then return end
+
     if next(originalCollisions) == nil then
         saveOriginalCollisions(player.Character)
     end
@@ -873,9 +878,11 @@ local function enableNoclip()
     -- 创建穿墙悬浮窗
     if noclipWindow then noclipWindow:Destroy() end
     noclipWindow = createNoclipWindow()
+    updateMainButtonText()
+    updateSpeedButtonText()
 end
 
--- ==================== 开启透视（依赖 createNightVisionWindow）====================
+-- ==================== 开启透视 ====================
 local function enableNightVision()
     if nightVisionEnabled then return end
     saveOriginalLighting()
@@ -893,6 +900,8 @@ local function enableNightVision()
 
     if nightVisionWindow then nightVisionWindow:Destroy() end
     nightVisionWindow = createNightVisionWindow()
+    updateMainButtonText()
+    updateSpeedButtonText()
 end
 
 -- ==================== 角色重生处理 ====================
@@ -1415,14 +1424,265 @@ local function showMainMenu()
             text = "📢 查看公告",
             callback = function(menu)
                 menu:Destroy()
-                -- 公告内容（为简洁略，实际可保留原有长代码）
+                local screenSize = getScreenSize()
+                local dialogWidth = math.min(450, screenSize.X * 0.8)
+                local dialogHeight = math.min(500, screenSize.Y * 0.8)
+
+                local dialog = Instance.new("ScreenGui")
+                dialog.Parent = playerGui
+                dialog.IgnoreGuiInset = true
+                dialog.ResetOnSpawn = false
+
+                local bg = Instance.new("Frame")
+                bg.Parent = dialog
+                bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+                bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+                bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                bg.BackgroundTransparency = 0.2
+                bg.BorderSizePixel = 0
+                bg.Active = true
+                bg.ClipsDescendants = true
+
+                local corner = Instance.new("UICorner")
+                corner.Parent = bg
+                corner.CornerRadius = UDim.new(0, 8)
+
+                local titleLabel = Instance.new("TextLabel")
+                titleLabel.Parent = bg
+                titleLabel.Size = UDim2.new(1, -20, 0, 40)
+                titleLabel.Position = UDim2.new(0, 10, 0, 10)
+                titleLabel.BackgroundTransparency = 1
+                titleLabel.Text = "更新日志"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1)
+                titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20
+                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+                local scrollingFrame = Instance.new("ScrollingFrame")
+                scrollingFrame.Parent = bg
+                scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
+                scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                scrollingFrame.ScrollBarThickness = 8
+                scrollingFrame.BackgroundTransparency = 1
+                scrollingFrame.BorderSizePixel = 0
+                scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+
+                local lines = {
+                    "版本 7.7.1 更新内容：",
+                    "",
+                    "1. 修复移速模式关闭时速度不刷新的问题",
+                    "2. 现在移速模式关闭时会实时显示实际速度",
+                    "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
+                    "4. 优化界面显示",
+                    "5. 新增独立穿墙功能（长按主按钮切换）",
+                    "6. 新增透视模式（长按主按钮第4次）",
+                    "",
+                    "功能介绍：",
+                    "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "- 加速/减速：单击调速度，长按连续",
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/透视亮度），长按可设置上升/下降步长",
+                    "- 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
+                    "- 隐藏按钮：单击折叠UI，长按打开菜单",
+                    "- 音量键控制：可在设置中开启/关闭",
+                    "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
+                    "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
+                    "",
+                    "自定义屏幕尺寸：",
+                    "如自动检测不准确，可手动设置屏幕宽高",
+                    "",
+                    "感谢使用！"
+                }
+
+                local contentContainer = Instance.new("Frame")
+                contentContainer.Parent = scrollingFrame
+                contentContainer.Size = UDim2.new(1, -10, 0, 0)
+                contentContainer.BackgroundTransparency = 1
+                contentContainer.Position = UDim2.new(0, 0, 0, 0)
+
+                local yPos = 0
+                local lineHeight = 20
+                local lineSpacing = 2
+
+                for _, lineText in ipairs(lines) do
+                    local lineLabel = Instance.new("TextLabel")
+                    lineLabel.Parent = contentContainer
+                    lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
+                    lineLabel.BackgroundTransparency = 1
+                    lineLabel.Text = lineText
+                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    lineLabel.Font = Enum.Font.Gotham
+                    lineLabel.TextSize = 14
+                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    lineLabel.TextWrapped = false
+                    
+                    yPos = yPos + lineHeight + lineSpacing
+                end
+
+                contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
+
+                local backBtn = Instance.new("TextButton")
+                backBtn.Parent = bg
+                backBtn.Size = UDim2.new(1, -40, 0, 40)
+                backBtn.Position = UDim2.new(0, 20, 1, -50)
+                backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+                backBtn.Text = "返回"
+                backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold
+                backBtn.TextSize = 16
+                backBtn.AutoButtonColor = true
+
+                local backCorner = Instance.new("UICorner")
+                backCorner.Parent = backBtn
+                backCorner.CornerRadius = UDim.new(0, 8)
+
+                backBtn.MouseButton1Click:Connect(function()
+                    dialog:Destroy()
+                    showMainMenu()
+                end)
             end
         },
         {
             text = "📖 功能介绍",
             callback = function(menu)
                 menu:Destroy()
-                -- 功能介绍（略）
+                local screenSize = getScreenSize()
+                local dialogWidth = math.min(400, screenSize.X * 0.8)
+                local dialogHeight = math.min(450, screenSize.Y * 0.8)
+
+                local dialog = Instance.new("ScreenGui")
+                dialog.Parent = playerGui
+                dialog.IgnoreGuiInset = true
+                dialog.ResetOnSpawn = false
+
+                local bg = Instance.new("Frame")
+                bg.Parent = dialog
+                bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+                bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+                bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+                bg.BackgroundTransparency = 0.2
+                bg.BorderSizePixel = 0
+                bg.Active = true
+                bg.ClipsDescendants = true
+
+                local corner = Instance.new("UICorner")
+                corner.Parent = bg
+                corner.CornerRadius = UDim.new(0, 8)
+
+                local titleLabel = Instance.new("TextLabel")
+                titleLabel.Parent = bg
+                titleLabel.Size = UDim2.new(1, -20, 0, 40)
+                titleLabel.Position = UDim2.new(0, 10, 0, 10)
+                titleLabel.BackgroundTransparency = 1
+                titleLabel.Text = "功能介绍"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1)
+                titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20
+                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+                local scrollingFrame = Instance.new("ScrollingFrame")
+                scrollingFrame.Parent = bg
+                scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
+                scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                scrollingFrame.ScrollBarThickness = 8
+                scrollingFrame.BackgroundTransparency = 1
+                scrollingFrame.BorderSizePixel = 0
+                scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+
+                local lines = {
+                    "🔹 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
+                    "   可切换多种方向模式（共9种）：",
+                    "   - 角色上下：沿角色自身向上方向",
+                    "   - 角色前后：基于角色朝向的前后",
+                    "   - 角色左右：基于角色朝向的左右",
+                    "   - 屏幕上下：基于相机上下方向",
+                    "   - 屏幕前后：基于相机前后方向",
+                    "   - 屏幕左右：基于相机左右方向",
+                    "   - 水平上下：世界Y轴（纯垂直）",
+                    "   - 水平前后(屏幕)：基于相机前方的水平方向",
+                    "   - 水平左右(屏幕)：基于相机右方的水平方向",
+                    "🔹 加速/减速：单击调速度，长按连续",
+                    "   - 飞天模式：调整倍率，每次增减 incStep（可在设置中调整）",
+                    "   - 移速模式：调整锁定速度，每次增减 incStep",
+                    "🔹 速度标签：",
+                    "   - 飞天/移速/透视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
+                    "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
+                    "🔹 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
+                    "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
+                    "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
+                    "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
+                    "",
+                    "⚙️ 菜单功能：",
+                    "- 查看公告：显示更新日志",
+                    "- 功能介绍：本页面",
+                    "- 设置：调整弹窗透明度、",
+                    "  启用音量键隐藏、",
+                    "  设置屏幕尺寸、",
+                    "  调整增长量（加速/减速步长）、",
+                    "  上升/下降模式、",
+                    "  飞行方向模式、",
+                    "  死亡自动关闭",
+                    "- 结束脚本：彻底停止",
+                    "",
+                    "音量键隐藏：",
+                    "启用后，按音量减隐藏UI，音量加显示"
+                }
+
+                local contentContainer = Instance.new("Frame")
+                contentContainer.Parent = scrollingFrame
+                contentContainer.Size = UDim2.new(1, -10, 0, 0)
+                contentContainer.BackgroundTransparency = 1
+                contentContainer.Position = UDim2.new(0, 0, 0, 0)
+
+                local yPos = 0
+                local lineHeight = 20
+                local lineSpacing = 2
+
+                for _, lineText in ipairs(lines) do
+                    local lineLabel = Instance.new("TextLabel")
+                    lineLabel.Parent = contentContainer
+                    lineLabel.Size = UDim2.new(1, 0, 0, lineHeight)
+                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
+                    lineLabel.BackgroundTransparency = 1
+                    lineLabel.Text = lineText
+                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    lineLabel.Font = Enum.Font.Gotham
+                    lineLabel.TextSize = 14
+                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    lineLabel.TextWrapped = false
+                    
+                    yPos = yPos + lineHeight + lineSpacing
+                end
+
+                contentContainer.Size = UDim2.new(1, -10, 0, yPos - lineSpacing)
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
+
+                local backBtn = Instance.new("TextButton")
+                backBtn.Parent = bg
+                backBtn.Size = UDim2.new(1, -40, 0, 40)
+                backBtn.Position = UDim2.new(0, 20, 1, -50)
+                backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+                backBtn.Text = "返回"
+                backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold
+                backBtn.TextSize = 16
+                backBtn.AutoButtonColor = true
+
+                local backCorner = Instance.new("UICorner")
+                backCorner.Parent = backBtn
+                backCorner.CornerRadius = UDim.new(0, 8)
+
+                backBtn.MouseButton1Click:Connect(function()
+                    dialog:Destroy()
+                    showMainMenu()
+                end)
             end
         },
         {
@@ -1444,7 +1704,232 @@ local function showMainMenu()
                                 end)
                             end
                         },
-                        -- ... 其他设置项（略）
+                        {
+                            text = volumeKeyEnabled and "🔊 音量键隐藏: 开启" or "🔊 音量键隐藏: 关闭",
+                            callback = function(subMenu)
+                                if volumeKeyEnabled then
+                                    disableVolumeKey()
+                                else
+                                    enableVolumeKey()
+                                end
+                                subMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
+                        {
+                            text = "⚡ 长按速度",
+                            callback = function(subMenu)
+                                showInputDialog("输入长按初始间隔 (秒，大于0)", tostring(longPressSpeed), function(val)
+                                    if val and val > 0 then
+                                        longPressSpeed = val
+                                        tanchuangxiaoxi("长按速度已设为 " .. val .. " 秒", "设置")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "📈 调整增长量 (当前: " .. incStep .. ")",
+                            callback = function(subMenu)
+                                showInputDialog("输入增长量（加速/减速步长）", tostring(incStep), function(val)
+                                    if val and val > 0 then
+                                        incStep = val
+                                        tanchuangxiaoxi("增长量已设为 " .. val, "设置")
+                                        subMenu:Destroy()
+                                        createSettingMenu()
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "⬆️ 上升/下降模式: " .. moveMode,
+                            callback = function(parentMenu)
+                                createMenu("选择移动模式", {
+                                    {
+                                        text = "角色上下" .. (moveMode == "角色上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "角色前后" .. (moveMode == "角色前后" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色前后"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色前后", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "角色左右" .. (moveMode == "角色左右" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "角色左右"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 角色左右", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕上下" .. (moveMode == "屏幕上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕前后" .. (moveMode == "屏幕前后" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕前后"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕前后", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "屏幕左右" .. (moveMode == "屏幕左右" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "屏幕左右"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 屏幕左右", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平上下" .. (moveMode == "水平上下" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平上下"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平上下", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平前后(屏幕)" .. (moveMode == "水平前后(屏幕)" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平前后(屏幕)"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平前后(屏幕)", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "水平左右(屏幕)" .. (moveMode == "水平左右(屏幕)" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            moveMode = "水平左右(屏幕)"
+                                            updateButtonText()
+                                            tanchuangxiaoxi("上升/下降模式已切换至: 水平左右(屏幕)", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                }, nil)
+                            end
+                        },
+                        {
+                            text = "✈️ 飞行方向模式: " .. flyMode,
+                            callback = function(parentMenu)
+                                createMenu("选择飞行模式", {
+                                    {
+                                        text = "屏幕" .. (flyMode == "屏幕" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "屏幕"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 屏幕", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "悬空" .. (flyMode == "悬空" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "悬空"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 悬空", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                    {
+                                        text = "绝对锁高" .. (flyMode == "绝对锁高" and " ✓" or ""),
+                                        callback = function(choiceMenu)
+                                            flyMode = "绝对锁高"
+                                            tanchuangxiaoxi("飞行方向模式已切换至: 绝对锁高", "模式切换")
+                                            choiceMenu:Destroy()
+                                            parentMenu:Destroy()
+                                            createSettingMenu()
+                                        end
+                                    },
+                                }, nil)
+                            end
+                        },
+                        {
+                            text = "📏 设置屏幕宽度",
+                            callback = function(subMenu)
+                                showInputDialog("输入屏幕宽度（像素）", tostring(customWidth or getScreenSize().X), function(val)
+                                    if val and val > 0 then
+                                        customWidth = val
+                                        tanchuangxiaoxi("屏幕宽度已设为 " .. val, "自定义尺寸")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "📏 设置屏幕高度",
+                            callback = function(subMenu)
+                                showInputDialog("输入屏幕高度（像素）", tostring(customHeight or getScreenSize().Y), function(val)
+                                    if val and val > 0 then
+                                        customHeight = val
+                                        tanchuangxiaoxi("屏幕高度已设为 " .. val, "自定义尺寸")
+                                    else
+                                        tanchuangxiaoxi("请输入大于0的数字", "错误")
+                                    end
+                                end)
+                            end
+                        },
+                        {
+                            text = "🔄 重置为自动检测",
+                            callback = function(subMenu)
+                                customWidth = nil
+                                customHeight = nil
+                                tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
+                            end
+                        },
+                        {
+                            text = autoDisableOnDeath and "☠️ 死亡自动关闭: 开启" or "☠️ 死亡自动关闭: 关闭",
+                            callback = function(parentMenu)
+                                autoDisableOnDeath = not autoDisableOnDeath
+                                tanchuangxiaoxi(autoDisableOnDeath and "死亡后自动关闭已开启" or "死亡后自动关闭已关闭", "设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
+                            end
+                        },
                     }, showMainMenu)
                 end
                 createSettingMenu()
@@ -2134,7 +2619,7 @@ updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
 
--- ==================== 补全缺失的亮度对话框函数（必须定义）====================
+-- ==================== 补全亮度对话框函数 ====================
 function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
