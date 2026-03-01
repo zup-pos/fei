@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1 (新增透视模式) - 完整修复版
+-- Version: 7.7.1 (最终修复版)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -709,236 +709,6 @@ local function showBrightnessDialog()
         conn:Disconnect()
         dialog:Destroy()
     end)
-end
-
--- ==================== 新增：极限压缩的穿墙悬浮窗 ====================
-local function createNoclipWindow()
-    local winWidth = 180
-    local winHeight = 70
-
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "NoclipWindow"
-    sg.Parent = playerGui
-    sg.IgnoreGuiInset = true
-    sg.ResetOnSpawn = false
-
-    local bg = Instance.new("Frame")
-    bg.Parent = sg
-    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
-    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
-    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.Draggable = true
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = bg
-
-    -- 标题
-    local title = Instance.new("TextLabel")
-    title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 18)
-    title.Position = UDim2.new(0, 3, 0, 2)
-    title.BackgroundTransparency = 1
-    title.Text = "穿墙"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
-    title.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- 关闭按钮
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 20, 0, 20)
-    closeBtn.Position = UDim2.new(1, -22, 0, 2)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
-    closeBtn.AutoButtonColor = false
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 3)
-    closeCorner.Parent = closeBtn
-
-    closeBtn.MouseButton1Click:Connect(disableNoclip)
-
-    -- 应急按钮
-    local emergencyBtn = Instance.new("TextButton")
-    emergencyBtn.Parent = bg
-    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 28)
-    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 25)
-    emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-    emergencyBtn.Text = "应急"
-    emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
-    emergencyBtn.Font = Enum.Font.GothamBold
-    emergencyBtn.TextSize = 12
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 4)
-    btnCorner.Parent = emergencyBtn
-
-    emergencyBtn.MouseButton1Click:Connect(function()
-        local char = player.Character
-        if not char then return end
-        local rootPart = char:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
-
-        if not isFlying then
-            toggleFly(true)
-            task.wait(0.1)
-        end
-
-        local startTime = tick()
-        local duration = 5
-        local step = moveStep
-        local connection
-        connection = RunService.Heartbeat:Connect(function()
-            if tick() - startTime >= duration then
-                connection:Disconnect()
-                return
-            end
-            if rootPart and rootPart.Parent then
-                rootPart.CFrame = rootPart.CFrame + Vector3.new(0, step, 0)
-            else
-                connection:Disconnect()
-            end
-        end)
-
-        task.wait(duration)
-
-        if noclipEnabled then disableNoclip() end
-        if isFlying then toggleFly(false) end
-    end)
-
-    return sg
-end
-
--- ==================== 新增：极限压缩的透视悬浮窗 ====================
-local function createNightVisionWindow()
-    local winWidth = 200
-    local winHeight = 100
-
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "NightVisionWindow"
-    sg.Parent = playerGui
-    sg.IgnoreGuiInset = true
-    sg.ResetOnSpawn = false
-
-    local bg = Instance.new("Frame")
-    bg.Parent = sg
-    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
-    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
-    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.Draggable = true
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = bg
-
-    -- 标题
-    local title = Instance.new("TextLabel")
-    title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 18)
-    title.Position = UDim2.new(0, 3, 0, 2)
-    title.BackgroundTransparency = 1
-    title.Text = "透视"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
-    title.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- 关闭按钮
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 20, 0, 20)
-    closeBtn.Position = UDim2.new(1, -22, 0, 2)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
-    closeBtn.AutoButtonColor = false
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 3)
-    closeCorner.Parent = closeBtn
-
-    closeBtn.MouseButton1Click:Connect(disableNightVision)
-
-    -- 亮度显示
-    local valueLabel = Instance.new("TextLabel")
-    valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -10, 0, 18)
-    valueLabel.Position = UDim2.new(0, 5, 0, 20)
-    valueLabel.BackgroundTransparency = 1
-    valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
-    valueLabel.TextColor3 = Color3.new(1, 1, 1)
-    valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 10
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- 滑块轨道
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Parent = bg
-    sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 45)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    local sliderCorner = Instance.new("UICorner")
-    sliderCorner.CornerRadius = UDim.new(0, 2)
-    sliderCorner.Parent = sliderBg
-
-    -- 滑块按钮
-    local knob = Instance.new("TextButton")
-    knob.Size = UDim2.new(0, 14, 0, 14)
-    local minBright = 0.01
-    local maxBright = 100
-    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-    knob.Position = UDim2.new(percent, -7, 0, -5.5)
-    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    knob.Text = ""
-    knob.Parent = sliderBg
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob
-
-    local dragging = false
-    knob.MouseButton1Down:Connect(function()
-        dragging = true
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mousePos = UserInputService:GetMouseLocation()
-            local absPos = sliderBg.AbsolutePosition
-            local absSize = sliderBg.AbsoluteSize.X
-            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
-            local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -7, 0, -5.5)
-            local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100) / 100
-            nightVisionBrightness = newBrightness
-            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
-            if nightVisionEnabled then
-                applyNightVision()
-            end
-        end
-    end)
-
-    sg.Destroying:Connect(function()
-        if conn then conn:Disconnect() end
-    end)
-
-    return sg
 end
 
 -- ==================== 穿墙核心函数 ====================
@@ -2190,6 +1960,236 @@ local function getMoveVector(dir, rootPart)
         end
     end
     return Vector3.new()
+end
+
+-- ==================== 创建穿墙悬浮窗（现在放在所有函数之后）====================
+local function createNoclipWindow()
+    local winWidth = 180
+    local winHeight = 70
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NoclipWindow"
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = sg
+    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
+    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.Draggable = true
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = bg
+
+    -- 标题
+    local title = Instance.new("TextLabel")
+    title.Parent = bg
+    title.Size = UDim2.new(1, -25, 0, 18)
+    title.Position = UDim2.new(0, 3, 0, 2)
+    title.BackgroundTransparency = 1
+    title.Text = "穿墙"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- 关闭按钮
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 20, 0, 20)
+    closeBtn.Position = UDim2.new(1, -22, 0, 2)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 12
+    closeBtn.AutoButtonColor = false
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 3)
+    closeCorner.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function() disableNoclip() end)
+
+    -- 应急按钮
+    local emergencyBtn = Instance.new("TextButton")
+    emergencyBtn.Parent = bg
+    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 28)
+    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 25)
+    emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+    emergencyBtn.Text = "应急"
+    emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
+    emergencyBtn.Font = Enum.Font.GothamBold
+    emergencyBtn.TextSize = 12
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 4)
+    btnCorner.Parent = emergencyBtn
+
+    emergencyBtn.MouseButton1Click:Connect(function()
+        local char = player.Character
+        if not char then return end
+        local rootPart = char:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+
+        if not isFlying then
+            toggleFly(true)
+            task.wait(0.1)
+        end
+
+        local startTime = tick()
+        local duration = 5
+        local step = moveStep
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            if tick() - startTime >= duration then
+                connection:Disconnect()
+                return
+            end
+            if rootPart and rootPart.Parent then
+                rootPart.CFrame = rootPart.CFrame + Vector3.new(0, step, 0)
+            else
+                connection:Disconnect()
+            end
+        end)
+
+        task.wait(duration)
+
+        if noclipEnabled then disableNoclip() end
+        if isFlying then toggleFly(false) end
+    end)
+
+    return sg
+end
+
+-- ==================== 创建透视悬浮窗（进一步压缩高度）====================
+local function createNightVisionWindow()
+    local winWidth = 200
+    local winHeight = 80  -- 从100压缩到80
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NightVisionWindow"
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = sg
+    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
+    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.Draggable = true
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = bg
+
+    -- 标题
+    local title = Instance.new("TextLabel")
+    title.Parent = bg
+    title.Size = UDim2.new(1, -25, 0, 18)
+    title.Position = UDim2.new(0, 3, 0, 2)
+    title.BackgroundTransparency = 1
+    title.Text = "透视"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- 关闭按钮
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 20, 0, 20)
+    closeBtn.Position = UDim2.new(1, -22, 0, 2)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 12
+    closeBtn.AutoButtonColor = false
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 3)
+    closeCorner.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function() disableNightVision() end)
+
+    -- 亮度显示
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Parent = bg
+    valueLabel.Size = UDim2.new(1, -10, 0, 16)
+    valueLabel.Position = UDim2.new(0, 5, 0, 18)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
+    valueLabel.TextColor3 = Color3.new(1, 1, 1)
+    valueLabel.Font = Enum.Font.Gotham
+    valueLabel.TextSize = 9
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- 滑块轨道
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Parent = bg
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 40)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 2)
+    sliderCorner.Parent = sliderBg
+
+    -- 滑块按钮
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    local minBright = 0.01
+    local maxBright = 100
+    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+    knob.Position = UDim2.new(percent, -7, 0, -5.5)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.Text = ""
+    knob.Parent = sliderBg
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if dragging then
+            local mousePos = UserInputService:GetMouseLocation()
+            local absPos = sliderBg.AbsolutePosition
+            local absSize = sliderBg.AbsoluteSize.X
+            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
+            local percent = relX / absSize
+            knob.Position = UDim2.new(percent, -7, 0, -5.5)
+            local newBrightness = minBright + percent * (maxBright - minBright)
+            newBrightness = math.floor(newBrightness * 100) / 100
+            nightVisionBrightness = newBrightness
+            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
+            if nightVisionEnabled then
+                applyNightVision()
+            end
+        end
+    end)
+
+    sg.Destroying:Connect(function()
+        if conn then conn:Disconnect() end
+    end)
+
+    return sg
 end
 
 -- ==================== 按钮长按逻辑 ====================
