@@ -237,13 +237,22 @@ local function enableNoclip()
     noclipMaintainConnection = RunService.Heartbeat:Connect(function()
         if noclipEnabled and player.Character then
             applyNoclip()
-            -- 不倒翁逻辑：穿墙开启且飞天关闭时保持角色直立
+            -- 不倒翁逻辑：穿墙开启且飞天关闭时保持角色直立（不改变朝向）
             if not isFlying then
                 local char = player.Character
                 if char then
                     local root = char:FindFirstChild("HumanoidRootPart")
                     if root then
-                        root.CFrame = CFrame.new(root.Position)
+                        -- 获取当前朝向（水平方向）
+                        local look = root.CFrame.LookVector
+                        local flatLook = Vector3.new(look.X, 0, look.Z)
+                        if flatLook.Magnitude > 0.01 then
+                            flatLook = flatLook.Unit
+                        else
+                            flatLook = Vector3.new(0, 0, 1) -- 默认朝前
+                        end
+                        -- 设置新CFrame：位置不变，面向水平方向，Y轴向上
+                        root.CFrame = CFrame.lookAt(root.Position, root.Position + flatLook)
                     end
                 end
             end
