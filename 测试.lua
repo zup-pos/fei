@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1 (最终修复版)
+-- Version: 7.7.1 (最终修复版 - 悬浮窗关闭不关功能)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -663,7 +663,7 @@ local function createNoclipWindow()
     title.TextSize = 11
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- 关闭按钮
+    -- 关闭按钮（只隐藏窗口，不关闭功能）
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(0, 18, 0, 18)
@@ -678,7 +678,10 @@ local function createNoclipWindow()
     closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
-    closeBtn.MouseButton1Click:Connect(disableNoclip)
+    closeBtn.MouseButton1Click:Connect(function()
+        sg:Destroy()
+        noclipWindow = nil
+    end)
 
     -- 应急按钮
     local emergencyBtn = Instance.new("TextButton")
@@ -767,7 +770,7 @@ local function createNightVisionWindow()
     title.TextSize = 11
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- 关闭按钮
+    -- 关闭按钮（只隐藏窗口，不关闭功能）
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(0, 18, 0, 18)
@@ -782,7 +785,10 @@ local function createNightVisionWindow()
     closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
-    closeBtn.MouseButton1Click:Connect(disableNightVision)
+    closeBtn.MouseButton1Click:Connect(function()
+        sg:Destroy()
+        nightVisionWindow = nil
+    end)
 
     -- 亮度显示
     local valueLabel = Instance.new("TextLabel")
