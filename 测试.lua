@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1 (新增透视模式)
+-- Version: 7.7.1 (新增透视模式，修复穿墙不倒翁)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -165,6 +165,7 @@ local autoDisableOnDeath = true
 local noclipEnabled = false
 local noclipMaintainConnection = nil
 local originalCollisions = {}
+local noclipGyro = nil  -- 用于保持直立的 BodyGyro
 
 -- ==================== 透视相关变量 ====================
 local nightVisionEnabled = false
@@ -224,36 +225,56 @@ local function applyNoclip()
     end
 end
 
--- 开启穿墙
+-- 开启穿墙（稳定不倒翁版）
 local function enableNoclip()
     if not player.Character then return end
     if next(originalCollisions) == nil then
         saveOriginalCollisions(player.Character)
     end
     applyNoclip()
+
+    -- 创建 BodyGyro 用于保持直立（仅在飞天关闭时有效）
+    if not isFlying then
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        if root and not noclipGyro then
+            noclipGyro = Instance.new("BodyGyro")
+            noclipGyro.P = 9e4
+            noclipGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+            noclipGyro.CFrame = root.CFrame
+            noclipGyro.Parent = root
+        end
+    end
+
     if noclipMaintainConnection then
         noclipMaintainConnection:Disconnect()
     end
     noclipMaintainConnection = RunService.Heartbeat:Connect(function()
         if noclipEnabled and player.Character then
             applyNoclip()
-            -- 不倒翁逻辑：穿墙开启且飞天关闭时保持角色直立（仅修正侧倾）
+            -- 不倒翁逻辑：穿墙开启且飞天关闭时更新 BodyGyro 目标
             if not isFlying then
                 local char = player.Character
                 if char then
                     local root = char:FindFirstChild("HumanoidRootPart")
-                    if root then
-                        -- 获取当前位置和当前朝向（包含俯仰）
-                        local pos = root.Position
-                        local look = root.CFrame.LookVector
-                        
-                        -- 计算新的右向量：使向上方向为世界Y轴
-                        local newRight = Vector3.new(0,0,0):Cross(look).Unit
-                        -- 重新计算新的向上向量（保证正交）
-                        local newUp = look:Cross(newRight).Unit
-                        
-                        -- 用矩阵构造新的CFrame：位置不变，保持看向方向，向上为世界Y
-                        root.CFrame = CFrame.fromMatrix(pos, newRight, newUp, look)
+                    local hum = char:FindFirstChildWhichIsA("Humanoid")
+                    if root and hum and noclipGyro then
+                        -- 获取移动方向
+                        local moveDir = hum.MoveDirection
+                        if moveDir.Magnitude > 0.1 then
+                            -- 如果有移动，面向移动方向（水平）
+                            local targetLook = Vector3.new(moveDir.X, 0, moveDir.Z).Unit
+                            noclipGyro.CFrame = CFrame.lookAt(root.Position, root.Position + targetLook)
+                        else
+                            -- 如果没有移动，保持当前水平朝向
+                            local currentLook = root.CFrame.LookVector
+                            local flatLook = Vector3.new(currentLook.X, 0, currentLook.Z)
+                            if flatLook.Magnitude > 0.01 then
+                                flatLook = flatLook.Unit
+                            else
+                                flatLook = Vector3.new(0,0,1)
+                            end
+                            noclipGyro.CFrame = CFrame.lookAt(root.Position, root.Position + flatLook)
+                        end
                     end
                 end
             end
@@ -267,6 +288,10 @@ local function disableNoclip()
     if noclipMaintainConnection then
         noclipMaintainConnection:Disconnect()
         noclipMaintainConnection = nil
+    end
+    if noclipGyro then
+        noclipGyro:Destroy()
+        noclipGyro = nil
     end
     restoreOriginalCollisions()
     noclipEnabled = false
@@ -524,7 +549,7 @@ local function forceDisableFly()
     end
 end
 
--- ==================== 飞天开关 ====================
+-- ==================== 飞天开关（修复版：与不倒翁协同）====================
 local function toggleFly(enable)
     if enable then
         forceDisableSpeedMode()
@@ -534,6 +559,12 @@ local function toggleFly(enable)
         stopTpwalking()
         tanchuangxiaoxi("已开启飞天", "飞天")
         applyFly()
+
+        -- 飞天开启时，如果穿墙也开启，需要销毁 BodyGyro（不倒翁失效）
+        if noclipEnabled and noclipGyro then
+            noclipGyro:Destroy()
+            noclipGyro = nil
+        end
     else
         if not isFlying then return end
         isFlying = false
@@ -542,6 +573,21 @@ local function toggleFly(enable)
         tanchuangxiaoxi("已关闭飞天", "飞天")
         removeFly()
         resetHumanoidAfterFly()
+
+        -- 飞天关闭后，如果穿墙仍开启，需要重新创建 BodyGyro（恢复不倒翁）
+        if noclipEnabled and not noclipGyro then
+            local char = player.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    noclipGyro = Instance.new("BodyGyro")
+                    noclipGyro.P = 9e4
+                    noclipGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+                    noclipGyro.CFrame = root.CFrame
+                    noclipGyro.Parent = root
+                end
+            end
+        end
     end
     updateSpeedButtonText()
 end
@@ -712,11 +758,11 @@ local function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (0.01~100)"  -- 提示改为 100
+    textBox.PlaceholderText = "亮度 (0.01~100)"
     textBox.Text = string.format("%.2f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
-    textBox.ClearTextOnFocus = false  -- 不自动清空
+    textBox.ClearTextOnFocus = false
 
     local line = Instance.new("Frame")
     line.Parent = textBox
@@ -739,7 +785,7 @@ local function showBrightnessDialog()
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
     local minBright = 0.01
-    local maxBright = 100  -- 改为 100
+    local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
@@ -769,7 +815,7 @@ local function showBrightnessDialog()
             local percent = relX / absSize
             knob.Position = UDim2.new(percent, -10, 0, -8)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100) / 100  -- 保留两位小数
+            newBrightness = math.floor(newBrightness * 100) / 100
             textBox.Text = string.format("%.2f", newBrightness)
         end
     end)
@@ -1423,7 +1469,7 @@ local function showMainMenu()
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
-                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
+                    "- 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1552,7 +1598,7 @@ local function showMainMenu()
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
-                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
+                    "🔹 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -2353,7 +2399,7 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                modeIndex = (modeIndex + 1) % 4  -- 改为4个模式循环
+                modeIndex = (modeIndex + 1) % 4  -- 4个模式循环
                 updateMainButtonText()
                 updateSpeedButtonText()
                 tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
