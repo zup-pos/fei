@@ -626,10 +626,10 @@ local function disableNightVision()
     end
 end
 
--- ==================== 创建穿墙悬浮窗（极致压缩）====================
+-- ==================== 创建穿墙悬浮窗（极致压缩 V2）====================
 local function createNoclipWindow()
     local winWidth = 150
-    local winHeight = 60
+    local winHeight = 50  -- 从60减到50
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"
@@ -654,25 +654,25 @@ local function createNoclipWindow()
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 16)
+    title.Size = UDim2.new(1, -25, 0, 14)  -- 高度从16减到14
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "穿墙"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 11
+    title.TextSize = 10  -- 字体从11减到10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- 关闭按钮（只隐藏窗口，不关闭功能）
+    -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 18, 0, 18)
-    closeBtn.Position = UDim2.new(1, -20, 0, 1)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)  -- 从18x18减到16x16
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)  -- 位置微调
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 10
+    closeBtn.TextSize = 9  -- 字体从10减到9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
@@ -686,13 +686,13 @@ local function createNoclipWindow()
     -- 应急按钮
     local emergencyBtn = Instance.new("TextButton")
     emergencyBtn.Parent = bg
-    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 24)
-    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 22)
+    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 18)  -- 高度从24减到18
+    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 18)  -- Y从22减到18
     emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
     emergencyBtn.Text = "应急"
     emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
     emergencyBtn.Font = Enum.Font.GothamBold
-    emergencyBtn.TextSize = 10
+    emergencyBtn.TextSize = 9  -- 字体从10减到9
     local btnCorner = Instance.new("UICorner")
     btnCorner.CornerRadius = UDim.new(0, 3)
     btnCorner.Parent = emergencyBtn
@@ -733,10 +733,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（极致压缩）====================
+-- ==================== 创建透视悬浮窗（极致压缩 V2）====================
 local function createNightVisionWindow()
     local winWidth = 180
-    local winHeight = 70
+    local winHeight = 58  -- 从70减到58
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -761,25 +761,25 @@ local function createNightVisionWindow()
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 16)
+    title.Size = UDim2.new(1, -25, 0, 14)  -- 高度从16减到14
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "透视"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 11
+    title.TextSize = 10  -- 字体从11减到10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- 关闭按钮（只隐藏窗口，不关闭功能）
+    -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 18, 0, 18)
-    closeBtn.Position = UDim2.new(1, -20, 0, 1)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)  -- 从18x18减到16x16
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)  -- 位置微调
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 10
+    closeBtn.TextSize = 9  -- 字体从10减到9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
@@ -793,20 +793,20 @@ local function createNightVisionWindow()
     -- 亮度显示
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -10, 0, 14)
-    valueLabel.Position = UDim2.new(0, 5, 0, 16)
+    valueLabel.Size = UDim2.new(1, -10, 0, 12)  -- 高度从14减到12
+    valueLabel.Position = UDim2.new(0, 5, 0, 14)  -- Y从16减到14
     valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
     valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 8
+    valueLabel.TextSize = 8  -- 保持不变
     valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 滑块轨道
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 35)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 30)  -- 从35上移到30
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     local sliderCorner = Instance.new("UICorner")
     sliderCorner.CornerRadius = UDim.new(0, 1)
