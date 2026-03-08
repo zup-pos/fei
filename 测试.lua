@@ -1,6 +1,5 @@
 -- Gui to Lua
 -- Version: 7.7.1 (最终修复版 - 悬浮窗关闭不关功能)
--- 优化：透视 → 夜视，亮度范围 0.000001 ~ 50
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -151,10 +150,10 @@ local flyMode = "屏幕"
 local noclipWindow = nil
 local nightVisionWindow = nil
 
--- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=夜视）
+-- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=透视）
 local modeIndex = 0
 local modeNames = { "fly", "speed", "noclip", "nightvision" }
-local modeDisplayNames = { "飞天", "移速", "穿墙", "夜视" }  -- 修改：透视 → 夜视
+local modeDisplayNames = { "飞天", "移速", "穿墙", "透视" }
 
 local speedModeEnabled = false
 local speedModeConnection = nil
@@ -171,7 +170,7 @@ local noclipEnabled = false
 local noclipMaintainConnection = nil
 local originalCollisions = {}
 
--- ==================== 夜视相关变量 ====================
+-- ==================== 透视相关变量 ====================
 local nightVisionEnabled = false
 local nightVisionBrightness = 2.5
 local originalLighting = {}
@@ -507,7 +506,7 @@ local function applySpeedMode(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 夜视基础 ====================
+-- ==================== 透视基础 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -608,7 +607,7 @@ local function disableNoclip()
     end
 end
 
--- 关闭夜视
+-- 关闭透视
 local function disableNightVision()
     if nightVisionEnabled then
         if nightVisionWindow then
@@ -621,7 +620,7 @@ local function disableNightVision()
         end
         restoreLighting()
         nightVisionEnabled = false
-        tanchuangxiaoxi("已关闭夜视", "夜视")  -- 修改：透视 → 夜视
+        tanchuangxiaoxi("已关闭透视", "透视")
         updateMainButtonText()
         updateSpeedButtonText()
     end
@@ -630,7 +629,7 @@ end
 -- ==================== 创建穿墙悬浮窗（极致压缩 V2）====================
 local function createNoclipWindow()
     local winWidth = 150
-    local winHeight = 50
+    local winHeight = 50  -- 从60减到50
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"
@@ -655,25 +654,25 @@ local function createNoclipWindow()
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 14)
+    title.Size = UDim2.new(1, -25, 0, 14)  -- 高度从16减到14
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "穿墙"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 10
+    title.TextSize = 10  -- 字体从11减到10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 16, 0, 16)
-    closeBtn.Position = UDim2.new(1, -18, 0, 1)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)  -- 从18x18减到16x16
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)  -- 位置微调
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 9
+    closeBtn.TextSize = 9  -- 字体从10减到9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
@@ -687,13 +686,13 @@ local function createNoclipWindow()
     -- 应急按钮
     local emergencyBtn = Instance.new("TextButton")
     emergencyBtn.Parent = bg
-    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 18)
-    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 18)
+    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 18)  -- 高度从24减到18
+    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 18)  -- Y从22减到18
     emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
     emergencyBtn.Text = "应急"
     emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
     emergencyBtn.Font = Enum.Font.GothamBold
-    emergencyBtn.TextSize = 9
+    emergencyBtn.TextSize = 9  -- 字体从10减到9
     local btnCorner = Instance.new("UICorner")
     btnCorner.CornerRadius = UDim.new(0, 3)
     btnCorner.Parent = emergencyBtn
@@ -734,10 +733,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建夜视悬浮窗（极致压缩 V2）====================
+-- ==================== 创建透视悬浮窗（极致压缩 V2）====================
 local function createNightVisionWindow()
     local winWidth = 180
-    local winHeight = 58
+    local winHeight = 58  -- 从70减到58
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -762,25 +761,25 @@ local function createNightVisionWindow()
     -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 14)
+    title.Size = UDim2.new(1, -25, 0, 14)  -- 高度从16减到14
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
-    title.Text = "夜视"  -- 修改：透视 → 夜视
+    title.Text = "透视"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 10
+    title.TextSize = 10  -- 字体从11减到10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 16, 0, 16)
-    closeBtn.Position = UDim2.new(1, -18, 0, 1)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)  -- 从18x18减到16x16
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)  -- 位置微调
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 9
+    closeBtn.TextSize = 9  -- 字体从10减到9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
@@ -794,20 +793,20 @@ local function createNightVisionWindow()
     -- 亮度显示
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -10, 0, 12)
-    valueLabel.Position = UDim2.new(0, 5, 0, 14)
+    valueLabel.Size = UDim2.new(1, -10, 0, 12)  -- 高度从14减到12
+    valueLabel.Position = UDim2.new(0, 5, 0, 14)  -- Y从16减到14
     valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
     valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 8
+    valueLabel.TextSize = 8  -- 保持不变
     valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     -- 滑块轨道
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 30)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 30)  -- 从35上移到30
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     local sliderCorner = Instance.new("UICorner")
     sliderCorner.CornerRadius = UDim.new(0, 1)
@@ -816,8 +815,8 @@ local function createNightVisionWindow()
     -- 滑块按钮
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 12, 0, 12)
-    local minBright = 0.000001  -- 修改：从0.01改为0.000001
-    local maxBright = 50        -- 修改：从100改为50
+    local minBright = 0.01
+    local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -6, 0, -4.5)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
@@ -847,9 +846,9 @@ local function createNightVisionWindow()
             local percent = relX / absSize
             knob.Position = UDim2.new(percent, -6, 0, -4.5)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100000) / 100000  -- 保留5位小数以便极小值
+            newBrightness = math.floor(newBrightness * 100) / 100
             nightVisionBrightness = newBrightness
-            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)  -- 显示两位小数，但内部精度保留
+            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
             if nightVisionEnabled then
                 applyNightVision()
             end
@@ -889,7 +888,7 @@ local function enableNoclip()
     updateSpeedButtonText()
 end
 
--- ==================== 开启夜视 ====================
+-- ==================== 开启透视 ====================
 local function enableNightVision()
     if nightVisionEnabled then return end
     saveOriginalLighting()
@@ -903,7 +902,7 @@ local function enableNightVision()
         end
     end)
     nightVisionEnabled = true
-    tanchuangxiaoxi("已开启夜视", "夜视")  -- 修改：透视 → 夜视
+    tanchuangxiaoxi("已开启透视", "透视")
 
     if nightVisionWindow then nightVisionWindow:Destroy() end
     nightVisionWindow = createNightVisionWindow()
@@ -1483,18 +1482,18 @@ local function showMainMenu()
                     "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
                     "4. 优化界面显示",
                     "5. 新增独立穿墙功能（长按主按钮切换）",
-                    "6. 新增夜视模式（长按主按钮第4次）",  -- 修改：透视 → 夜视
+                    "6. 新增透视模式（长按主按钮第4次）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/夜视亮度），长按可设置上升/下降步长",  -- 修改：透视亮度 → 夜视亮度
-                    "- 主按钮：长按切换飞天/移速/穿墙/夜视模式，单击开关当前模式",  -- 修改：透视 → 夜视
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/透视亮度），长按可设置上升/下降步长",
+                    "- 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
-                    "- 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",  -- 修改：透视 → 夜视，亮度范围更新
+                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1617,13 +1616,13 @@ local function showMainMenu()
                     "   - 飞天模式：调整倍率，每次增减 incStep（可在设置中调整）",
                     "   - 移速模式：调整锁定速度，每次增减 incStep",
                     "🔹 速度标签：",
-                    "   - 飞天/移速/夜视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",  -- 修改：透视 → 夜视
+                    "   - 飞天/移速/透视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
-                    "🔹 主按钮：长按切换飞天/移速/穿墙/夜视模式，单击开关当前模式",  -- 修改：透视 → 夜视
+                    "🔹 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
-                    "🔹 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",  -- 修改：透视 → 夜视，亮度范围更新
+                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -2655,7 +2654,7 @@ function showBrightnessDialog()
     titleLabel.Size = UDim2.new(1, -20, 0, 30)
     titleLabel.Position = UDim2.new(0, 10, 0, 10)
     titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "设置夜视亮度"  -- 修改：透视 → 夜视
+    titleLabel.Text = "设置透视亮度"
     titleLabel.TextColor3 = Color3.new(1, 1, 1)
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.TextSize = 16
@@ -2667,7 +2666,7 @@ function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (0.000001~50)"  -- 修改范围
+    textBox.PlaceholderText = "亮度 (0.01~100)"
     textBox.Text = string.format("%.2f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
@@ -2691,8 +2690,8 @@ function showBrightnessDialog()
 
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local minBright = 0.000001  -- 修改
-    local maxBright = 50        -- 修改
+    local minBright = 0.01
+    local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
@@ -2722,8 +2721,8 @@ function showBrightnessDialog()
             local percent = relX / absSize
             knob.Position = UDim2.new(percent, -10, 0, -8)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100000) / 100000  -- 保留5位小数
-            textBox.Text = string.format("%.2f", newBrightness)  -- 显示两位小数，但内部精度保留
+            newBrightness = math.floor(newBrightness * 100) / 100
+            textBox.Text = string.format("%.2f", newBrightness)
         end
     end)
 
@@ -2731,7 +2730,7 @@ function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = clamp(num, minBright, maxBright)
-            num = math.floor(num * 100000) / 100000
+            num = math.floor(num * 100) / 100
             textBox.Text = string.format("%.2f", num)
             local newPercent = (num - minBright) / (maxBright - minBright)
             knob.Position = UDim2.new(newPercent, -10, 0, -8)
@@ -2781,12 +2780,12 @@ function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = clamp(num, minBright, maxBright)
-            num = math.floor(num * 100000) / 100000
+            num = math.floor(num * 100) / 100
             nightVisionBrightness = num
             if nightVisionEnabled then
                 applyNightVision()
             end
-            tanchuangxiaoxi("夜视亮度已设为 " .. tostring(num), "亮度设置")  -- 修改：透视 → 夜视
+            tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
         end
         conn:Disconnect()
         dialog:Destroy()
