@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.6 (悬浮窗关闭只销毁窗口，不关闭功能；滑块不居中)
--- 修复：关闭按钮仅销毁窗口，不关闭功能；所有滑块恢复普通偏移
+-- Version: 7.7.6 (悬浮窗关闭只销毁窗口，不关闭功能；滑块不居中；尺寸统一)
+-- 修复：重力/跳跃悬浮窗尺寸与夜视一致，滑块偏移修正
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -699,15 +699,15 @@ local function disableNightVision()
     end
 end
 
--- ==================== 重力模式相关函数（滑块不居中，关闭按钮只关窗口）====================
+-- ==================== 重力模式相关函数（统一尺寸180x58，滑块偏移修正）====================
 local function createGravityModeWindow()
     if gravityWindow then
         gravityWindow:Destroy()
         gravityWindow = nil
     end
 
-    local winWidth = 200
-    local winHeight = 100
+    local winWidth = 180
+    local winHeight = 58
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "GravityWindow"
@@ -731,31 +731,30 @@ local function createGravityModeWindow()
 
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 20)
+    title.Size = UDim2.new(1, -25, 0, 14)
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "重力调节"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
+    title.TextSize = 10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 18, 0, 18)
-    closeBtn.Position = UDim2.new(1, -20, 0, 2)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 10
+    closeBtn.TextSize = 9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 只关闭窗口，不关闭功能
         if gravityWindow then
             gravityWindow:Destroy()
             gravityWindow = nil
@@ -765,20 +764,20 @@ local function createGravityModeWindow()
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Name = "ValueLabel"
     valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -20, 0, 20)
-    valueLabel.Position = UDim2.new(0, 10, 0, 25)
+    valueLabel.Size = UDim2.new(1, -10, 0, 12)
+    valueLabel.Position = UDim2.new(0, 5, 0, 14)
     valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "重力: " .. string.format("%.1f", workspace.Gravity)
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
     valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 12
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+    valueLabel.TextSize = 8
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     local sliderBg = Instance.new("Frame")
     sliderBg.Name = "SliderBg"
     sliderBg.Parent = bg
-    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 55)
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 30)
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     local sliderCorner = Instance.new("UICorner")
     sliderCorner.CornerRadius = UDim.new(0, 1)
@@ -786,7 +785,7 @@ local function createGravityModeWindow()
 
     local knob = Instance.new("TextButton")
     knob.Name = "Knob"
-    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Size = UDim2.new(0, 12, 0, 12)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -799,7 +798,7 @@ local function createGravityModeWindow()
     local function updateKnobPosition()
         local currentG = workspace.Gravity
         local percent = (currentG - minG) / (maxG - minG)
-        knob.Position = UDim2.new(percent, -7, 0, -5)  -- 不居中，Y轴偏移-5
+        knob.Position = UDim2.new(percent, -6, 0, -4.5)
         valueLabel.Text = "重力: " .. string.format("%.1f", currentG)
     end
     updateKnobPosition()
@@ -822,7 +821,7 @@ local function createGravityModeWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -7, 0, -5)
+            knob.Position = UDim2.new(percent, -6, 0, -4.5)
             local newGravity = minG + percent * (maxG - minG)
             newGravity = math.floor(newGravity * 10) / 10
             workspace.Gravity = newGravity
@@ -861,15 +860,15 @@ local function disableGravity()
     updateSpeedButtonText()
 end
 
--- ==================== 跳跃模式相关函数（滑块不居中，关闭按钮只关窗口）====================
+-- ==================== 跳跃模式相关函数（统一尺寸180x58，滑块偏移修正）====================
 local function createJumpPowerWindow()
     if jumpPowerWindow then
         jumpPowerWindow:Destroy()
         jumpPowerWindow = nil
     end
 
-    local winWidth = 200
-    local winHeight = 100
+    local winWidth = 180
+    local winHeight = 58
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "JumpPowerWindow"
@@ -893,31 +892,30 @@ local function createJumpPowerWindow()
 
     local title = Instance.new("TextLabel")
     title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 20)
+    title.Size = UDim2.new(1, -25, 0, 14)
     title.Position = UDim2.new(0, 3, 0, 2)
     title.BackgroundTransparency = 1
     title.Text = "跳跃力度"
     title.TextColor3 = Color3.new(1, 1, 1)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
+    title.TextSize = 10
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 18, 0, 18)
-    closeBtn.Position = UDim2.new(1, -20, 0, 2)
+    closeBtn.Size = UDim2.new(0, 16, 0, 16)
+    closeBtn.Position = UDim2.new(1, -18, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
     closeBtn.Text = "X"
     closeBtn.TextColor3 = Color3.new(1, 1, 1)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 10
+    closeBtn.TextSize = 9
     closeBtn.AutoButtonColor = false
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 2)
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 只关闭窗口，不关闭功能
         if jumpPowerWindow then
             jumpPowerWindow:Destroy()
             jumpPowerWindow = nil
@@ -938,20 +936,20 @@ local function createJumpPowerWindow()
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Name = "ValueLabel"
     valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -20, 0, 20)
-    valueLabel.Position = UDim2.new(0, 10, 0, 25)
+    valueLabel.Size = UDim2.new(1, -10, 0, 12)
+    valueLabel.Position = UDim2.new(0, 5, 0, 14)
     valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "跳跃力度: " .. string.format("%.1f", getCurrentJumpPower())
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
     valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 12
-    valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+    valueLabel.TextSize = 8
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     local sliderBg = Instance.new("Frame")
     sliderBg.Name = "SliderBg"
     sliderBg.Parent = bg
-    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
-    sliderBg.Position = UDim2.new(0.1, 0, 0, 55)
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 30)
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     local sliderCorner = Instance.new("UICorner")
     sliderCorner.CornerRadius = UDim.new(0, 1)
@@ -959,7 +957,7 @@ local function createJumpPowerWindow()
 
     local knob = Instance.new("TextButton")
     knob.Name = "Knob"
-    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Size = UDim2.new(0, 12, 0, 12)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -972,7 +970,7 @@ local function createJumpPowerWindow()
     local function updateKnobPosition()
         local currentVal = getCurrentJumpPower()
         local percent = (currentVal - minJP) / (maxJP - minJP)
-        knob.Position = UDim2.new(percent, -7, 0, -5)
+        knob.Position = UDim2.new(percent, -6, 0, -4.5)
         valueLabel.Text = "跳跃力度: " .. string.format("%.1f", currentVal)
     end
     updateKnobPosition()
@@ -995,7 +993,7 @@ local function createJumpPowerWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -7, 0, -5)
+            knob.Position = UDim2.new(percent, -6, 0, -4.5)
             local newJP = minJP + percent * (maxJP - minJP)
             newJP = math.floor(newJP * 10) / 10
             currentJumpPower = newJP
@@ -1113,7 +1111,6 @@ local function createNoclipWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 只关闭窗口，不关闭功能
         if noclipWindow then
             noclipWindow:Destroy()
             noclipWindow = nil
@@ -1169,7 +1166,7 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建夜视悬浮窗（滑块不居中，关闭按钮只关窗口）====================
+-- ==================== 创建夜视悬浮窗 ====================
 local function createNightVisionWindow()
     local winWidth = 180
     local winHeight = 58
@@ -1220,7 +1217,6 @@ local function createNightVisionWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 只关闭窗口，不关闭功能
         if nightVisionWindow then
             nightVisionWindow:Destroy()
             nightVisionWindow = nil
@@ -1910,7 +1906,7 @@ local function showMainMenu()
                     "版本 7.7.6 更新内容：",
                     "",
                     "1. 所有悬浮窗关闭按钮仅销毁窗口，不关闭功能",
-                    "2. 修复重力/跳跃滑块位置计算（恢复默认偏移，不居中）",
+                    "2. 重力/跳跃悬浮窗尺寸统一为180x58，滑块偏移修正",
                     "3. 夜视亮度默认值保持 2.5，范围 0.01~100",
                     "",
                     "功能介绍：",
@@ -2845,7 +2841,7 @@ do
                                         local minG = -100
                                         local maxG = 100
                                         local percent = (workspace.Gravity - minG) / (maxG - minG)
-                                        knob.Position = UDim2.new(percent, -7, 0, -5)
+                                        knob.Position = UDim2.new(percent, -6, 0, -4.5)
                                     end
                                 end
                             end
@@ -2893,7 +2889,7 @@ do
                                         local minJP = 0
                                         local maxJP = 200
                                         local percent = (currentJumpPower - minJP) / (maxJP - minJP)
-                                        knob.Position = UDim2.new(percent, -7, 0, -5)
+                                        knob.Position = UDim2.new(percent, -6, 0, -4.5)
                                     end
                                 end
                             end
