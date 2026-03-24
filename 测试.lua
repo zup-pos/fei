@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.3 (新增重力模式，独立悬浮窗调节，范围-100~100)
--- 新增：重力模式，长按主按钮切换，单击开关，悬浮窗拖动滑块调节重力，关闭自动恢复原始重力
+-- Version: 7.7.4 (新增跳跃力度模式，修复重力滑块错位，夜视亮度恢复0.01~100)
+-- 新增：跳跃力度模式，独立悬浮窗调节Humanoid.JumpPower，范围0~200，关闭自动恢复原始值
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -150,12 +150,13 @@ local flyMode = "屏幕"
 -- 悬浮窗变量
 local noclipWindow = nil
 local nightVisionWindow = nil
-local gravityWindow = nil  -- 重力模式悬浮窗
+local gravityWindow = nil
+local jumpPowerWindow = nil
 
--- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=夜视, 4=重力）
+-- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=夜视, 4=重力, 5=跳跃）
 local modeIndex = 0
-local modeNames = { "fly", "speed", "noclip", "nightvision", "gravity" }
-local modeDisplayNames = { "飞天", "移速", "穿墙", "夜视", "重力" }
+local modeNames = { "fly", "speed", "noclip", "nightvision", "gravity", "jumppower" }
+local modeDisplayNames = { "飞天", "移速", "穿墙", "夜视", "重力", "跳跃" }
 
 local speedModeEnabled = false
 local speedModeConnection = nil
@@ -182,7 +183,11 @@ local nightVisionMaintainConnection = nil
 -- ==================== 重力模式相关变量 ====================
 local gravityEnabled = false
 local originalGravity = 196.2
-local gravityWindow = nil
+
+-- ==================== 跳跃模式相关变量 ====================
+local jumpPowerEnabled = false
+local originalJumpPower = 50
+local currentJumpPower = 50
 
 -- ==================== 有效Humanoid状态 ====================
 local VALID_HUMANOD_STATES = {
@@ -258,6 +263,8 @@ local function updateMainButtonText()
         state = nightVisionEnabled
     elseif modeIndex == 4 then
         state = gravityEnabled
+    elseif modeIndex == 5 then
+        state = jumpPowerEnabled
     end
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
@@ -288,6 +295,18 @@ local function updateSpeedButtonText()
         speed.Text = string.format("%.2f", nightVisionBrightness)
     elseif modeIndex == 4 then
         speed.Text = string.format("%.1f", workspace.Gravity)
+    elseif modeIndex == 5 then
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                speed.Text = string.format("%.1f", hum.JumpPower)
+            else
+                speed.Text = tostring(currentJumpPower)
+            end
+        else
+            speed.Text = tostring(currentJumpPower)
+        end
     end
 end
 
@@ -736,11 +755,11 @@ local function createGravityModeWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 关闭重力模式
         disableGravity()
     end)
 
     local valueLabel = Instance.new("TextLabel")
+    valueLabel.Name = "ValueLabel"
     valueLabel.Parent = bg
     valueLabel.Size = UDim2.new(1, -20, 0, 20)
     valueLabel.Position = UDim2.new(0, 10, 0, 25)
@@ -752,6 +771,7 @@ local function createGravityModeWindow()
     valueLabel.TextXAlignment = Enum.TextXAlignment.Center
 
     local sliderBg = Instance.new("Frame")
+    sliderBg.Name = "SliderBg"
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
     sliderBg.Position = UDim2.new(0.1, 0, 0, 55)
@@ -761,22 +781,25 @@ local function createGravityModeWindow()
     sliderCorner.Parent = sliderBg
 
     local knob = Instance.new("TextButton")
+    knob.Name = "Knob"
     knob.Size = UDim2.new(0, 14, 0, 14)
-    local minG = -100
-    local maxG = 100
-    local function updateKnobPosition()
-        local currentG = workspace.Gravity
-        local percent = (currentG - minG) / (maxG - minG)
-        knob.Position = UDim2.new(percent, -7, 0, -5)
-        valueLabel.Text = "重力: " .. string.format("%.1f", currentG)
-    end
-    updateKnobPosition()
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
     local knobCorner = Instance.new("UICorner")
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
+
+    local minG = -100
+    local maxG = 100
+    local function updateKnobPosition()
+        local currentG = workspace.Gravity
+        local percent = (currentG - minG) / (maxG - minG)
+        knob.Position = UDim2.new(percent, 0, 0.5, 0)
+        valueLabel.Text = "重力: " .. string.format("%.1f", currentG)
+    end
+    updateKnobPosition()
 
     local dragging = false
     knob.MouseButton1Down:Connect(function()
@@ -796,7 +819,7 @@ local function createGravityModeWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -7, 0, -5)
+            knob.Position = UDim2.new(percent, 0, 0.5, 0)
             local newGravity = minG + percent * (maxG - minG)
             newGravity = math.floor(newGravity * 10) / 10
             workspace.Gravity = newGravity
@@ -831,6 +854,202 @@ local function disableGravity()
     workspace.Gravity = originalGravity
     gravityEnabled = false
     tanchuangxiaoxi("已关闭重力调节，恢复原始重力", "重力模式")
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+-- ==================== 跳跃模式相关函数 ====================
+local function createJumpPowerWindow()
+    if jumpPowerWindow then
+        jumpPowerWindow:Destroy()
+        jumpPowerWindow = nil
+    end
+
+    local winWidth = 200
+    local winHeight = 100
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "JumpPowerWindow"
+    sg.Parent = playerGui
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = sg
+    bg.Size = UDim2.new(0, winWidth, 0, winHeight)
+    bg.Position = UDim2.new(0.5, -winWidth/2, 0.5, -winHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.Draggable = true
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 5)
+    corner.Parent = bg
+
+    local title = Instance.new("TextLabel")
+    title.Parent = bg
+    title.Size = UDim2.new(1, -25, 0, 20)
+    title.Position = UDim2.new(0, 3, 0, 2)
+    title.BackgroundTransparency = 1
+    title.Text = "跳跃力度"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(0, 18, 0, 18)
+    closeBtn.Position = UDim2.new(1, -20, 0, 2)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 10
+    closeBtn.AutoButtonColor = false
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 2)
+    closeCorner.Parent = closeBtn
+
+    closeBtn.MouseButton1Click:Connect(function()
+        disableJumpPower()
+    end)
+
+    local function getCurrentJumpPower()
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then
+                return hum.JumpPower
+            end
+        end
+        return currentJumpPower
+    end
+
+    local valueLabel = Instance.new("TextLabel")
+    valueLabel.Name = "ValueLabel"
+    valueLabel.Parent = bg
+    valueLabel.Size = UDim2.new(1, -20, 0, 20)
+    valueLabel.Position = UDim2.new(0, 10, 0, 25)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = "跳跃力度: " .. string.format("%.1f", getCurrentJumpPower())
+    valueLabel.TextColor3 = Color3.new(1, 1, 1)
+    valueLabel.Font = Enum.Font.Gotham
+    valueLabel.TextSize = 12
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Name = "SliderBg"
+    sliderBg.Parent = bg
+    sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
+    sliderBg.Position = UDim2.new(0.1, 0, 0, 55)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 1)
+    sliderCorner.Parent = sliderBg
+
+    local knob = Instance.new("TextButton")
+    knob.Name = "Knob"
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    knob.Text = ""
+    knob.Parent = sliderBg
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local minJP = 0
+    local maxJP = 200
+    local function updateKnobPosition()
+        local currentVal = getCurrentJumpPower()
+        local percent = (currentVal - minJP) / (maxJP - minJP)
+        knob.Position = UDim2.new(percent, 0, 0.5, 0)
+        valueLabel.Text = "跳跃力度: " .. string.format("%.1f", currentVal)
+    end
+    updateKnobPosition()
+
+    local dragging = false
+    knob.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if dragging then
+            local mousePos = UserInputService:GetMouseLocation()
+            local absPos = sliderBg.AbsolutePosition
+            local absSize = sliderBg.AbsoluteSize.X
+            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
+            local percent = relX / absSize
+            knob.Position = UDim2.new(percent, 0, 0.5, 0)
+            local newJP = minJP + percent * (maxJP - minJP)
+            newJP = math.floor(newJP * 10) / 10
+            currentJumpPower = newJP
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                if hum then
+                    hum.JumpPower = currentJumpPower
+                end
+            end
+            valueLabel.Text = "跳跃力度: " .. string.format("%.1f", currentJumpPower)
+            updateSpeedButtonText()
+        end
+    end)
+
+    sg.Destroying:Connect(function()
+        if conn then conn:Disconnect() end
+    end)
+
+    return sg
+end
+
+local function enableJumpPower()
+    if jumpPowerEnabled then return end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            originalJumpPower = hum.JumpPower
+            currentJumpPower = originalJumpPower
+        else
+            originalJumpPower = 50
+            currentJumpPower = 50
+        end
+    else
+        originalJumpPower = 50
+        currentJumpPower = 50
+    end
+    jumpPowerEnabled = true
+    jumpPowerWindow = createJumpPowerWindow()
+    tanchuangxiaoxi("已开启跳跃力度调节", "跳跃模式")
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+local function disableJumpPower()
+    if not jumpPowerEnabled then return end
+    if jumpPowerWindow then
+        jumpPowerWindow:Destroy()
+        jumpPowerWindow = nil
+    end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            hum.JumpPower = originalJumpPower
+        end
+    end
+    jumpPowerEnabled = false
+    tanchuangxiaoxi("已关闭跳跃力度调节，恢复原始值", "跳跃模式")
     updateMainButtonText()
     updateSpeedButtonText()
 end
@@ -938,7 +1157,7 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建夜视悬浮窗 ====================
+-- ==================== 创建夜视悬浮窗（亮度范围0.01~100）====================
 local function createNightVisionWindow()
     local winWidth = 180
     local winHeight = 58
@@ -1014,10 +1233,11 @@ local function createNightVisionWindow()
 
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 12, 0, 12)
-    local minBright = 0.000001
-    local maxBright = 50
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    local minBright = 0.01
+    local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-    knob.Position = UDim2.new(percent, -6, 0, -4.5)
+    knob.Position = UDim2.new(percent, 0, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -1043,9 +1263,9 @@ local function createNightVisionWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -6, 0, -4.5)
+            knob.Position = UDim2.new(percent, 0, 0.5, 0)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100000) / 100000
+            newBrightness = math.floor(newBrightness * 100) / 100
             nightVisionBrightness = newBrightness
             valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
             if nightVisionEnabled then
@@ -1126,15 +1346,25 @@ local function onCharacterAdded(char)
         enableNightVision()
     end
 
-    -- 重力模式：如果开启，确保重力值恢复并重新创建窗口（因为窗口可能随角色重生被销毁）
     if gravityEnabled then
-        -- 重新设置重力值为之前的值（用户设定值，不是原始值）
-        -- 但窗口可能已随重生被销毁，需要重建
         if gravityWindow then
             gravityWindow:Destroy()
             gravityWindow = nil
         end
         gravityWindow = createGravityModeWindow()
+    end
+
+    if jumpPowerEnabled then
+        -- 重新设置跳跃力度为用户当前设定的值
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            hum.JumpPower = currentJumpPower
+        end
+        if jumpPowerWindow then
+            jumpPowerWindow:Destroy()
+            jumpPowerWindow = nil
+        end
+        jumpPowerWindow = createJumpPowerWindow()
     end
 
     stopTpwalking()
@@ -1659,28 +1889,31 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.3 更新内容：",
+                    "版本 7.7.4 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
-                    "2. 现在移速模式关闭时会实时显示实际速度",
-                    "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
-                    "4. 优化界面显示",
-                    "5. 新增独立穿墙功能（长按主按钮切换）",
-                    "6. 新增夜视模式（长按主按钮第4次）",
-                    "7. 增强穿墙：修复开启失败问题，跳跃等新部件自动穿透",
-                    "8. 新增重力模式（长按主按钮第5次），单击开关，悬浮窗拖动滑块调节重力（-100~100）",
+                    "2. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
+                    "3. 优化界面显示",
+                    "4. 新增独立穿墙功能（长按主按钮切换）",
+                    "5. 新增夜视模式（长按主按钮第4次）",
+                    "6. 增强穿墙：修复开启失败问题，跳跃等新部件自动穿透",
+                    "7. 新增重力模式（长按主按钮第5次），单击开关，悬浮窗拖动滑块调节重力（-100~100）",
+                    "8. 新增跳跃力度模式（长按主按钮第6次），独立悬浮窗调节Humanoid.JumpPower（0~200）",
+                    "9. 夜视亮度范围恢复为 0.01~100",
+                    "10. 修复重力悬浮窗滑块按钮错位（使用居中锚点）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/夜视亮度），长按可设置上升/下降步长；重力模式下显示当前重力值",
-                    "- 主按钮：长按切换飞天/移速/穿墙/夜视/重力模式，单击开关当前模式",
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/夜视亮度/重力值/跳跃力度），长按可设置上升/下降步长",
+                    "- 主按钮：长按切换飞天/移速/穿墙/夜视/重力/跳跃模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
-                    "- 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",
-                    "- 重力模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变世界重力，关闭恢复原始值",
+                    "- 夜视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
+                    "- 重力模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变世界重力（-100~100），关闭恢复原始值",
+                    "- 跳跃力度：独立开关，开启后出现悬浮窗，拖动滑块实时改变角色跳跃力度（0~200），关闭恢复原始值",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1803,15 +2036,15 @@ local function showMainMenu()
                     "   - 飞天模式：调整倍率，每次增减 incStep（可在设置中调整）",
                     "   - 移速模式：调整锁定速度，每次增减 incStep",
                     "🔹 速度标签：",
-                    "   - 飞天/移速/夜视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
+                    "   - 飞天/移速/夜视/重力/跳跃模式下单击可手动设置当前值（倍率/锁定速度/亮度/重力值/跳跃力度）",
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
-                    "   - 重力模式下显示当前重力值",
-                    "🔹 主按钮：长按切换飞天/移速/穿墙/夜视/重力模式，单击开关当前模式",
+                    "🔹 主按钮：长按切换飞天/移速/穿墙/夜视/重力/跳跃模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复，跳跃等新部件自动穿透",
-                    "🔹 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",
+                    "🔹 夜视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
                     "🔹 重力模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变世界重力（-100~100），关闭恢复原始值",
+                    "🔹 跳跃模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变角色跳跃力度（0~200），关闭恢复原始值",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -2150,6 +2383,7 @@ local function showMainMenu()
                             disableNoclip()
                             disableNightVision()
                             disableGravity()
+                            disableJumpPower()
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -2585,7 +2819,6 @@ do
             elseif modeIndex == 3 then
                 showBrightnessDialog()
             elseif modeIndex == 4 then
-                -- 重力模式下手动设置重力值
                 showInputDialog(
                     "设置重力值",
                     string.format("%.1f", workspace.Gravity),
@@ -2595,13 +2828,11 @@ do
                             workspace.Gravity = num
                             tanchuangxiaoxi("重力已设为 " .. tostring(num), "重力设置")
                             updateSpeedButtonText()
-                            -- 如果重力窗口存在，更新显示
                             if gravityWindow and gravityWindow:FindFirstChild("Frame") then
                                 local valueLabel = gravityWindow.Frame:FindFirstChild("ValueLabel")
                                 if valueLabel then
                                     valueLabel.Text = "重力: " .. string.format("%.1f", workspace.Gravity)
                                 end
-                                -- 更新滑块位置
                                 local sliderBg = gravityWindow.Frame:FindFirstChild("SliderBg")
                                 if sliderBg then
                                     local knob = sliderBg:FindFirstChild("Knob")
@@ -2609,12 +2840,60 @@ do
                                         local minG = -100
                                         local maxG = 100
                                         local percent = (workspace.Gravity - minG) / (maxG - minG)
-                                        knob.Position = UDim2.new(percent, -7, 0, -5)
+                                        knob.Position = UDim2.new(percent, 0, 0.5, 0)
                                     end
                                 end
                             end
                         else
                             tanchuangxiaoxi("请输入-100到100之间的数字", "错误")
+                        end
+                    end
+                )
+            elseif modeIndex == 5 then
+                local currentJP = 50
+                local char = player.Character
+                if char then
+                    local hum = char:FindFirstChildWhichIsA("Humanoid")
+                    if hum then
+                        currentJP = hum.JumpPower
+                    end
+                else
+                    currentJP = currentJumpPower
+                end
+                showInputDialog(
+                    "设置跳跃力度",
+                    string.format("%.1f", currentJP),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num >= 0 and num <= 200 then
+                            currentJumpPower = num
+                            local char = player.Character
+                            if char then
+                                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                                if hum then
+                                    hum.JumpPower = currentJumpPower
+                                end
+                            end
+                            tanchuangxiaoxi("跳跃力度已设为 " .. tostring(num), "跳跃设置")
+                            updateSpeedButtonText()
+                            if jumpPowerWindow and jumpPowerWindow:FindFirstChild("Frame") then
+                                local valueLabel = jumpPowerWindow.Frame:FindFirstChild("ValueLabel")
+                                if valueLabel then
+                                    valueLabel.Text = "跳跃力度: " .. string.format("%.1f", currentJumpPower)
+                                end
+                                local sliderBg = jumpPowerWindow.Frame:FindFirstChild("SliderBg")
+                                if sliderBg then
+                                    local knob = sliderBg:FindFirstChild("Knob")
+                                    if knob then
+                                        local minJP = 0
+                                        local maxJP = 200
+                                        local percent = (currentJumpPower - minJP) / (maxJP - minJP)
+                                        knob.Position = UDim2.new(percent, 0, 0.5, 0)
+                                    end
+                                end
+                            end
+                        else
+                            tanchuangxiaoxi("请输入0到200之间的数字", "错误")
                         end
                     end
                 )
@@ -2645,8 +2924,8 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                -- 循环切换模式（5个模式）
-                modeIndex = (modeIndex + 1) % 5
+                -- 循环切换模式（6个模式）
+                modeIndex = (modeIndex + 1) % 6
                 updateMainButtonText()
                 updateSpeedButtonText()
                 tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
@@ -2689,6 +2968,14 @@ do
                         disableGravity()
                     else
                         enableGravity()
+                    end
+                    updateMainButtonText()
+                    updateSpeedButtonText()
+                elseif modeIndex == 5 then
+                    if jumpPowerEnabled then
+                        disableJumpPower()
+                    else
+                        enableJumpPower()
                     end
                     updateMainButtonText()
                     updateSpeedButtonText()
@@ -2840,6 +3127,7 @@ main.Destroying:Connect(function()
         restoreLighting()
     end
     disableGravity()
+    disableJumpPower()
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
@@ -2900,7 +3188,7 @@ function showBrightnessDialog()
     textBox.Position = UDim2.new(0.2, 0, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "亮度 (0.000001~50)"
+    textBox.PlaceholderText = "亮度 (0.01~100)"
     textBox.Text = string.format("%.2f", nightVisionBrightness)
     textBox.Font = Enum.Font.Gotham
     textBox.TextSize = 14
@@ -2924,10 +3212,11 @@ function showBrightnessDialog()
 
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local minBright = 0.000001
-    local maxBright = 50
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    local minBright = 0.01
+    local maxBright = 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-    knob.Position = UDim2.new(percent, -10, 0, -8)
+    knob.Position = UDim2.new(percent, 0, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -2953,9 +3242,9 @@ function showBrightnessDialog()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -10, 0, -8)
+            knob.Position = UDim2.new(percent, 0, 0.5, 0)
             local newBrightness = minBright + percent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100000) / 100000
+            newBrightness = math.floor(newBrightness * 100) / 100
             textBox.Text = string.format("%.2f", newBrightness)
         end
     end)
@@ -2964,10 +3253,10 @@ function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = clamp(num, minBright, maxBright)
-            num = math.floor(num * 100000) / 100000
+            num = math.floor(num * 100) / 100
             textBox.Text = string.format("%.2f", num)
             local newPercent = (num - minBright) / (maxBright - minBright)
-            knob.Position = UDim2.new(newPercent, -10, 0, -8)
+            knob.Position = UDim2.new(newPercent, 0, 0.5, 0)
         else
             textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
@@ -3014,7 +3303,7 @@ function showBrightnessDialog()
         local num = tonumber(textBox.Text)
         if num then
             num = clamp(num, minBright, maxBright)
-            num = math.floor(num * 100000) / 100000
+            num = math.floor(num * 100) / 100
             nightVisionBrightness = num
             if nightVisionEnabled then
                 applyNightVision()
