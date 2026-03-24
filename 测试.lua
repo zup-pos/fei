@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.1-fix2 (修复重力/跳跃滑块错位，穿墙增强)
--- 修复：重力/跳跃悬浮窗滑块偏移与夜视一致，穿墙功能稳定
+-- Version: 7.7.3 (重力范围-10000~10000，穿墙增强，模式扩展)
+-- 修复：穿墙可靠，重力范围扩大，所有悬浮窗关闭只关窗口
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -183,6 +183,8 @@ local nightVisionMaintainConnection = nil
 -- ==================== 重力模式相关变量 ====================
 local gravityEnabled = false
 local originalGravity = 196.2
+local gravityMin = -10000
+local gravityMax = 10000
 
 -- ==================== 跳跃模式相关变量 ====================
 local jumpPowerEnabled = false
@@ -571,7 +573,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数 ====================
+-- ==================== 穿墙核心函数（增强版）====================
 local function getAllParts(character)
     local parts = {}
     local function scan(instance)
@@ -642,8 +644,9 @@ local function disableNoclip()
     end
 end
 
--- 开启穿墙
+-- 开启穿墙（修复：等待角色完全加载，监听新部件）
 local function enableNoclip()
+    -- 等待角色完全加载
     while not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") do
         task.wait()
     end
@@ -661,6 +664,7 @@ local function enableNoclip()
             applyNoclip()
         end
     end)
+    -- 监听新部件添加
     if noclipDescendantConnection then
         noclipDescendantConnection:Disconnect()
     end
@@ -697,7 +701,7 @@ local function disableNightVision()
     end
 end
 
--- ==================== 重力模式相关函数（修复滑块）====================
+-- ==================== 重力模式相关函数（范围-10000~10000）====================
 local function createGravityModeWindow()
     if gravityWindow then
         gravityWindow:Destroy()
@@ -791,8 +795,8 @@ local function createGravityModeWindow()
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
 
-    local minG = -100
-    local maxG = 100
+    local minG = gravityMin
+    local maxG = gravityMax
     local function updateKnobPosition()
         local currentG = workspace.Gravity
         local percent = (currentG - minG) / (maxG - minG)
@@ -858,7 +862,7 @@ local function disableGravity()
     updateSpeedButtonText()
 end
 
--- ==================== 跳跃模式相关函数（修复滑块）====================
+-- ==================== 跳跃模式相关函数 ====================
 local function createJumpPowerWindow()
     if jumpPowerWindow then
         jumpPowerWindow:Destroy()
@@ -1901,14 +1905,14 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.2 更新内容：",
+                    "版本 7.7.3 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
                     "2. 修复穿墙无法正常工作的问题（等待角色加载、监听新部件）",
                     "3. 修复重力/跳跃悬浮窗滑块错位问题",
                     "4. 所有悬浮窗关闭按钮仅销毁窗口，不关闭功能",
-                    "5. 新增重力调节模式（长按主按钮切换）",
-                    "6. 新增跳跃力度调节模式（长按主按钮切换）",
+                    "5. 新增重力调节模式（范围-10000~10000）",
+                    "6. 新增跳跃力度调节模式（0~200）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1920,7 +1924,7 @@ local function showMainMenu()
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，重生后自动恢复，跳跃时新部件自动穿透",
                     "- 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
-                    "- 重力调节：独立开关，悬浮窗拖动滑块调节世界重力（-100~100），关闭窗口不关功能",
+                    "- 重力调节：独立开关，悬浮窗拖动滑块调节世界重力（-10000~10000），关闭窗口不关功能",
                     "- 跳跃力度：独立开关，悬浮窗拖动滑块调节角色跳跃力度（0~200），关闭窗口不关功能",
                     "",
                     "自定义屏幕尺寸：",
@@ -2051,7 +2055,7 @@ local function showMainMenu()
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，重生后自动恢复，跳跃等新部件自动穿透",
                     "🔹 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
-                    "🔹 重力模式：独立开关，悬浮窗滑块实时调节世界重力（-100~100），关闭窗口不关功能",
+                    "🔹 重力模式：独立开关，悬浮窗滑块实时调节世界重力（-10000~10000），关闭窗口不关功能",
                     "🔹 跳跃模式：独立开关，悬浮窗滑块实时调节角色跳跃力度（0~200），关闭窗口不关功能",
                     "",
                     "⚙️ 菜单功能：",
@@ -2826,7 +2830,7 @@ do
                     string.format("%.1f", workspace.Gravity),
                     function(input)
                         local num = tonumber(input)
-                        if num and num >= -100 and num <= 100 then
+                        if num and num >= gravityMin and num <= gravityMax then
                             workspace.Gravity = num
                             tanchuangxiaoxi("重力已设为 " .. tostring(num), "重力设置")
                             updateSpeedButtonText()
@@ -2839,15 +2843,13 @@ do
                                 if sliderBg then
                                     local knob = sliderBg:FindFirstChild("Knob")
                                     if knob then
-                                        local minG = -100
-                                        local maxG = 100
-                                        local percent = (workspace.Gravity - minG) / (maxG - minG)
+                                        local percent = (workspace.Gravity - gravityMin) / (gravityMax - gravityMin)
                                         knob.Position = UDim2.new(percent, -6, 0, -4.5)
                                     end
                                 end
                             end
                         else
-                            tanchuangxiaoxi("请输入-100到100之间的数字", "错误")
+                            tanchuangxiaoxi("请输入" .. gravityMin .. "到" .. gravityMax .. "之间的数字", "错误")
                         end
                     end
                 )
@@ -2887,9 +2889,7 @@ do
                                 if sliderBg then
                                     local knob = sliderBg:FindFirstChild("Knob")
                                     if knob then
-                                        local minJP = 0
-                                        local maxJP = 200
-                                        local percent = (currentJumpPower - minJP) / (maxJP - minJP)
+                                        local percent = (currentJumpPower - 0) / 200
                                         knob.Position = UDim2.new(percent, -6, 0, -4.5)
                                     end
                                 end
@@ -3213,16 +3213,20 @@ function showBrightnessDialog()
 
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local minBright = 0.01
-    local maxBright = 100
-    local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-    knob.Position = UDim2.new(percent, -10, 0, -8)
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
     local knobCorner = Instance.new("UICorner")
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
+
+    local minBright = 0.01
+    local maxBright = 100
+    local function updateKnobPosition()
+        local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+        knob.Position = UDim2.new(percent, -10, 0, -10)
+    end
+    updateKnobPosition()
 
     local dragging = false
     knob.MouseButton1Down:Connect(function()
@@ -3242,7 +3246,7 @@ function showBrightnessDialog()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local percent = relX / absSize
-            knob.Position = UDim2.new(percent, -10, 0, -8)
+            knob.Position = UDim2.new(percent, -10, 0, -10)
             local newBrightness = minBright + percent * (maxBright - minBright)
             newBrightness = math.floor(newBrightness * 100) / 100
             textBox.Text = string.format("%.2f", newBrightness)
@@ -3256,7 +3260,7 @@ function showBrightnessDialog()
             num = math.floor(num * 100) / 100
             textBox.Text = string.format("%.2f", num)
             local newPercent = (num - minBright) / (maxBright - minBright)
-            knob.Position = UDim2.new(newPercent, -10, 0, -8)
+            knob.Position = UDim2.new(newPercent, -10, 0, -10)
         else
             textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
