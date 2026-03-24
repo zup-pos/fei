@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.3 (重力范围-10000~10000，穿墙增强，模式扩展)
--- 修复：穿墙可靠，重力范围扩大，所有悬浮窗关闭只关窗口
+-- Version: 7.7.3-fix (修复重力负数验证，穿墙增强，悬浮窗关闭不关功能)
+-- 修复：重力输入允许 -10000 ~ 10000；穿墙等待角色加载、监听新部件
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -168,7 +168,7 @@ local originalSpeed = 16
 -- 死亡自动关闭（仅影响飞天/移速）
 local autoDisableOnDeath = true
 
--- ==================== 穿墙相关变量 ====================
+-- ==================== 穿墙相关变量（增强版） ====================
 local noclipEnabled = false
 local noclipMaintainConnection = nil
 local noclipDescendantConnection = nil
@@ -573,7 +573,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（增强版）====================
+-- ==================== 穿墙核心函数（增强版） ====================
 local function getAllParts(character)
     local parts = {}
     local function scan(instance)
@@ -644,7 +644,7 @@ local function disableNoclip()
     end
 end
 
--- 开启穿墙（修复：等待角色完全加载，监听新部件）
+-- 开启穿墙（增强版：等待角色完全加载，监听新部件）
 local function enableNoclip()
     -- 等待角色完全加载
     while not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") do
@@ -1905,13 +1905,13 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.3 更新内容：",
+                    "版本 7.7.3-fix 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
                     "2. 修复穿墙无法正常工作的问题（等待角色加载、监听新部件）",
                     "3. 修复重力/跳跃悬浮窗滑块错位问题",
                     "4. 所有悬浮窗关闭按钮仅销毁窗口，不关闭功能",
-                    "5. 新增重力调节模式（范围-10000~10000）",
+                    "5. 新增重力调节模式（范围-10000~10000，支持负数）",
                     "6. 新增跳跃力度调节模式（0~200）",
                     "",
                     "功能介绍：",
@@ -2849,7 +2849,7 @@ do
                                 end
                             end
                         else
-                            tanchuangxiaoxi("请输入" .. gravityMin .. "到" .. gravityMax .. "之间的数字", "错误")
+                            tanchuangxiaoxi("请输入 " .. gravityMin .. " 到 " .. gravityMax .. " 之间的数字", "错误")
                         end
                     end
                 )
