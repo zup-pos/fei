@@ -1,6 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.1-fix (修复穿墙无法工作的问题)
--- 修复：穿墙增强，确保所有部件穿透，动态监听新部件
+-- Version: 7.7.1 (最终修复版 - 悬浮窗关闭不关功能)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -169,7 +168,6 @@ local autoDisableOnDeath = true
 -- ==================== 穿墙相关变量 ====================
 local noclipEnabled = false
 local noclipMaintainConnection = nil
-local noclipDescendantConnection = nil   -- 新增：监听新部件
 local originalCollisions = {}
 
 -- ==================== 透视相关变量 ====================
@@ -542,7 +540,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（修复版）====================
+-- ==================== 穿墙核心函数 ====================
 local function getAllParts(character)
     local parts = {}
     local function scan(instance)
@@ -602,53 +600,11 @@ local function disableNoclip()
             noclipMaintainConnection:Disconnect()
             noclipMaintainConnection = nil
         end
-        if noclipDescendantConnection then
-            noclipDescendantConnection:Disconnect()
-            noclipDescendantConnection = nil
-        end
         restoreOriginalCollisions()
         noclipEnabled = false
         updateMainButtonText()
         updateSpeedButtonText()
     end
-end
-
--- 开启穿墙（修复：等待角色完全加载，监听新部件）
-local function enableNoclip()
-    -- 等待角色完全加载
-    while not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") do
-        task.wait()
-    end
-    if noclipEnabled then return end
-
-    if next(originalCollisions) == nil then
-        saveOriginalCollisions(player.Character)
-    end
-    applyNoclip()
-    if noclipMaintainConnection then
-        noclipMaintainConnection:Disconnect()
-    end
-    noclipMaintainConnection = RunService.Heartbeat:Connect(function()
-        if noclipEnabled and player.Character then
-            applyNoclip()
-        end
-    end)
-    -- 监听新部件添加，确保跳跃等生成的新部件也被穿透
-    if noclipDescendantConnection then
-        noclipDescendantConnection:Disconnect()
-    end
-    noclipDescendantConnection = player.Character.DescendantAdded:Connect(function(desc)
-        if noclipEnabled and desc:IsA("BasePart") then
-            desc.CanCollide = false
-            pcall(function() desc.CollisionGroup = "Ghost" end)
-        end
-    end)
-
-    noclipEnabled = true
-    if noclipWindow then noclipWindow:Destroy() end
-    noclipWindow = createNoclipWindow()
-    updateMainButtonText()
-    updateSpeedButtonText()
 end
 
 -- 关闭透视
@@ -904,6 +860,32 @@ local function createNightVisionWindow()
     end)
 
     return sg
+end
+
+-- ==================== 开启穿墙 ====================
+local function enableNoclip()
+    if not player.Character then return end
+    if noclipEnabled then return end
+
+    if next(originalCollisions) == nil then
+        saveOriginalCollisions(player.Character)
+    end
+    applyNoclip()
+    if noclipMaintainConnection then
+        noclipMaintainConnection:Disconnect()
+    end
+    noclipMaintainConnection = RunService.Heartbeat:Connect(function()
+        if noclipEnabled and player.Character then
+            applyNoclip()
+        end
+    end)
+    noclipEnabled = true
+
+    -- 创建穿墙悬浮窗
+    if noclipWindow then noclipWindow:Destroy() end
+    noclipWindow = createNoclipWindow()
+    updateMainButtonText()
+    updateSpeedButtonText()
 end
 
 -- ==================== 开启透视 ====================
@@ -1493,7 +1475,7 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.1-fix 更新内容：",
+                    "版本 7.7.1 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
                     "2. 现在移速模式关闭时会实时显示实际速度",
@@ -1501,7 +1483,6 @@ local function showMainMenu()
                     "4. 优化界面显示",
                     "5. 新增独立穿墙功能（长按主按钮切换）",
                     "6. 新增透视模式（长按主按钮第4次）",
-                    "7. 修复穿墙无法正常工作的问题（等待角色加载、监听新部件）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
@@ -1511,8 +1492,8 @@ local function showMainMenu()
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
-                    "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复，跳跃时新部件自动穿透",
-                    "- 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
+                    "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1640,8 +1621,8 @@ local function showMainMenu()
                     "🔹 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
-                    "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复，跳跃时新部件自动穿透",
-                    "🔹 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
+                    "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
+                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
