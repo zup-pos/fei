@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.2 (穿墙增强 + 重力调节)
--- 新增：夜视模式下长按主按钮打开重力调节悬浮窗（-100~100，关闭自动恢复重力）
+-- Version: 7.7.3 (新增重力模式，独立悬浮窗调节，范围-100~100)
+-- 新增：重力模式，长按主按钮切换，单击开关，悬浮窗拖动滑块调节重力，关闭自动恢复原始重力
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -150,12 +150,12 @@ local flyMode = "屏幕"
 -- 悬浮窗变量
 local noclipWindow = nil
 local nightVisionWindow = nil
-local gravityWindow = nil
+local gravityWindow = nil  -- 重力模式悬浮窗
 
--- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=夜视）
+-- 模式切换（0=飞天, 1=移速, 2=穿墙, 3=夜视, 4=重力）
 local modeIndex = 0
-local modeNames = { "fly", "speed", "noclip", "nightvision" }
-local modeDisplayNames = { "飞天", "移速", "穿墙", "夜视" }
+local modeNames = { "fly", "speed", "noclip", "nightvision", "gravity" }
+local modeDisplayNames = { "飞天", "移速", "穿墙", "夜视", "重力" }
 
 local speedModeEnabled = false
 local speedModeConnection = nil
@@ -170,7 +170,7 @@ local autoDisableOnDeath = true
 -- ==================== 穿墙相关变量 ====================
 local noclipEnabled = false
 local noclipMaintainConnection = nil
-local noclipDescendantConnection = nil  -- 新增：监听部件添加
+local noclipDescendantConnection = nil
 local originalCollisions = {}
 
 -- ==================== 夜视相关变量 ====================
@@ -179,9 +179,10 @@ local nightVisionBrightness = 2.5
 local originalLighting = {}
 local nightVisionMaintainConnection = nil
 
--- ==================== 重力相关变量 ====================
+-- ==================== 重力模式相关变量 ====================
+local gravityEnabled = false
 local originalGravity = 196.2
-local gravityWindowActive = false
+local gravityWindow = nil
 
 -- ==================== 有效Humanoid状态 ====================
 local VALID_HUMANOD_STATES = {
@@ -255,6 +256,8 @@ local function updateMainButtonText()
         state = noclipEnabled
     elseif modeIndex == 3 then
         state = nightVisionEnabled
+    elseif modeIndex == 4 then
+        state = gravityEnabled
     end
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 end
@@ -283,6 +286,8 @@ local function updateSpeedButtonText()
         speed.Text = noclipEnabled and "开启" or "关闭"
     elseif modeIndex == 3 then
         speed.Text = string.format("%.2f", nightVisionBrightness)
+    elseif modeIndex == 4 then
+        speed.Text = string.format("%.1f", workspace.Gravity)
     end
 end
 
@@ -547,7 +552,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（增强版）====================
+-- ==================== 穿墙核心函数 ====================
 local function getAllParts(character)
     local parts = {}
     local function scan(instance)
@@ -618,13 +623,17 @@ local function disableNoclip()
     end
 end
 
--- 开启穿墙（增强：监听新部件）
+-- 开启穿墙
 local function enableNoclip()
-    if not player.Character then return end
+    local char = player.Character
+    while not char do
+        task.wait()
+        char = player.Character
+    end
     if noclipEnabled then return end
 
     if next(originalCollisions) == nil then
-        saveOriginalCollisions(player.Character)
+        saveOriginalCollisions(char)
     end
     applyNoclip()
     if noclipMaintainConnection then
@@ -635,11 +644,10 @@ local function enableNoclip()
             applyNoclip()
         end
     end)
-    -- 监听新部件添加，确保跳跃等生成的新部件也被穿透
     if noclipDescendantConnection then
         noclipDescendantConnection:Disconnect()
     end
-    noclipDescendantConnection = player.Character.DescendantAdded:Connect(function(desc)
+    noclipDescendantConnection = char.DescendantAdded:Connect(function(desc)
         if noclipEnabled and desc:IsA("BasePart") then
             desc.CanCollide = false
             pcall(function() desc.CollisionGroup = "Ghost" end)
@@ -672,8 +680,8 @@ local function disableNightVision()
     end
 end
 
--- ==================== 重力调节悬浮窗 ====================
-local function createGravityWindow()
+-- ==================== 重力模式相关函数 ====================
+local function createGravityModeWindow()
     if gravityWindow then
         gravityWindow:Destroy()
         gravityWindow = nil
@@ -702,7 +710,6 @@ local function createGravityWindow()
     corner.CornerRadius = UDim.new(0, 5)
     corner.Parent = bg
 
-    -- 标题
     local title = Instance.new("TextLabel")
     title.Parent = bg
     title.Size = UDim2.new(1, -25, 0, 20)
@@ -714,7 +721,6 @@ local function createGravityWindow()
     title.TextSize = 12
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- 关闭按钮
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(0, 18, 0, 18)
@@ -730,14 +736,10 @@ local function createGravityWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        -- 恢复原始重力
-        workspace.Gravity = originalGravity
-        sg:Destroy()
-        gravityWindow = nil
-        gravityWindowActive = false
+        -- 关闭重力模式
+        disableGravity()
     end)
 
-    -- 重力值显示
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Parent = bg
     valueLabel.Size = UDim2.new(1, -20, 0, 20)
@@ -749,7 +751,6 @@ local function createGravityWindow()
     valueLabel.TextSize = 12
     valueLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    -- 滑块轨道
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
@@ -759,14 +760,17 @@ local function createGravityWindow()
     sliderCorner.CornerRadius = UDim.new(0, 1)
     sliderCorner.Parent = sliderBg
 
-    -- 滑块按钮
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 14, 0, 14)
     local minG = -100
     local maxG = 100
-    local currentG = workspace.Gravity
-    local percent = (currentG - minG) / (maxG - minG)
-    knob.Position = UDim2.new(percent, -7, 0, -5)
+    local function updateKnobPosition()
+        local currentG = workspace.Gravity
+        local percent = (currentG - minG) / (maxG - minG)
+        knob.Position = UDim2.new(percent, -7, 0, -5)
+        valueLabel.Text = "重力: " .. string.format("%.1f", currentG)
+    end
+    updateKnobPosition()
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
     knob.Text = ""
     knob.Parent = sliderBg
@@ -797,19 +801,41 @@ local function createGravityWindow()
             newGravity = math.floor(newGravity * 10) / 10
             workspace.Gravity = newGravity
             valueLabel.Text = "重力: " .. string.format("%.1f", workspace.Gravity)
+            updateSpeedButtonText()
         end
     end)
 
     sg.Destroying:Connect(function()
         if conn then conn:Disconnect() end
-        gravityWindowActive = false
     end)
 
-    gravityWindowActive = true
     return sg
 end
 
--- ==================== 创建穿墙悬浮窗（不变）====================
+local function enableGravity()
+    if gravityEnabled then return end
+    originalGravity = workspace.Gravity
+    gravityEnabled = true
+    gravityWindow = createGravityModeWindow()
+    tanchuangxiaoxi("已开启重力调节", "重力模式")
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+local function disableGravity()
+    if not gravityEnabled then return end
+    if gravityWindow then
+        gravityWindow:Destroy()
+        gravityWindow = nil
+    end
+    workspace.Gravity = originalGravity
+    gravityEnabled = false
+    tanchuangxiaoxi("已关闭重力调节，恢复原始重力", "重力模式")
+    updateMainButtonText()
+    updateSpeedButtonText()
+end
+
+-- ==================== 创建穿墙悬浮窗 ====================
 local function createNoclipWindow()
     local winWidth = 150
     local winHeight = 50
@@ -860,8 +886,7 @@ local function createNoclipWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        sg:Destroy()
-        noclipWindow = nil
+        disableNoclip()
     end)
 
     local emergencyBtn = Instance.new("TextButton")
@@ -913,7 +938,7 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建夜视悬浮窗（亮度范围0.000001~50）====================
+-- ==================== 创建夜视悬浮窗 ====================
 local function createNightVisionWindow()
     local winWidth = 180
     local winHeight = 58
@@ -964,8 +989,7 @@ local function createNightVisionWindow()
     closeCorner.Parent = closeBtn
 
     closeBtn.MouseButton1Click:Connect(function()
-        sg:Destroy()
-        nightVisionWindow = nil
+        disableNightVision()
     end)
 
     local valueLabel = Instance.new("TextLabel")
@@ -1100,6 +1124,17 @@ local function onCharacterAdded(char)
 
     if nightVisionEnabled then
         enableNightVision()
+    end
+
+    -- 重力模式：如果开启，确保重力值恢复并重新创建窗口（因为窗口可能随角色重生被销毁）
+    if gravityEnabled then
+        -- 重新设置重力值为之前的值（用户设定值，不是原始值）
+        -- 但窗口可能已随重生被销毁，需要重建
+        if gravityWindow then
+            gravityWindow:Destroy()
+            gravityWindow = nil
+        end
+        gravityWindow = createGravityModeWindow()
     end
 
     stopTpwalking()
@@ -1624,7 +1659,7 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.2 更新内容：",
+                    "版本 7.7.3 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
                     "2. 现在移速模式关闭时会实时显示实际速度",
@@ -1632,20 +1667,20 @@ local function showMainMenu()
                     "4. 优化界面显示",
                     "5. 新增独立穿墙功能（长按主按钮切换）",
                     "6. 新增夜视模式（长按主按钮第4次）",
-                    "7. 增强穿墙：跳跃等新部件自动穿透，避免卡墙",
-                    "8. 新增重力调节：夜视模式下长按主按钮打开悬浮窗，范围-100~100，关闭自动恢复",
+                    "7. 增强穿墙：修复开启失败问题，跳跃等新部件自动穿透",
+                    "8. 新增重力模式（长按主按钮第5次），单击开关，悬浮窗拖动滑块调节重力（-100~100）",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/夜视亮度），长按可设置上升/下降步长",
-                    "- 主按钮：长按切换飞天/移速/穿墙/夜视模式，单击开关当前模式；夜视开启时长按打开重力调节",
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/夜视亮度），长按可设置上升/下降步长；重力模式下显示当前重力值",
+                    "- 主按钮：长按切换飞天/移速/穿墙/夜视/重力模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复",
                     "- 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",
-                    "- 重力调节：临时调节世界重力，关闭窗口恢复原始值",
+                    "- 重力模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变世界重力，关闭恢复原始值",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1770,12 +1805,13 @@ local function showMainMenu()
                     "🔹 速度标签：",
                     "   - 飞天/移速/夜视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
                     "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
-                    "🔹 主按钮：长按切换飞天/移速/穿墙/夜视模式，单击开关当前模式",
-                    "   - 夜视模式开启时长按主按钮打开重力调节悬浮窗（范围-100~100，关闭自动恢复）",
+                    "   - 重力模式下显示当前重力值",
+                    "🔹 主按钮：长按切换飞天/移速/穿墙/夜视/重力模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
                     "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复，跳跃等新部件自动穿透",
                     "🔹 夜视：独立开关，可调节亮度（0.000001~50），重生后自动恢复",
+                    "🔹 重力模式：独立开关，开启后出现悬浮窗，拖动滑块实时改变世界重力（-100~100），关闭恢复原始值",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
@@ -2113,8 +2149,7 @@ local function showMainMenu()
                             removeFly()
                             disableNoclip()
                             disableNightVision()
-                            if gravityWindow then gravityWindow:Destroy() end
-                            workspace.Gravity = originalGravity
+                            disableGravity()
                             if main and main.Parent then
                                 main:Destroy()
                             end
@@ -2549,6 +2584,40 @@ do
                 )
             elseif modeIndex == 3 then
                 showBrightnessDialog()
+            elseif modeIndex == 4 then
+                -- 重力模式下手动设置重力值
+                showInputDialog(
+                    "设置重力值",
+                    string.format("%.1f", workspace.Gravity),
+                    function(input)
+                        local num = tonumber(input)
+                        if num and num >= -100 and num <= 100 then
+                            workspace.Gravity = num
+                            tanchuangxiaoxi("重力已设为 " .. tostring(num), "重力设置")
+                            updateSpeedButtonText()
+                            -- 如果重力窗口存在，更新显示
+                            if gravityWindow and gravityWindow:FindFirstChild("Frame") then
+                                local valueLabel = gravityWindow.Frame:FindFirstChild("ValueLabel")
+                                if valueLabel then
+                                    valueLabel.Text = "重力: " .. string.format("%.1f", workspace.Gravity)
+                                end
+                                -- 更新滑块位置
+                                local sliderBg = gravityWindow.Frame:FindFirstChild("SliderBg")
+                                if sliderBg then
+                                    local knob = sliderBg:FindFirstChild("Knob")
+                                    if knob then
+                                        local minG = -100
+                                        local maxG = 100
+                                        local percent = (workspace.Gravity - minG) / (maxG - minG)
+                                        knob.Position = UDim2.new(percent, -7, 0, -5)
+                                    end
+                                end
+                            end
+                        else
+                            tanchuangxiaoxi("请输入-100到100之间的数字", "错误")
+                        end
+                    end
+                )
             end
             holding = false
         end
@@ -2562,7 +2631,7 @@ do
     end)
 end
 
--- ==================== 主按钮长按/单击逻辑（新增重力调节）====================
+-- ==================== 主按钮长按/单击逻辑 ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2576,20 +2645,8 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 isLongPress = true
-                -- 夜视模式下且夜视开启时，打开重力调节窗口（不切换模式）
-                if modeIndex == 3 and nightVisionEnabled then
-                    if not gravityWindowActive then
-                        originalGravity = workspace.Gravity
-                        gravityWindow = createGravityWindow()
-                    else
-                        tanchuangxiaoxi("重力窗口已打开", "提示")
-                    end
-                    holding = false
-                    longPressTask = nil
-                    return
-                end
-                -- 其他情况正常切换模式
-                modeIndex = (modeIndex + 1) % 4
+                -- 循环切换模式（5个模式）
+                modeIndex = (modeIndex + 1) % 5
                 updateMainButtonText()
                 updateSpeedButtonText()
                 tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
@@ -2624,6 +2681,14 @@ do
                         disableNightVision()
                     else
                         enableNightVision()
+                    end
+                    updateMainButtonText()
+                    updateSpeedButtonText()
+                elseif modeIndex == 4 then
+                    if gravityEnabled then
+                        disableGravity()
+                    else
+                        enableGravity()
                     end
                     updateMainButtonText()
                     updateSpeedButtonText()
@@ -2774,8 +2839,7 @@ main.Destroying:Connect(function()
     if nightVisionEnabled then
         restoreLighting()
     end
-    if gravityWindow then gravityWindow:Destroy() end
-    workspace.Gravity = originalGravity
+    disableGravity()
     if miniWindow then
         miniWindow:Destroy()
         miniWindow = nil
