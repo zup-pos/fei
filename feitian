@@ -443,7 +443,7 @@ local function toggleFly(enable)
         if speedWasClosed then
             tanchuangxiaoxi("飞天已开启，移速已关闭", "飞天模式")
         else
-            tanchuangxiaoxi("已开启飞天", "飞天")
+            tanchuangxiaoxi("已开启飞天", "飞天模式")
         end
         applyFly()
     else
@@ -451,7 +451,7 @@ local function toggleFly(enable)
         isFlying = false
         updateMainButtonText()
         stopTpwalking()
-        tanchuangxiaoxi("已关闭飞天", "飞天")
+        tanchuangxiaoxi("已关闭飞天", "飞天模式")
         removeFly()
         resetHumanoidAfterFly()
     end
