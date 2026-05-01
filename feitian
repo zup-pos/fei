@@ -1,5 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.1 (最终修复版 - 悬浮窗关闭不关功能)
+-- Version: 7.7.1 (互斥优化版 - 悬浮窗关闭不关功能)
+-- 新增：飞天/移速互斥开关（设置菜单中），修复互斥提示逻辑
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -164,6 +165,9 @@ local originalSpeed = 16
 
 -- 死亡自动关闭（仅影响飞天/移速）
 local autoDisableOnDeath = true
+
+-- 飞天与移速互斥开关（默认开启）
+local flySpeedExclusive = true
 
 -- ==================== 穿墙相关变量 ====================
 local noclipEnabled = false
@@ -397,8 +401,9 @@ local function resetHumanoidAfterFly()
     char.Animate.Disabled = false
 end
 
--- ==================== 强制关闭移速（静默，返回是否关闭）====================
+-- ==================== 强制关闭移速（仅当互斥开启时执行）====================
 local function forceDisableSpeedMode()
+    if not flySpeedExclusive then return false end  -- 互斥关闭时，不关闭移速
     if speedModeEnabled then
         if speedModeConnection then
             speedModeConnection:Disconnect()
@@ -419,8 +424,9 @@ local function forceDisableSpeedMode()
     return false
 end
 
--- ==================== 强制关闭飞天（静默，返回是否关闭）====================
+-- ==================== 强制关闭飞天（仅当互斥开启时执行）====================
 local function forceDisableFly()
+    if not flySpeedExclusive then return false end  -- 互斥关闭时，不关闭飞天
     if isFlying then
         removeFly()
         resetHumanoidAfterFly()
@@ -435,12 +441,13 @@ end
 -- ==================== 飞天开关 ====================
 local function toggleFly(enable)
     if enable then
-        local speedWasClosed = forceDisableSpeedMode()
+        local wasSpeedEnabled = speedModeEnabled   -- 记录互斥关闭前的状态
+        forceDisableSpeedMode()                    -- 根据互斥开关决定是否关闭
         if isFlying then return end
         isFlying = true
         updateMainButtonText()
         stopTpwalking()
-        if speedWasClosed then
+        if flySpeedExclusive and wasSpeedEnabled then
             tanchuangxiaoxi("飞天已开启，移速已关闭", "飞天模式")
         else
             tanchuangxiaoxi("已开启飞天", "飞天模式")
@@ -461,7 +468,8 @@ end
 -- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
-        local flyWasClosed = forceDisableFly()
+        local wasFlying = isFlying
+        forceDisableFly()
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
@@ -492,7 +500,7 @@ local function applySpeedMode(enable)
         end)
 
         speedModeEnabled = true
-        if flyWasClosed then
+        if flySpeedExclusive and wasFlying then
             tanchuangxiaoxi("移速已开启，飞天已关闭", "移速模式")
         else
             tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
@@ -1936,6 +1944,15 @@ local function showMainMenu()
                                 customWidth = nil
                                 customHeight = nil
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
+                            end
+                        },
+                        {
+                            text = "🚫 飞天/移速互斥: " .. (flySpeedExclusive and "开启" or "关闭"),
+                            callback = function(parentMenu)
+                                flySpeedExclusive = not flySpeedExclusive
+                                tanchuangxiaoxi(flySpeedExclusive and "飞天/移速互斥已开启" or "飞天/移速互斥已关闭", "设置")
+                                parentMenu:Destroy()
+                                createSettingMenu()
                             end
                         },
                         {
