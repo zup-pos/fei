@@ -1,6 +1,6 @@
 -- Gui to Lua
--- Version: 7.7.3 (穿墙类型选择优化 + 互斥提示修复)
--- 优化: 穿墙模式下长按速度标签弹出菜单选择类型; 修复互斥提示不准确问题
+-- Version: 7.7.1-墙体移除版 (基于7.7.1互斥优化版添加墙体移除功能)
+-- 新增：穿墙模式下长按速度标签可选择【角色穿墙】或【墙体移除】
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -178,7 +178,7 @@ local originalCollisions = {}
 local wallType = 1  -- 1=角色穿墙, 2=墙体移除
 local wallCollideremoved = false
 local originalWallCollisions = {}
-local IGNORED_KEYWORDS = { "baseplate", "ground", "floor", "terrain", "platform", "road", "stair" }
+local IGNORED_NAMES = { "baseplate", "ground", "floor", "terrain", "platform", "road" }
 
 -- ==================== 透视相关变量 ====================
 local nightVisionEnabled = false
@@ -255,6 +255,7 @@ local function updateMainButtonText()
     elseif modeIndex == 1 then
         state = speedModeEnabled
     elseif modeIndex == 2 then
+        -- 根据当前穿墙类型决定状态
         state = (wallType == 1 and noclipEnabled) or (wallType == 2 and wallCollideremoved)
     elseif modeIndex == 3 then
         state = nightVisionEnabled
@@ -283,6 +284,7 @@ local function updateSpeedButtonText()
             end
         end
     elseif modeIndex == 2 then
+        -- 穿墙模式下显示当前类型
         if wallType == 1 then
             speed.Text = noclipEnabled and "角色穿墙" or "角色穿墙"
         else
@@ -411,7 +413,7 @@ local function resetHumanoidAfterFly()
     char.Animate.Disabled = false
 end
 
--- ==================== 强制关闭移速（静默，返回是否关闭）====================
+-- ==================== 强制关闭移速（仅当互斥开启时执行）====================
 local function forceDisableSpeedMode()
     if not flySpeedExclusive then return false end
     if speedModeEnabled then
@@ -434,7 +436,7 @@ local function forceDisableSpeedMode()
     return false
 end
 
--- ==================== 强制关闭飞天（静默，返回是否关闭）====================
+-- ==================== 强制关闭飞天（仅当互斥开启时执行）====================
 local function forceDisableFly()
     if not flySpeedExclusive then return false end
     if isFlying then
@@ -448,11 +450,11 @@ local function forceDisableFly()
     return false
 end
 
--- ==================== 飞天开关（修复互斥提示）====================
+-- ==================== 飞天开关 ====================
 local function toggleFly(enable)
     if enable then
-        local wasSpeedEnabled = speedModeEnabled   -- 记录互斥关闭前的状态
-        forceDisableSpeedMode()                    -- 根据互斥开关决定是否关闭
+        local wasSpeedEnabled = speedModeEnabled
+        forceDisableSpeedMode()
         if isFlying then return end
         isFlying = true
         updateMainButtonText()
@@ -460,7 +462,7 @@ local function toggleFly(enable)
         if flySpeedExclusive and wasSpeedEnabled then
             tanchuangxiaoxi("飞天已开启，移速已关闭", "飞天模式")
         else
-            tanchuangxiaoxi("已开启飞天", "飞天模式")
+            tanchuangxiaoxi("飞天已开启", "飞天模式")
         end
         applyFly()
     else
@@ -468,14 +470,14 @@ local function toggleFly(enable)
         isFlying = false
         updateMainButtonText()
         stopTpwalking()
-        tanchuangxiaoxi("已关闭飞天", "飞天模式")
+        tanchuangxiaoxi("飞天已关闭", "飞天模式")
         removeFly()
         resetHumanoidAfterFly()
     end
     updateSpeedButtonText()
 end
 
--- ==================== 移速模式（修复互斥提示）====================
+-- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
         local wasFlying = isFlying
@@ -513,7 +515,7 @@ local function applySpeedMode(enable)
         if flySpeedExclusive and wasFlying then
             tanchuangxiaoxi("移速已开启，飞天已关闭", "移速模式")
         else
-            tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
+            tanchuangxiaoxi("移速已开启，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式")
         end
     else
         if speedModeConnection then
@@ -529,7 +531,7 @@ local function applySpeedMode(enable)
         end
         lockedSpeed = originalSpeed
         speedModeEnabled = false
-        tanchuangxiaoxi("已关闭移速模式", "移速模式")
+        tanchuangxiaoxi("移速已关闭", "移速模式")
     end
     updateMainButtonText()
     updateSpeedButtonText()
@@ -602,7 +604,10 @@ local function disableNoclip()
 end
 
 local function enableNoclip()
-    if not player.Character then return end
+    -- 等待角色完全加载
+    while not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") do
+        task.wait()
+    end
     if noclipEnabled then return end
 
     if next(originalCollisions) == nil then
@@ -623,14 +628,15 @@ local function enableNoclip()
     noclipWindow = createNoclipWindow()
     updateMainButtonText()
     updateSpeedButtonText()
+    tanchuangxiaoxi("角色穿墙已开启", "穿墙模式")
 end
 
--- ==================== 墙体移除功能 ====================
+-- ==================== 墙体移除功能（基于关键词过滤）====================
 local function isWallPart(part)
     if not part:IsA("BasePart") then return false end
     if part:IsA("Terrain") then return false end
     local nameLower = string.lower(part.Name)
-    for _, kw in ipairs(IGNORED_KEYWORDS) do
+    for _, kw in ipairs(IGNORED_NAMES) do
         if string.find(nameLower, kw) then
             return false
         end
@@ -638,9 +644,7 @@ local function isWallPart(part)
     if player.Character and part:IsDescendantOf(player.Character) then
         return false
     end
-    -- 简单检测是否为垂直墙体（上方向量接近水平）
-    local up = part.CFrame.UpVector
-    if math.abs(up.Y) > 0.866 then  -- 水平面
+    if part:IsA("Seat") or part:IsA("VehicleSeat") then
         return false
     end
     return true
@@ -708,17 +712,15 @@ local function setWallType(newType)
         end
     end
     wallType = newType
-    -- 如果之前是开启状态，则开启新类型
-    if wasEnabled then
-        if wallType == 1 then
-            enableNoclip()
-        else
-            enableWallRemoval()
-        end
+    -- 自动开启新类型
+    if wallType == 1 then
+        enableNoclip()
+    else
+        enableWallRemoval()
     end
     updateMainButtonText()
     updateSpeedButtonText()
-    tanchuangxiaoxi("穿墙类型已切换为: " .. (wallType == 1 and "角色穿墙" or "墙体移除"), "穿墙模式")
+    tanchuangxiaoxi("穿墙类型已切换为: " .. (wallType == 1 and "角色穿墙" or "墙体移除") .. " 并已开启", "穿墙模式")
 end
 
 -- ==================== 透视基础 ====================
@@ -755,7 +757,6 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- 关闭透视
 local function disableNightVision()
     if nightVisionEnabled then
         if nightVisionWindow then
@@ -774,7 +775,6 @@ local function disableNightVision()
     end
 end
 
--- 开启透视
 local function enableNightVision()
     if nightVisionEnabled then return end
     saveOriginalLighting()
@@ -1597,25 +1597,27 @@ local function showMainMenu()
                 scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
                 local lines = {
-                    "版本 7.7.3 更新内容：",
+                    "版本 7.7.1-墙体移除版 更新内容：",
                     "",
                     "1. 修复移速模式关闭时速度不刷新的问题",
-                    "2. 修复飞天/移速互斥时提示不准确的问题",
-                    "3. 穿墙模式下长按速度标签弹出简洁菜单，可选择【角色穿墙】、【墙体移除】或【关闭】",
-                    "4. 优化代码结构，统一菜单风格",
+                    "2. 现在移速模式关闭时会实时显示实际速度",
+                    "3. 加速/减速按钮在移速模式关闭时仍然调整锁定速度",
+                    "4. 优化界面显示",
+                    "5. 新增独立穿墙功能（长按主按钮切换）",
+                    "6. 新增透视模式（长按主按钮第4次）",
+                    "7. 新增墙体移除功能：穿墙模式下长按速度标签，可选择【角色穿墙】或【墙体移除】",
+                    "   - 墙体移除：移除所有垂直墙体碰撞（保留地面和角色自身），子弹/武器可穿透",
                     "",
                     "功能介绍：",
                     "- 上升/下降（或前移/后移/左移/右移）：单击移动，长按连续",
                     "- 加速/减速：单击调速度，长按连续",
-                    "- 速度标签：长按可设置移动步长/切飞行模式/透视亮度；在穿墙模式下长按可切换穿墙类型",
+                    "- 速度标签：单击可手动设置当前值（飞天倍率/移速锁定/透视亮度），长按可设置上升/下降步长；穿墙模式下长按可切换穿墙类型",
                     "- 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "- 隐藏按钮：单击折叠UI，长按打开菜单",
                     "- 音量键控制：可在设置中开启/关闭",
                     "- 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
-                    "- 穿墙模式：",
-                    "   - 角色穿墙：人物身体穿过墙体，适合近战",
-                    "   - 墙体移除：移除墙体碰撞但保留视觉，子弹/武器可穿透",
-                    "- 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
+                    "- 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复；可切换角色穿墙/墙体移除",
+                    "- 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "自定义屏幕尺寸：",
                     "如自动检测不准确，可手动设置屏幕宽高",
@@ -1738,21 +1740,25 @@ local function showMainMenu()
                     "   - 飞天模式：调整倍率，每次增减 incStep（可在设置中调整）",
                     "   - 移速模式：调整锁定速度，每次增减 incStep",
                     "🔹 速度标签：",
-                    "   - 飞天/移速/透视模式下单击可手动设置当前值，长按可设置移动步长/飞行模式/亮度",
-                    "   - 穿墙模式下长按可切换【角色穿墙】、【墙体移除】或【关闭】",
+                    "   - 飞天/移速/透视模式下单击可手动设置当前值（倍率/锁定速度/亮度）",
+                    "   - 长按：设置上升/下降的移动步长，并可切换移动模式",
+                    "   - 穿墙模式下长按可切换【角色穿墙】或【墙体移除】",
                     "🔹 主按钮：长按切换飞天/移速/穿墙/透视模式，单击开关当前模式",
                     "🔹 隐藏按钮：单击折叠UI，长按打开菜单",
-                    "🔹 音量键控制：可在设置中开启/关闭",
                     "🔹 死亡自动关闭：可控制角色死后是否自动停用当前模式（仅影响飞天/移速）",
-                    "🔹 穿墙模式：",
-                    "   - 角色穿墙：人物身体穿过墙体，适合近战",
-                    "   - 墙体移除：移除墙体碰撞但保留视觉，子弹/武器可穿透",
-                    "🔹 透视：独立开关，可调节亮度（0.01~100），重生后自动恢复",
+                    "🔹 穿墙：独立开关，不受死亡自动关闭影响，重生后自动恢复；可切换两种模式",
+                    "🔹 透视：独立开关，可调节亮度（1~5），重生后自动恢复",
                     "",
                     "⚙️ 菜单功能：",
                     "- 查看公告：显示更新日志",
                     "- 功能介绍：本页面",
-                    "- 设置：调整弹窗透明度、启用音量键隐藏、设置屏幕尺寸、调整增长量、上升/下降模式、飞行方向模式、死亡自动关闭、飞天/移速互斥",
+                    "- 设置：调整弹窗透明度、",
+                    "  启用音量键隐藏、",
+                    "  设置屏幕尺寸、",
+                    "  调整增长量（加速/减速步长）、",
+                    "  上升/下降模式、",
+                    "  飞行方向模式、",
+                    "  死亡自动关闭、飞天/移速互斥",
                     "- 结束脚本：彻底停止",
                     "",
                     "音量键隐藏：",
@@ -2086,7 +2092,7 @@ local function showMainMenu()
                                 speedModeConnection = nil
                             end
                             removeFly()
-                            if noclipEnabled then disableNoclip() end
+                            disableNoclip()
                             if wallCollideremoved then disableWallRemoval() end
                             disableNightVision()
                             if main and main.Parent then
@@ -2425,7 +2431,7 @@ do
     end)
 end
 
--- ==================== 速度标签长按逻辑（含穿墙模式菜单）====================
+-- ==================== 速度标签（长按：穿墙模式下切换类型，其他模式下设置移动步长/速度等）====================
 do
     local holding = false
     local longPressTask = nil
@@ -2437,7 +2443,7 @@ do
         longPressTask = task.delay(0.3, function()
             if holding then
                 if modeIndex == 2 then
-                    -- 穿墙模式：弹出类型选择菜单（使用 createMenu）
+                    -- 穿墙模式：弹出类型选择菜单（只含两个选项，菜单自带关闭按钮）
                     createMenu("选择穿墙类型", {
                         {
                             text = "角色穿墙" .. (wallType == 1 and " ✓" or ""),
@@ -2452,20 +2458,10 @@ do
                                 setWallType(2)
                                 menu:Destroy()
                             end
-                        },
-                        {
-                            text = "关闭",
-                            callback = function(menu)
-                                -- 关闭穿墙功能（无论当前类型）
-                                if (wallType == 1 and noclipEnabled) or (wallType == 2 and wallCollideremoved) then
-                                    toggleWall()
-                                end
-                                menu:Destroy()
-                            end
                         }
                     }, nil)
                 else
-                    -- 其他模式：保持原有设置移动步长等
+                    -- 其他模式：保持原有的设置移动步长等
                     showInputDialog(
                         "设置移动步长（上升/下降距离）",
                         tostring(moveStep),
