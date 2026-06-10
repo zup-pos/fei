@@ -4843,7 +4843,7 @@ function HS3()
             skipCount = skipCount + 1
             goto continue
         end
-        if x == 0 and y == 0 and z == 0 then
+        if x == 0 or y == 0 or z == 0 then
             skipCount = skipCount + 1
             goto continue
         end
@@ -4857,7 +4857,7 @@ function HS3()
     end
 
     if skipCount > 0 then
-        提示("跳过 " .. skipCount .. " 个无效实体坐标")
+        提示("跳过 " .. skipCount .. " 个无效实体坐标数据")
         gg.sleep(600)
     end
 
@@ -4929,7 +4929,7 @@ function filterDynamicEntities(threshold, sortOrder)
         end
         local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
 
-        if x == 0 and y == 0 and z == 0 then
+        if x == 0 or y == 0 or z == 0 then
             goto skip
         end
         local dx = x - cand.x
@@ -5009,7 +5009,7 @@ function resortHS3(order)
         })
         if ok and curCoords and curCoords[1] and curCoords[2] and curCoords[3] then
             local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
-            if not (x == 0 and y == 0 and z == 0) then
+            if not (x == 0 or y == 0 or z == 0) then
 
                 cand.x = x
                 cand.y = y
@@ -5139,6 +5139,392 @@ function cleanHS3()
         提示("没有有效地址进行清理")
     end
     return count
+end
+
+function manageEntities()
+local rawData = _G.Candidates
+if not rawData or #rawData == 0 then
+    rawData = _G.PlayerData
+end
+if not rawData or #rawData == 0 then
+    提示("没有实体数据，请先执行HS3")
+    return
+end
+
+local refreshed = {}
+for _, v in ipairs(rawData) do
+    local addr = v.addr or v.address
+    if addr then
+        local ok, coords = pcall(gg.getValues, {
+            {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+            {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+            {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
+        })
+        if ok and coords and coords[1] and coords[2] and coords[3] then
+            local x, y, z = coords[1].value, coords[2].value, coords[3].value
+            table.insert(refreshed, {addr = addr, x = x, y = y, z = z})
+        end
+    end
+end
+
+local data = {}
+for _, ent in ipairs(refreshed) do
+    if not (ent.x == 0 or ent.y == 0 or ent.z == 0) then
+        table.insert(data, ent)
+    end
+end
+
+if #data == 0 then
+    提示("所有实体坐标数据均为0（可能已失效），请重新初始化")
+    return
+end
+if #data < #rawData then
+    提示(string.format("已自动过滤 %d 个无效实体数据（坐标含0）", #rawData - #data))
+    gg.sleep(600)
+end
+
+    local function syncToGlobal()
+        _G.Candidates = data
+        _G.PlayerData = {}
+        for i, ent in ipairs(data) do
+            _G.PlayerData[i] = {
+                address = ent.addr,
+                flags = gg.TYPE_DWORD,
+                value = 0
+            }
+        end
+    end
+
+    local function buildItems(source)
+        local items = {"🔍 搜索", "📦 批量操作", "🧹 清理无效"}
+        for i, ent in ipairs(source) do
+            items[#items+1] = string.format("%d. (%.2f, %.2f, %.2f)", i, ent.x, ent.y, ent.z)
+        end
+        return items
+    end
+
+    local function parseIndices(input, max)
+        local indices = {}
+        if not input or input == "" then return indices end
+        for part in input:gmatch("[^,]+") do
+            part = part:match("^%s*(.-)%s*$")
+            if part:find("-") then
+                local a, b = part:match("(%d+)-(%d+)")
+                a, b = tonumber(a), tonumber(b)
+                if a and b then
+                    for i = math.max(a,1), math.min(b, max) do
+                        indices[#indices+1] = i
+                    end
+                end
+            else
+                local idx = tonumber(part)
+                if idx and idx >= 1 and idx <= max then
+                    indices[#indices+1] = idx
+                end
+            end
+        end
+        local seen, sorted = {}, {}
+        for _, idx in ipairs(indices) do
+            if not seen[idx] then
+                seen[idx] = true
+                table.insert(sorted, idx)
+            end
+        end
+        table.sort(sorted)
+        return sorted
+    end
+
+    local function batchOperation(source)
+        if #source == 0 then
+            提示("没有可操作的实体数据")
+            return false
+        end
+        local prompt = string.format("请输入要操作的实体序号（例如 1,3,5-7）\n当前共 %d 个实体", #source)
+        local input = gg.prompt({prompt}, {""}, {"text"})
+        if not input then return false end
+        local indices = parseIndices(input[1], #source)
+        if #indices == 0 then
+            提示("没有有效的序号")
+            return false
+        end
+
+        local ops = {"批量删除", "批量置顶", "批量置底", "取消"}
+        local op = gg.choice(ops, nil, string.format("选中了 %d 个实体数据，选择操作", #indices))
+        if not op or op == 4 then return false end
+
+        if op == 1 then
+            local new = {}
+            for i = 1, #source do
+                local found = false
+                for _, idx in ipairs(indices) do
+                    if i == idx then found = true; break end
+                end
+                if not found then table.insert(new, source[i]) end
+            end
+            for i = 1, #new do source[i] = new[i] end
+            for i = #new+1, #source do source[i] = nil end
+            syncToGlobal()
+            提示(string.format("已删除 %d 个实体数据", #indices))
+        elseif op == 2 then
+            local selected = {}
+            for _, idx in ipairs(indices) do table.insert(selected, source[idx]) end
+            local new = {}
+            for _, ent in ipairs(selected) do table.insert(new, ent) end
+            for i = 1, #source do
+                local isSelected = false
+                for _, idx in ipairs(indices) do
+                    if i == idx then isSelected = true; break end
+                end
+                if not isSelected then table.insert(new, source[i]) end
+            end
+            for i = 1, #new do source[i] = new[i] end
+            for i = #new+1, #source do source[i] = nil end
+            syncToGlobal()
+            提示("已置顶选中的实体数据")
+        elseif op == 3 then
+            local selected = {}
+            for _, idx in ipairs(indices) do table.insert(selected, source[idx]) end
+            local new = {}
+            for i = 1, #source do
+                local isSelected = false
+                for _, idx in ipairs(indices) do
+                    if i == idx then isSelected = true; break end
+                end
+                if not isSelected then table.insert(new, source[i]) end
+            end
+            for _, ent in ipairs(selected) do table.insert(new, ent) end
+            for i = 1, #new do source[i] = new[i] end
+            for i = #new+1, #source do source[i] = nil end
+            syncToGlobal()
+            提示("已置底选中的实体数据")
+        end
+        return true
+    end
+
+local function entityActions(idx, source)
+    local actions = {"传送测试", "删除此实体数据", "上移", "下移", "置顶", "置底", "查看详细", "返回"}
+    local choice = gg.choice(actions, nil, string.format("实体数据 %d 的操作", idx))
+    if not choice then return false end
+    
+    if choice == 1 then  -- 传送测试
+        local ent = source[idx]
+        if not selfXAddr or not selfYAddr or not selfZAddr then
+            提示("请先初始化数据")
+            return false
+        end
+
+        local memEntries = {
+            {address = selfXAddr, value = ent.x, flags = gg.TYPE_FLOAT},
+            {address = selfYAddr, value = ent.y, flags = gg.TYPE_FLOAT},
+            {address = selfZAddr, value = ent.z, flags = gg.TYPE_FLOAT},
+            {address = selfXAddr + 0xB0, value = ent.x, flags = gg.TYPE_FLOAT},
+            {address = selfYAddr + 0xB0, value = ent.y, flags = gg.TYPE_FLOAT},
+            {address = selfZAddr + 0xB0, value = ent.z, flags = gg.TYPE_FLOAT}
+        }
+        local ok, err = pcall(gg.setValues, memEntries)
+        if ok then
+            提示(string.format("已传送到实体 %d (%.2f, %.2f, %.2f)", idx, ent.x, ent.y, ent.z))
+        else
+            提示("传送失败: " .. tostring(err))
+        end
+        return false
+    elseif choice == 2 then  -- 删除
+        table.remove(source, idx)
+        if #source == 0 then
+            提示("所有实体数据已删除")
+            _G.Candidates = nil
+            _G.PlayerData = nil
+            return true
+        end
+        syncToGlobal()
+        提示("已删除实体数据 " .. idx)
+    elseif choice == 3 then  -- 上移
+        if idx > 1 then
+            source[idx], source[idx-1] = source[idx-1], source[idx]
+            syncToGlobal()
+            提示("已上移")
+        else
+            提示("已是第一个")
+        end
+    elseif choice == 4 then  -- 下移
+        if idx < #source then
+            source[idx], source[idx+1] = source[idx+1], source[idx]
+            syncToGlobal()
+            提示("已下移")
+        else
+            提示("已是最后一个")
+        end
+    elseif choice == 5 then  -- 置顶
+        if idx > 1 then
+            local item = table.remove(source, idx)
+            table.insert(source, 1, item)
+            syncToGlobal()
+            提示("已置顶")
+        else
+            提示("已在顶部")
+        end
+    elseif choice == 6 then  -- 置底
+        if idx < #source then
+            local item = table.remove(source, idx)
+            table.insert(source, item)
+            syncToGlobal()
+            提示("已置底")
+        else
+            提示("已在底部")
+        end
+    elseif choice == 7 then  -- 查看详细
+        local ent = source[idx]
+        local msg = string.format("实体 %d\n地址: 0x%X\nX: %.2f\nY: %.2f\nZ: %.2f",
+            idx, ent.addr, ent.x, ent.y, ent.z)
+        gg.alert(msg)
+    end
+    return false
+end
+
+    local function searchEntities(source, keyword)
+        if keyword == "" then return source end
+        local kw = keyword:lower()
+        local filtered = {}
+        for _, ent in ipairs(source) do
+            local info = string.format("%f %f %f %X", ent.x, ent.y, ent.z, ent.addr)
+            if info:lower():find(kw, 1, true) then
+                table.insert(filtered, ent)
+            end
+        end
+        return filtered
+    end
+
+    local function cleanInvalid(source)
+        local before = #source
+        local cleaned = {}
+        for _, ent in ipairs(source) do
+            if not (ent.x == 0 or ent.y == 0 or ent.z == 0) then
+                table.insert(cleaned, ent)
+            end
+        end
+        if #cleaned < before then
+            for i=1,#cleaned do source[i] = cleaned[i] end
+            for i=#cleaned+1, #source do source[i] = nil end
+            syncToGlobal()
+            提示(string.format("已清理 %d 个无效实体数据", before - #cleaned))
+            return true
+        else
+            提示("没有发现无效实体数据")
+            return false
+        end
+    end
+
+    local history = {{items = buildItems(data), data = data}}
+
+    while true do
+        local current = history[#history]
+        local displayItems = current.items
+        local currentData = current.data
+        local title = string.format("实体数据列表 (共%d个)", #currentData)
+
+        local choice = gg.choice(displayItems, nil, title)
+        if not choice then break end
+
+        if #history == 1 then
+            if choice == 1 then
+                local input = gg.prompt({"请输入关键词 (坐标/地址)"}, {""}, {"text"})
+                if input and input[1] ~= "" then
+                    local keyword = input[1]:match("^%s*(.-)%s*$")
+                    if keyword == "" then
+                        提示("关键词不能为空")
+                    else
+                        local filtered = searchEntities(currentData, keyword)
+                        if #filtered > 0 then
+                            local newItems = buildItems(filtered)
+                            table.insert(history, {items = newItems, data = filtered})
+                        else
+                            提示("没有匹配的实体数据")
+                        end
+                    end
+                end
+            elseif choice == 2 then
+                batchOperation(currentData)
+                current.items = buildItems(currentData)
+                if #currentData == 0 then
+                    提示("所有实体数据已删除，退出管理")
+                    _G.Candidates = nil
+                    _G.PlayerData = nil
+                    return
+                end
+            elseif choice == 3 then
+                cleanInvalid(currentData)
+                current.items = buildItems(currentData)
+                if #currentData == 0 then
+                    提示("所有实体数据已失效，退出管理")
+                    _G.Candidates = nil
+                    _G.PlayerData = nil
+                    return
+                end
+            else
+                local idx = choice - 3
+                local shouldExit = entityActions(idx, currentData)
+                if shouldExit then return end
+                current.items = buildItems(currentData)
+                if #currentData == 0 and #history > 1 then
+                    table.remove(history)
+                    提示("数据已空，返回上一页")
+                end
+            end
+        else
+            if choice == 1 then
+                local adminOpts = {"🔍 搜索", "📦 批量操作", "🧹 清理无效坐标", "↩️ 返回上一页", "❌ 取消"}
+                local admin = gg.choice(adminOpts, nil, "管理")
+                if admin == 1 then
+                    local input = gg.prompt({"请输入关键词"}, {""}, {"text"})
+                    if input and input[1] ~= "" then
+                        local keyword = input[1]:match("^%s*(.-)%s*$")
+                        if keyword == "" then
+                            提示("关键词不能为空")
+                        else
+                            local filtered = searchEntities(currentData, keyword)
+                            if #filtered > 0 then
+                                local newItems = buildItems(filtered)
+                                table.insert(history, {items = newItems, data = filtered})
+                            else
+                                提示("没有匹配的实体数据")
+                            end
+                        end
+                    end
+                elseif admin == 2 then
+                    batchOperation(currentData)
+                    current.items = buildItems(currentData)
+                    if #currentData == 0 and #history > 1 then
+                        table.remove(history)
+                        提示("数据已空，返回上一页")
+                    end
+                elseif admin == 3 then
+                    cleanInvalid(currentData)
+                    current.items = buildItems(currentData)
+                    if #currentData == 0 and #history > 1 then
+                        table.remove(history)
+                        提示("数据已空，返回上一页")
+                    end
+                elseif admin == 4 then
+                    table.remove(history)
+                end
+            else
+                local idx = choice - 2
+                local entityIdx = choice - 3
+                local shouldExit = entityActions(entityIdx, currentData)
+                if shouldExit then return end
+                current.items = buildItems(currentData)
+                if #currentData == 0 and #history > 1 then
+                    table.remove(history)
+                    提示("数据已空，返回上一页")
+                end
+            end
+        end
+    end
+
+    if _G.Candidates then
+        _G.Candidates = data
+        syncToGlobal()
+    end
 end
 
 
@@ -15421,6 +15807,11 @@ HK()
 randomCD()
 end):start() end
 },
+{"查看实体坐标数据储存",
+function() luajava.newThread(function()
+manageEntities()
+end):start() end
+},
 {"清除锁核储存数据",
 function() luajava.newThread(function()
 HK()
@@ -25083,6 +25474,10 @@ HK()
 wj5tp()
 end) end),
 }),
+RG.button("查看实体坐标数据储存",
+function() enqueueTask(function()
+manageEntities()
+end) end),
 RG.button("清理锁核储存数据",
 function() enqueueTask(function()
 HK()
