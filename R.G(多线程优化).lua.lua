@@ -11391,24 +11391,36 @@ end
 xnsj = nil
 function 霜鸟锁定数量开()
 if not xnsj or #xnsj == 0 then
-search(1.002666647964E-312, 64, neicun)
-py1(0.9, 64, 284)
+search("2.6527537714E-314", 64, 4)
+py1(0.9, 64, 20)
+py1(0.8, 64, -100)
+py1(-1.0, 64, 92)
+py1(7.0, 64, -76)
+py1(0.9, 64, 44)
+py1(0.1, 64, -52)
+py1(0.9, 64, 68)
 xnsj = sj
 else
 sj = xnsj
 end
-xg3(4, 64, -260, false)
+xg3(4, 64, -4, false, true, "(自定义霜鸟锁定数量)")
 end
 
 function 霜鸟锁定数量关()
 if not xnsj or #xnsj == 0 then
-search(1.002666647964E-312, 64, neicun)
-py1(0.9, 64, 284)
+search("2.6527537714E-314", 64, 4)
+py1(0.9, 64, 20)
+py1(0.8, 64, -100)
+py1(-1.0, 64, 92)
+py1(7.0, 64, -76)
+py1(0.9, 64, 44)
+py1(0.1, 64, -52)
+py1(0.9, 64, 68)
 xnsj = sj
 else
 sj = xnsj
 end
-xg3(4, 64, -260, false)
+xg1(3, 64, -4, false)
 xnsj=nil
 end
 
@@ -15535,7 +15547,6 @@ HK()
 startMultiPlayerLoop()
 end) end,
 function() runAsyncTask(function()
-HK()
 stopMultiPlayerLoop()
 end) end),
 RG.switch("传送玩家1(循环)",
@@ -16030,7 +16041,6 @@ HK()
 startPlayerCycle()
 end):start() end,
 function()
-HK()
 stopPlayerCycle()
 end
 ),
