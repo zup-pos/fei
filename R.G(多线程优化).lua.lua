@@ -12534,7 +12534,7 @@ function 正常秒杀范围优化二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12561,7 +12561,7 @@ function 正常秒杀范围二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12591,7 +12591,7 @@ function 不挡秒杀范围新二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12601,7 +12601,7 @@ function 队友不挡高伤范围二进制()
     fw1 = true
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         local search_tbl1 = {
             {7.707281683632926E-41, 16, neicun},
             {7.1746481373430634E-43, 4, 16},
@@ -12679,7 +12679,7 @@ function 执行迅速秒杀范围新二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12702,7 +12702,7 @@ function 频率优化秒杀范围旧二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12723,7 +12723,7 @@ function 频率优化秒杀范围新二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12753,7 +12753,7 @@ function 极小秒杀范围二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12772,7 +12772,7 @@ function 不秒杀范围二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12794,7 +12794,7 @@ function 自定义不秒杀范围二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12820,7 +12820,7 @@ function 范围穿甲弹二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12840,7 +12840,7 @@ function 高伤二进制()
     }
 luajava.newThread(function()
     while fw1 do
-        gg.sleep(1)
+        gg.sleep(100)
         LSQ_pointer(search_tbl, write_tbl)
     end
 end):start()
@@ -12850,7 +12850,7 @@ function 正常秒杀范围优化()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(4652218415073722371,32,4)
 py1(236227496247808,32,-72)
 py1(2199026335744,32,-60)
@@ -12875,7 +12875,7 @@ function 正常秒杀范围()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(0.0,16,12)
 py1(0.0,16,16)
@@ -12897,7 +12897,7 @@ function 不挡秒杀范围新()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(7.1746481373430634E-43,16,4)
 py1(4.316268319425587E-39,16,8)
@@ -12922,7 +12922,7 @@ function 队友不挡高伤范围()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(7.1746481373430634E-43,16,4)
 py1(7.1746481373430634E-43,16,20)
@@ -12967,7 +12967,7 @@ function 执行迅速秒杀范围新()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(0.0,16,12)
 py1(0.0,16,16)
@@ -12990,7 +12990,7 @@ function 频率优化秒杀范围旧()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(1.0,16,24)
 py1(0.0,16,28)
@@ -13008,7 +13008,7 @@ function 频率优化秒杀范围新()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(1.0,16,24)
 py1(0.0,16,36)
@@ -13028,7 +13028,7 @@ if not gd then gd=100 提示("输入无效，使用默认值100") end
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(1.0,16,24)
 py1(0.0,16,28)
@@ -13062,7 +13062,7 @@ function 不秒杀范围()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(4.5,16,neicun)
 py1(0.19999998807907104,16,-20)
 py1(4.5,16,0)
@@ -13079,7 +13079,7 @@ if not gd then 提示("输入无效，使用默认值100") end
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(4.5,16,neicun)
 py1(0.19999998807907104,16,-20)
 py1(4.5,16,0)
@@ -13093,7 +13093,7 @@ function 范围穿甲弹()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(7.707281683632926E-41,16,neicun)
 py1(0.0,16,12)
 py1(0.0,16,16)
@@ -13114,7 +13114,7 @@ function 自瞄炮范围()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 gg.clearResults()
 gg.setRanges(neicun)
 gg.searchNumber("4.5", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -13133,7 +13133,7 @@ function 高伤()
 fw1=true
 luajava.newThread(function()
 while fw1 do
-gg.sleep(1)
+gg.sleep(100)
 search(1083179008,4,neicun)
 py1(1045220556,4,-20)
 py1(1083179008,4,0)
@@ -16092,9 +16092,9 @@ RG.switch("传送玩家1(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj1tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16106,9 +16106,9 @@ RG.switch("传送玩家2(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj2tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16120,9 +16120,9 @@ RG.switch("传送玩家3(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj3tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16134,9 +16134,9 @@ RG.switch("传送玩家4(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj4tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16148,9 +16148,9 @@ RG.switch("传送玩家5(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj5tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16162,9 +16162,9 @@ RG.switch("传送玩家6(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj6tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16176,9 +16176,9 @@ RG.switch("传送玩家7(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj7tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16190,9 +16190,9 @@ RG.switch("传送玩家8(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj8tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16204,9 +16204,9 @@ RG.switch("传送玩家9(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj9tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16218,9 +16218,9 @@ RG.switch("传送玩家10(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj10tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16232,9 +16232,9 @@ RG.switch("传送玩家11(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj11tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16246,9 +16246,9 @@ RG.switch("传送玩家12(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj12tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16260,9 +16260,9 @@ RG.switch("传送玩家13(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj13tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16274,9 +16274,9 @@ RG.switch("传送玩家14(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj14tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16288,9 +16288,9 @@ RG.switch("传送玩家15(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj15tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16302,9 +16302,9 @@ RG.switch("传送玩家16(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj16tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16316,9 +16316,9 @@ RG.switch("传送玩家17(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj17tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16330,9 +16330,9 @@ RG.switch("传送玩家18(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj18tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16344,9 +16344,9 @@ RG.switch("传送玩家19(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj19tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16358,9 +16358,9 @@ RG.switch("传送玩家20(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj20tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16372,9 +16372,9 @@ RG.switch("传送玩家21(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj21tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16386,9 +16386,9 @@ RG.switch("传送玩家22(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj22tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16400,9 +16400,9 @@ RG.switch("传送玩家23(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj23tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16414,9 +16414,9 @@ RG.switch("传送玩家24(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj24tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16428,9 +16428,9 @@ RG.switch("传送玩家25(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj25tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16442,9 +16442,9 @@ RG.switch("传送玩家26(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj26tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16456,9 +16456,9 @@ RG.switch("传送玩家27(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj27tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16470,9 +16470,9 @@ RG.switch("传送玩家28(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj28tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16484,9 +16484,9 @@ RG.switch("传送玩家29(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj29tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16498,9 +16498,9 @@ RG.switch("传送玩家30(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj30tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16587,9 +16587,9 @@ RG.switch("传送玩家1(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj51tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16601,9 +16601,9 @@ RG.switch("传送玩家2(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj52tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16615,9 +16615,9 @@ RG.switch("传送玩家3(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj53tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16629,9 +16629,9 @@ RG.switch("传送玩家4(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj54tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16643,9 +16643,9 @@ RG.switch("传送玩家5(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj55tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16657,9 +16657,9 @@ RG.switch("传送玩家6(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj56tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16671,9 +16671,9 @@ RG.switch("传送玩家7(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj57tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16685,9 +16685,9 @@ RG.switch("传送玩家8(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj58tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16699,9 +16699,9 @@ RG.switch("传送玩家9(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj59tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16713,9 +16713,9 @@ RG.switch("传送玩家10(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj60tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16727,9 +16727,9 @@ RG.switch("传送玩家11(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj61tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16741,9 +16741,9 @@ RG.switch("传送玩家12(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj62tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16755,9 +16755,9 @@ RG.switch("传送玩家13(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj63tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16769,9 +16769,9 @@ RG.switch("传送玩家14(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj64tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16783,9 +16783,9 @@ RG.switch("传送玩家15(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj65tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16797,9 +16797,9 @@ RG.switch("传送玩家16(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj66tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16811,9 +16811,9 @@ RG.switch("传送玩家17(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj67tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16825,9 +16825,9 @@ RG.switch("传送玩家18(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj68tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16839,9 +16839,9 @@ RG.switch("传送玩家19(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj69tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16853,9 +16853,9 @@ RG.switch("传送玩家20(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj70tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16867,9 +16867,9 @@ RG.switch("传送玩家21(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj71tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16881,9 +16881,9 @@ RG.switch("传送玩家22(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj72tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16895,9 +16895,9 @@ RG.switch("传送玩家23(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj73tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16909,9 +16909,9 @@ RG.switch("传送玩家24(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj74tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16923,9 +16923,9 @@ RG.switch("传送玩家25(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj75tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16937,9 +16937,9 @@ RG.switch("传送玩家26(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj76tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16951,9 +16951,9 @@ RG.switch("传送玩家27(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj77tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16965,9 +16965,9 @@ RG.switch("传送玩家28(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj78tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16979,9 +16979,9 @@ RG.switch("传送玩家29(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj79tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16993,9 +16993,9 @@ RG.switch("传送玩家30(循环)",
 function() luajava.newThread(function()
 HK()
 fw1=true
-while fw1==true do 
+while fw1 do
+gg.sleep(10)
 wj80tp()
-gg.sleep(1)
 end
 end):start() end,
 function()
