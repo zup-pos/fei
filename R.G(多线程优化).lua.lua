@@ -6019,12 +6019,12 @@ function ViewControl:setMode(mode)
     mode = tonumber(mode)
     if mode == 1 or mode == 2 or mode == 3 then
         local wasRunning = fw1
-        if wasRunning then self:stop() end
+        if wasRunning then self:stop() gg.sleep(200) end
         self.mode = mode
         local modeName = (mode == 1 and "坐标模式") or (mode == 2 and "速度模式") or "双模式合并"
         提示("模式已切换为：" .. modeName)
         if wasRunning then
-            gg.sleep(100)
+            gg.sleep(200)
             self:start()
         end
     else
@@ -6610,7 +6610,7 @@ function 选择要显示的玩家()
     for _, i in ipairs(已选中的玩家) do
         创建按钮页面("玩家" .. i, function()
             luajava.newThread(function()
-                if EnemyLock.running then
+                if fw1 then
                     EnemyLock:stop()
                     gg.sleep(100)
                 end
@@ -6621,7 +6621,7 @@ function 选择要显示的玩家()
     
     创建按钮页面("停止自瞄", function()
         luajava.newThread(function()
-            if EnemyLock.running then
+            if fw1 then
                 EnemyLock:stop()
                 提示("自瞄已停止")
                 gg.sleep(200)
@@ -6652,7 +6652,7 @@ function 关闭玩家列表()
         关闭页面("玩家" .. i)
     end
     关闭页面("停止自瞄")
-    if EnemyLock.running then
+    if fw1 then
         EnemyLock:stop()
         gg.sleep(200)
     end
@@ -6727,7 +6727,7 @@ local 视角锁敌开关 = false
         end
         
         if bestIndex then
-            if EnemyLock.running then
+            if fw1 then
                 EnemyLock:stop()
                 gg.sleep(100)
             end
@@ -6740,7 +6740,7 @@ local 视角锁敌开关 = false
     end,
     function()
         视角锁敌开关 = false
-        if EnemyLock.running then
+        if fw1 then
             EnemyLock:stop()
             gg.sleep(200)
         end
@@ -16483,7 +16483,6 @@ HK()
 ViewControl:start()
 end) end,
 function() runAsyncTask(function()
-HK()
 ViewControl:stop()
 end) end),
 }),
@@ -16537,7 +16536,6 @@ HK()
 EnemyLock:toggle()
 end) end,
 function() runAsyncTask(function()
-HK()
 EnemyLock:stop()
 end) end),
 RG.box({'视角追敌快捷悬浮窗',
@@ -16551,7 +16549,6 @@ gg.sleep(200)
 end
 end) end,
 function() runAsyncTask(function()
-HK()
 关闭玩家列表()
 end) end),
 RG.switch("执行视角自动追踪",
@@ -16562,10 +16559,8 @@ end) end,
 function() runAsyncTask(function()
 HK()
 关闭页面("视角锁敌")
-if EnemyLock.running then
 EnemyLock:stop()
 gg.sleep(200)
-end
 end) end),
 }),
 }),
