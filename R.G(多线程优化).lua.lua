@@ -1348,7 +1348,7 @@ kongzhi_jishi("启动")
 
 
 _config = {
-    checkInterval = 1400,
+    checkInterval = 1000,
     isMonitoring = false,
     currentProcess = nil,
     lastCheckTime = 0,
@@ -11692,7 +11692,7 @@ function 特殊加速关闭()
     local t = {"libclient.so:bss", "Cb"}
     local tt = {0xC7E798, 0x40, 0x30, 0x28, 0x70, 0x10}
     local ttt = S_Pointer(t, tt, true)
-    gg.setValues({{address = ttt, flags = 64, value = 0.79}})
+    gg.setValues({{address = ttt, flags = 64, value = 0.5}})
     
     gg.sleep(1)
     提示("请解体修复")
@@ -11704,8 +11704,8 @@ function 特殊加速关闭()
             {["lv"] = 1111752704, ["offset"] = 0x44, ["type"] = D},
         },
         {
-            {["value"] = 0, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = true},
-            {["value"] = 0, ["offset"] = -0x14, ["type"] = F, ["freeze"] = true},
+            {["value"] = 0, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = false},
+            {["value"] = 0, ["offset"] = -0x14, ["type"] = F, ["freeze"] = false},
         }
     )
 end
@@ -11899,7 +11899,6 @@ function 相机Y状态开()
 if not xjysj or #xjysj == 0 then
 search("-9.073736162416211E207", 64, neicun)
 py1(0.0001, 64, 4)
-py1(0.1, 64, 76)
 py1(0.8, 64, 52)
 xjysj = sj
 else
@@ -11912,7 +11911,6 @@ function 相机Y状态关()
 if not xjysj or #xjysj == 0 then
 search("-9.073736162416211E207", 64, neicun)
 py1(0.0001, 64, 4)
-py1(0.1, 64, 76)
 py1(0.8, 64, 52)
 xjysj = sj
 else
@@ -14554,10 +14552,11 @@ end) end
 {"恢复速度",
 function() enqueueTask(function()
 HK()
+
 local t = {"libclient.so:bss", "Cb"}
 local tt = {0xC7E798, 0x40, 0x30, 0x28,0x70,0x10}
 local ttt = S_Pointer(t, tt, true)
-gg.setValues({{address = ttt, flags = 64, value = 1}})
+gg.setValues({{address = ttt, flags = 64, value = 0.5}})
 
 提示("恢复成功,请解体修复") 
 end) end},
@@ -14632,14 +14631,7 @@ HK()
 local t = {"libclient.so:bss", "Cb"}
 local tt = {0xC7E798, 0x40, 0x30, 0x28,0x70,0x10}
 local ttt = S_Pointer(t, tt, true)
-gg.setValues({{address = ttt, flags = 64, value = 0.79}})
-
-gg.sleep(1)
-
-local t = {"libclient.so:bss", "Cb"}
-local tt = {0xC7E798, 0x40, 0x30, 0x28,0x70,0x10}
-local ttt = S_Pointer(t, tt, true)
-gg.setValues({{address = ttt, flags = 64, value = 0.79}})
+gg.setValues({{address = ttt, flags = 64, value = 0.5}})
 
 提示("请解体修复")
 gg.clearResults()
@@ -14685,7 +14677,7 @@ gg.sleep(1)
 local t = {"libclient.so:bss", "Cb"}
 local tt = {0xC7E798, 0x40, 0x30, 0x28,0x70,0x10}
 local ttt = S_Pointer(t, tt, true)
-gg.setValues({{address = ttt, flags = 64, value = 0.79}})
+gg.setValues({{address = ttt, flags = 64, value = 0.5}})
 
 editData(
 {
@@ -16093,7 +16085,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj1tp()
 end
 end):start() end,
@@ -16107,7 +16099,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj2tp()
 end
 end):start() end,
@@ -16121,7 +16113,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj3tp()
 end
 end):start() end,
@@ -16135,7 +16127,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj4tp()
 end
 end):start() end,
@@ -16149,7 +16141,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj5tp()
 end
 end):start() end,
@@ -16163,7 +16155,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj6tp()
 end
 end):start() end,
@@ -16177,7 +16169,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj7tp()
 end
 end):start() end,
@@ -16191,7 +16183,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj8tp()
 end
 end):start() end,
@@ -16205,7 +16197,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj9tp()
 end
 end):start() end,
@@ -16219,7 +16211,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj10tp()
 end
 end):start() end,
@@ -16233,7 +16225,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj11tp()
 end
 end):start() end,
@@ -16247,7 +16239,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj12tp()
 end
 end):start() end,
@@ -16261,7 +16253,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj13tp()
 end
 end):start() end,
@@ -16275,7 +16267,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj14tp()
 end
 end):start() end,
@@ -16289,7 +16281,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj15tp()
 end
 end):start() end,
@@ -16303,7 +16295,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj16tp()
 end
 end):start() end,
@@ -16317,7 +16309,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj17tp()
 end
 end):start() end,
@@ -16331,7 +16323,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj18tp()
 end
 end):start() end,
@@ -16345,7 +16337,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj19tp()
 end
 end):start() end,
@@ -16359,7 +16351,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj20tp()
 end
 end):start() end,
@@ -16373,7 +16365,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj21tp()
 end
 end):start() end,
@@ -16387,7 +16379,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj22tp()
 end
 end):start() end,
@@ -16401,7 +16393,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj23tp()
 end
 end):start() end,
@@ -16415,7 +16407,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj24tp()
 end
 end):start() end,
@@ -16429,7 +16421,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj25tp()
 end
 end):start() end,
@@ -16443,7 +16435,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj26tp()
 end
 end):start() end,
@@ -16457,7 +16449,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj27tp()
 end
 end):start() end,
@@ -16471,7 +16463,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj28tp()
 end
 end):start() end,
@@ -16485,7 +16477,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj29tp()
 end
 end):start() end,
@@ -16499,7 +16491,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj30tp()
 end
 end):start() end,
@@ -16588,7 +16580,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj51tp()
 end
 end):start() end,
@@ -16602,7 +16594,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj52tp()
 end
 end):start() end,
@@ -16616,7 +16608,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj53tp()
 end
 end):start() end,
@@ -16630,7 +16622,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj54tp()
 end
 end):start() end,
@@ -16644,7 +16636,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj55tp()
 end
 end):start() end,
@@ -16658,7 +16650,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj56tp()
 end
 end):start() end,
@@ -16672,7 +16664,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj57tp()
 end
 end):start() end,
@@ -16686,7 +16678,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj58tp()
 end
 end):start() end,
@@ -16700,7 +16692,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj59tp()
 end
 end):start() end,
@@ -16714,7 +16706,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj60tp()
 end
 end):start() end,
@@ -16728,7 +16720,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj61tp()
 end
 end):start() end,
@@ -16742,7 +16734,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj62tp()
 end
 end):start() end,
@@ -16756,7 +16748,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj63tp()
 end
 end):start() end,
@@ -16770,7 +16762,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj64tp()
 end
 end):start() end,
@@ -16784,7 +16776,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj65tp()
 end
 end):start() end,
@@ -16798,7 +16790,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj66tp()
 end
 end):start() end,
@@ -16812,7 +16804,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj67tp()
 end
 end):start() end,
@@ -16826,7 +16818,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj68tp()
 end
 end):start() end,
@@ -16840,7 +16832,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj69tp()
 end
 end):start() end,
@@ -16854,7 +16846,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj70tp()
 end
 end):start() end,
@@ -16868,7 +16860,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj71tp()
 end
 end):start() end,
@@ -16882,7 +16874,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj72tp()
 end
 end):start() end,
@@ -16896,7 +16888,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj73tp()
 end
 end):start() end,
@@ -16910,7 +16902,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj74tp()
 end
 end):start() end,
@@ -16924,7 +16916,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj75tp()
 end
 end):start() end,
@@ -16938,7 +16930,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj76tp()
 end
 end):start() end,
@@ -16952,7 +16944,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj77tp()
 end
 end):start() end,
@@ -16966,7 +16958,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj78tp()
 end
 end):start() end,
@@ -16980,7 +16972,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj79tp()
 end
 end):start() end,
@@ -16994,7 +16986,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(10)
+gg.sleep(5)
 wj80tp()
 end
 end):start() end,
@@ -28092,6 +28084,7 @@ RG.line(),
 RG.button("强制取消循环功能", 
 function() luajava.newThread(function()
 HK()
+fw1=false
 end):start() end),
 RG.button("取消所有冻结", 
 function() luajava.newThread(function()
