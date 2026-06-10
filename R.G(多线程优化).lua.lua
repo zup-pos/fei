@@ -4730,12 +4730,38 @@ end
 ]]
 
 
+
+local function isZero(v)
+    local num = tonumber(v)
+    if num == nil then return true end
+    return math.abs(num) < 0.001
+end
+
+_G.FilterStep = 1
+_G.CleanStep = 1
+_G.CleanHistory = {}
+_G.MoveHistory = {}
 _G.Candidates = nil
 _G.PlayerData = nil
-local Xintid, Yintid, Zintid, Xintzhi, Yintzhi, Zintzhi
+
+selfXAddr = nil
+selfYAddr = nil
+selfZAddr = nil
+
+Xintid = nil
+Yintid = nil
+Zintid = nil
+Xintzhi = nil
+Yintzhi = nil
+Zintzhi = nil
 
 
 function HS3()
+    _G.FilterStep = 1
+    _G.MoveHistory = {}
+    _G.CleanStep = 1
+    _G.CleanHistory = {}
+
     local selfCoords = nil
     local selfBase = nil
 
@@ -4839,11 +4865,7 @@ function HS3()
 
         local x, y, z = coords[1].value, coords[2].value, coords[3].value
 
-        if type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then
-            skipCount = skipCount + 1
-            goto continue
-        end
-        if x == 0 or y == 0 or z == 0 then
+        if isZero(x) or isZero(y) or isZero(z) then
             skipCount = skipCount + 1
             goto continue
         end
@@ -4897,82 +4919,109 @@ function filterDynamicEntities(threshold, sortOrder)
         return
     end
 
-    local selfX, selfY, selfZ
-    local canSort = false
-    if selfXAddr and selfYAddr and selfZAddr then
-        local selfCoords = gg.getValues({
-            {address = selfXAddr, flags = gg.TYPE_FLOAT},
-            {address = selfYAddr, flags = gg.TYPE_FLOAT},
-            {address = selfZAddr, flags = gg.TYPE_FLOAT}
-        })
-        if selfCoords and selfCoords[1] and selfCoords[2] and selfCoords[3] then
-            selfX = selfCoords[1].value
-            selfY = selfCoords[2].value
-            selfZ = selfCoords[3].value
-            canSort = true
-        end
-    end
-
-    if not canSort then
-        提示("自身坐标未初始化，无法排序，将仅过滤")
-    end
-
-    local validPlayers = {}
-    for _, cand in ipairs(_G.Candidates) do
-        local ok, curCoords = pcall(gg.getValues, {
-            {address = cand.addr + 0x24, flags = gg.TYPE_FLOAT},
-            {address = cand.addr + 0x28, flags = gg.TYPE_FLOAT},
-            {address = cand.addr + 0x2C, flags = gg.TYPE_FLOAT}
-        })
-        if not ok or not curCoords or not curCoords[1] or not curCoords[2] or not curCoords[3] then
-            goto skip
-        end
-        local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
-
-        if x == 0 or y == 0 or z == 0 then
-            goto skip
-        end
-        local dx = x - cand.x
-        local dy = y - cand.y
-        local dz = z - cand.z
-        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        if dist > threshold then
-            table.insert(validPlayers, {
-                addr = cand.addr,
-                x = x,
-                y = y,
-                z = z
+    if _G.FilterStep == 1 then
+        for _, cand in ipairs(_G.Candidates) do
+            local addr = cand.addr
+            local ok, coords = pcall(gg.getValues, {
+                {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
             })
+            if ok and coords and coords[1] and coords[2] and coords[3] then
+                local x = tonumber(coords[1].value)
+                local y = tonumber(coords[2].value)
+                local z = tonumber(coords[3].value)
+                if x and y and z and not (isZero(x) or isZero(y) or isZero(z)) then
+                    _G.MoveHistory[addr] = { firstX = x, firstY = y, firstZ = z }
+                end
+            end
         end
-        ::skip::
+        _G.FilterStep = 2
+        提示("已记录第一次坐标，再次点击「过滤移动玩家」将执行过滤")
+        return
     end
 
-    if canSort and #validPlayers > 0 then
-        for _, v in ipairs(validPlayers) do
-            v.dist = math.sqrt((v.x - selfX)^2 + (v.y - selfY)^2 + (v.z - selfZ)^2)
+    if _G.FilterStep == 2 then
+        local selfX, selfY, selfZ
+        local canSort = false
+        if selfXAddr and selfYAddr and selfZAddr then
+            local selfCoords = gg.getValues({
+                {address = selfXAddr, flags = gg.TYPE_FLOAT},
+                {address = selfYAddr, flags = gg.TYPE_FLOAT},
+                {address = selfZAddr, flags = gg.TYPE_FLOAT}
+            })
+            if selfCoords and selfCoords[1] and selfCoords[2] and selfCoords[3] then
+                selfX = selfCoords[1].value
+                selfY = selfCoords[2].value
+                selfZ = selfCoords[3].value
+                canSort = true
+            end
         end
-        if sortOrder == 1 then
-            table.sort(validPlayers, function(a, b) return a.dist > b.dist end)
-        else
-            table.sort(validPlayers, function(a, b) return a.dist < b.dist end)
+
+        if not canSort then
+            提示("自身坐标未初始化，无法排序，将仅过滤")
         end
-    end
 
-    _G.PlayerData = {}
-    for i, v in ipairs(validPlayers) do
-        _G.PlayerData[i] = {
-            address = v.addr,
-            flags = gg.TYPE_DWORD,
-            value = 0
-        }
-    end
+        local validPlayers = {}
+        for _, cand in ipairs(_G.Candidates) do
+            local addr = cand.addr
+            local ok, curCoords = pcall(gg.getValues, {
+                {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
+            })
+            if not ok or not curCoords or not curCoords[1] or not curCoords[2] or not curCoords[3] then
+                goto skip
+            end
+            local x = tonumber(curCoords[1].value)
+            local y = tonumber(curCoords[2].value)
+            local z = tonumber(curCoords[3].value)
+            if not (x and y and z) then goto skip end
 
-    local sortText = (sortOrder == 1) and "（远→近）" or "（近→远）"
-    local msg = string.format("过滤完成，剩余 %d 个移动玩家", #validPlayers)
-    if canSort then
-        msg = msg .. sortText
+            if isZero(x) or isZero(y) or isZero(z) then
+                goto skip
+            end
+
+            local hist = _G.MoveHistory[addr]
+            if hist then
+                local dx = x - hist.firstX
+                local dy = y - hist.firstY
+                local dz = z - hist.firstZ
+                local totalDist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                if totalDist > threshold then
+                    table.insert(validPlayers, { addr = addr, x = x, y = y, z = z })
+                end
+            else
+                table.insert(validPlayers, { addr = addr, x = x, y = y, z = z })
+            end
+            ::skip::
+        end
+
+        if canSort and #validPlayers > 0 then
+            for _, v in ipairs(validPlayers) do
+                v.dist = math.sqrt((v.x - selfX)^2 + (v.y - selfY)^2 + (v.z - selfZ)^2)
+            end
+            if sortOrder == 1 then
+                table.sort(validPlayers, function(a, b) return a.dist > b.dist end)
+            else
+                table.sort(validPlayers, function(a, b) return a.dist < b.dist end)
+            end
+        end
+
+        _G.PlayerData = {}
+        for i, v in ipairs(validPlayers) do
+            _G.PlayerData[i] = { address = v.addr, flags = gg.TYPE_DWORD, value = 0 }
+        end
+
+        local sortText = (sortOrder == 1) and "（远→近）" or "（近→远）"
+        local msg = string.format("过滤完成，剩余 %d 个移动玩家", #validPlayers)
+        if canSort then msg = msg .. sortText end
+        提示(msg)
+
+        _G.FilterStep = 1
+        _G.MoveHistory = {}
+        return
     end
-    提示(msg)
 end
 
 
@@ -5009,7 +5058,7 @@ function resortHS3(order)
         })
         if ok and curCoords and curCoords[1] and curCoords[2] and curCoords[3] then
             local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
-            if not (x == 0 or y == 0 or z == 0) then
+            if not (isZero(x) or isZero(y) or isZero(z)) then
 
                 cand.x = x
                 cand.y = y
@@ -5134,7 +5183,6 @@ function cleanHS3()
         _G.Candidates = nil
         提示(string.format("已强制清除所有 %d 个玩家数据", count))
         collectgarbage("collect")
-        gg.clearList()
     else
         提示("没有有效地址进行清理")
     end
@@ -5147,7 +5195,7 @@ if not rawData or #rawData == 0 then
     rawData = _G.PlayerData
 end
 if not rawData or #rawData == 0 then
-    提示("没有实体数据，请先执行HS3")
+    提示("没有实体数据，请先初始化")
     return
 end
 
@@ -5161,18 +5209,17 @@ for _, v in ipairs(rawData) do
             {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
         })
         if ok and coords and coords[1] and coords[2] and coords[3] then
-            local x, y, z = coords[1].value, coords[2].value, coords[3].value
-            table.insert(refreshed, {addr = addr, x = x, y = y, z = z})
+            local x = tonumber(coords[1].value)
+            local y = tonumber(coords[2].value)
+            local z = tonumber(coords[3].value)
+            if x and y and z and not (isZero(x) or isZero(y) or isZero(z)) then
+                table.insert(refreshed, {addr = addr, x = x, y = y, z = z})
+            end
         end
     end
 end
 
-local data = {}
-for _, ent in ipairs(refreshed) do
-    if not (ent.x == 0 or ent.y == 0 or ent.z == 0) then
-        table.insert(data, ent)
-    end
-end
+local data = refreshed
 
 if #data == 0 then
     提示("所有实体坐标数据均为0（可能已失效），请重新初始化")
@@ -5394,25 +5441,122 @@ end
         return filtered
     end
 
-    local function cleanInvalid(source)
-        local before = #source
-        local cleaned = {}
+local function cleanInvalid(source)
+    if not source or #source == 0 then
+        提示("没有实体数据")
+        return false
+    end
+
+    local step = _G.CleanStep
+    local history = _G.CleanHistory
+
+    if step == 1 then
         for _, ent in ipairs(source) do
-            if not (ent.x == 0 or ent.y == 0 or ent.z == 0) then
-                table.insert(cleaned, ent)
+            local addr = ent.addr
+            if addr then
+                local ok, coords = pcall(gg.getValues, {
+                    {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+                    {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+                    {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
+                })
+                if ok and coords and coords[1] and coords[2] and coords[3] then
+                    local x = tonumber(coords[1].value)
+                    local y = tonumber(coords[2].value)
+                    local z = tonumber(coords[3].value)
+                    if x and y and z then
+                        history[addr] = { x1 = x, y1 = y, z1 = z, step = 1 }
+                    end
+                end
             end
         end
-        if #cleaned < before then
-            for i=1,#cleaned do source[i] = cleaned[i] end
-            for i=#cleaned+1, #source do source[i] = nil end
-            syncToGlobal()
-            提示(string.format("已清理 %d 个无效实体数据", before - #cleaned))
-            return true
-        else
-            提示("没有发现无效实体数据")
-            return false
-        end
+        _G.CleanStep = 2
+        提示("已记录第一次坐标，再次点击「清理无效」记录第二次")
+        return false
     end
+    if step == 2 then
+        for _, ent in ipairs(source) do
+            local addr = ent.addr
+            if addr and history[addr] and history[addr].step == 1 then
+                local ok, coords = pcall(gg.getValues, {
+                    {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+                    {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+                    {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
+                })
+                if ok and coords and coords[1] and coords[2] and coords[3] then
+                    local x = tonumber(coords[1].value)
+                    local y = tonumber(coords[2].value)
+                    local z = tonumber(coords[3].value)
+                    if x and y and z then
+                        history[addr].x2 = x
+                        history[addr].y2 = y
+                        history[addr].z2 = z
+                        history[addr].step = 2
+                    end
+                end
+            end
+        end
+        _G.CleanStep = 3
+        提示("已记录第二次坐标，再次点击「清理无效」将过滤静止物体（第三次比较）")
+        return false
+    end
+    if step == 3 then
+        local cleaned = {}
+        local removed = 0
+        for _, ent in ipairs(source) do
+            local addr = ent.addr
+            if not addr then goto skip end
+            local ok, coords = pcall(gg.getValues, {
+                {address = addr + 0x24, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x28, flags = gg.TYPE_FLOAT},
+                {address = addr + 0x2C, flags = gg.TYPE_FLOAT}
+            })
+            if not ok or not coords or not coords[1] or not coords[2] or not coords[3] then
+                removed = removed + 1
+                goto skip
+            end
+            local x = tonumber(coords[1].value)
+            local y = tonumber(coords[2].value)
+            local z = tonumber(coords[3].value)
+            if not (x and y and z) then
+                removed = removed + 1
+                goto skip
+            end
+            if isZero(x) or isZero(y) or isZero(z) then
+                removed = removed + 1
+                goto skip
+            end
+
+            local hist = history[addr]
+            if hist and hist.step == 2 then
+                local same = math.abs(hist.x2 - x) < 1e-4 and
+                             math.abs(hist.y2 - y) < 1e-4 and
+                             math.abs(hist.z2 - z) < 1e-4
+                if same then
+                    removed = removed + 1
+                    goto skip
+                else
+                    table.insert(cleaned, { addr = addr, x = x, y = y, z = z })
+                end
+            else
+                table.insert(cleaned, { addr = addr, x = x, y = y, z = z })
+            end
+            ::skip::
+        end
+
+        if #cleaned < #source then
+            for i = 1, #cleaned do source[i] = cleaned[i] end
+            for i = #cleaned + 1, #source do source[i] = nil end
+            syncToGlobal()
+            提示(string.format("已清理 %d 个静止实体（连续三次坐标未变）", removed))
+        else
+            提示("没有发现静止实体")
+        end
+        _G.CleanStep = 1
+        _G.CleanHistory = {}
+        return true
+    end
+    return false
+end
 
     local history = {{items = buildItems(data), data = data}}
 
@@ -5749,11 +5893,13 @@ function stopMultiPlayerLoop()
     if fw1 then
         fw1 = false
         if multiPlayerLoopThread then
+            gg.sleep(100)
             multiPlayerLoopThread = nil
         end
         提示("已停止多玩家循环传送")
     else
         提示("未在运行")
+        multiPlayerLoopThread = nil
     end
 end
 
@@ -11751,26 +11897,28 @@ end
 xjysj = nil
 function 相机Y状态开()
 if not xjysj or #xjysj == 0 then
-search(80, 64, neicun)
-py1(20, 64, 24)
-py1(0.0001, 64, 48)
+search("-9.073736162416211E207", 64, neicun)
+py1(0.0001, 64, 4)
+py1(0.1, 64, 76)
+py1(0.8, 64, 52)
 xjysj = sj
 else
 sj = xjysj
 end
-xg3(nil, 64, 72, false, true, "相机Y状态")
+xg3(nil, 64, 28, false, true, "相机Y状态")
 end
 
 function 相机Y状态关()
 if not xjysj or #xjysj == 0 then
-search(80, 64, neicun)
-py1(20, 64, 24)
-py1(0.0001, 64, 48)
+search("-9.073736162416211E207", 64, neicun)
+py1(0.0001, 64, 4)
+py1(0.1, 64, 76)
+py1(0.8, 64, 52)
 xjysj = sj
 else
 sj = xjysj
 end
-xg1(10, 64, 72, false)
+xg1(10, 64, 28, false)
 xjysj=nil
 end
 
@@ -11779,12 +11927,12 @@ function 霜鸟锁定数量开()
 if not xnsj or #xnsj == 0 then
 search("2.6527537714E-314", 64, 4)
 py1(0.9, 64, 20)
-py1(0.8, 64, -100)
-py1(-1.0, 64, 92)
-py1(7.0, 64, -76)
+--py1(0.8, 64, -100)
+--py1(-1.0, 64, 92)
+--py1(7.0, 64, -76)
 py1(0.9, 64, 44)
 py1(0.1, 64, -52)
-py1(0.9, 64, 68)
+--py1(0.9, 64, 68)
 xnsj = sj
 else
 sj = xnsj
@@ -11796,12 +11944,12 @@ function 霜鸟锁定数量关()
 if not xnsj or #xnsj == 0 then
 search("2.6527537714E-314", 64, 4)
 py1(0.9, 64, 20)
-py1(0.8, 64, -100)
-py1(-1.0, 64, 92)
-py1(7.0, 64, -76)
+--py1(0.8, 64, -100)
+--py1(-1.0, 64, 92)
+--py1(7.0, 64, -76)
 py1(0.9, 64, 44)
 py1(0.1, 64, -52)
-py1(0.9, 64, 68)
+--py1(0.9, 64, 68)
 xnsj = sj
 else
 sj = xnsj
