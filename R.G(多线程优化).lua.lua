@@ -1348,7 +1348,7 @@ kongzhi_jishi("启动")
 
 
 _config = {
-    checkInterval = 1000,
+    checkInterval = 1200,
     isMonitoring = false,
     currentProcess = nil,
     lastCheckTime = 0,
@@ -1508,12 +1508,12 @@ local function optimizedMonitorLoop()
         if not isAlive then
             _config.lastCrashTime = os.time()
             提示("检测到进程崩溃，尝试自动切换...")
-            gg.sleep(800)
+            gg.sleep(400)
 
             local switched, oldProcess, newProcess = safeSwitchToOtherProcess()
             if switched then
                 提示(string.format("已从 %s 切换到 %s", oldProcess.name, newProcess.name))
-                gg.sleep(1000)
+                gg.sleep(400)
             else
                 提示("自动切换失败，请手动选择新进程")
                 local selected = nil
@@ -1533,7 +1533,7 @@ local function optimizedMonitorLoop()
                         gg.sleep(500)
                     end
                 end
-                gg.sleep(1000)
+                gg.sleep(600)
             end
         end
 
@@ -11897,26 +11897,24 @@ end
 xjysj = nil
 function 相机Y状态开()
 if not xjysj or #xjysj == 0 then
-search("-9.073736162416211E207", 64, neicun)
-py1(0.0001, 64, 4)
-py1(0.8, 64, 52)
+search(0.0001, 64, 4)
+py1(0.8, 64, 48)
 xjysj = sj
 else
 sj = xjysj
 end
-xg3(nil, 64, 28, false, true, "相机Y状态")
+xg3(nil, 64, 24, false, true, "相机Y状态")
 end
 
 function 相机Y状态关()
 if not xjysj or #xjysj == 0 then
-search("-9.073736162416211E207", 64, neicun)
-py1(0.0001, 64, 4)
-py1(0.8, 64, 52)
+search(0.0001, 64, 4)
+py1(0.8, 64, 48)
 xjysj = sj
 else
 sj = xjysj
 end
-xg1(10, 64, 28, false)
+xg1(10, 64, 24, false)
 xjysj=nil
 end
 
