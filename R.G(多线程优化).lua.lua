@@ -23,7 +23,7 @@ file.mkdir("/storage/emulated/0/长安/配置文件")
 file.mkdir("/storage/emulated/0/长安/列表改模块")
 
 local function get_android_version()
-    if type(luajava) ~= "table" or not luajava.bindClass then return "安卓未知设备" end
+    if type(luajava) ~= "table" or not luajava.bindClass then return "安卓(未知版本)设备" end
     local success, sdk_int = pcall(function()
         local BuildVersion = luajava.bindClass("android.os.Build$VERSION")
         return BuildVersion.SDK_INT
@@ -395,10 +395,6 @@ cssfdj=false
 end
 end
 
-function HF()
-fw1=false
-end
-
 
 function HA()
 fw1=false
@@ -410,11 +406,12 @@ fw1=false
 end
 
 
+fw1=false
 function HK()
-if fw1==true then 
+if fw1 then 
 提示("检测到正在执行循环功能\n为防止卡顿\n正在尝试关闭循环功能后再执行功能")   
 fw1=false
-gg.sleep(3000)       
+gg.sleep(3000)
 end
 end
 
@@ -3424,7 +3421,7 @@ end
 AS.switchFuncs["语音播报开关"] = { on = voice_on, off = voice_off, applyOn = voice_applyOn, applyOff = voice_applyOff }
 
 local function clear_applyOn()
-    pcall(QC); pcall(HF)
+    pcall(QC)
 end
 local function clear_applyOff()
     pcall(QS)
@@ -3487,7 +3484,7 @@ local function pickup_applyOff()
     pcall(拾取冻结, false)
 end
 local function pickup_applyOn()
-    pcall(拾取冻结, true); pcall(HF)
+    pcall(拾取冻结, true)
 end
 pickup_on = function()
     luajava.newThread(function()
@@ -4714,15 +4711,7 @@ end
 
 
 
-
-
-
-
-
-_G.Candidates = nil
-_G.PlayerData = nil
-local Xintid, Yintid, Zintid, Xintzhi, Yintzhi, Zintzhi
-
+--[[
 function HS1()
 gg.clearResults()
 提示("寻找敌人")
@@ -4738,6 +4727,13 @@ editData(
 }
 )
 end
+]]
+
+
+_G.Candidates = nil
+_G.PlayerData = nil
+local Xintid, Yintid, Zintid, Xintzhi, Yintzhi, Zintzhi
+
 
 function HS3()
     local selfCoords = nil
@@ -4748,17 +4744,11 @@ function HS3()
         gg.setRanges(neicun)
         gg.searchNumber("17039364", gg.TYPE_QWORD, false, gg.SIGN_EQUAL, 0, -1)
         local count = gg.getResultsCount()
-        if count == 0 then
-            return false
-        end
+        if count == 0 then return false end
         local results = gg.getResults(1)
-        if not results or #results == 0 then
-            return false
-        end
+        if not results or #results == 0 then return false end
         selfBase = results[1].address
-        if not selfBase or selfBase == 0 then
-            return false
-        end
+        if not selfBase or selfBase == 0 then return false end
         selfXAddr = selfBase - 12
         selfYAddr = selfBase - 8
         selfZAddr = selfBase - 4
@@ -4818,45 +4808,57 @@ function HS3()
         提示("自身坐标未初始化，继续搜索敌人但无法排序")
     end
 
-    HS1()
-    gg.clearResults()
-    gg.setRanges(neicun)
-    gg.searchNumber("1145141919", gg.TYPE_DWORD, false, gg.SIGN_EQUAL, 0, -1)
-    local jc = gg.getResultsCount()
-
-    if jc < 1 then
-        gg.editAll("0", gg.TYPE_DWORD)
-    else
-        HS1()
-        gg.clearResults()
-    end
-
-    gg.searchNumber("1145141919", gg.TYPE_DWORD, false, gg.SIGN_EQUAL, 0, -1)
-    local cs = gg.getResultCount()
-    local allResults = gg.getResults(cs)
-    gg.clearResults()
-    gg.sleep(50)
+    search(17039361, 4, neicun)
+    py1(-190986834, 4, 0x30)
 
     _G.Candidates = {}
-    local idx = 1
-    for i = 1, cs do
-        local result = allResults[i]
-        if result and result.address then
-            local ok, coords = pcall(gg.getValues, {
-                {address = result.address + 0x24, flags = gg.TYPE_FLOAT},
-                {address = result.address + 0x28, flags = gg.TYPE_FLOAT},
-                {address = result.address + 0x2C, flags = gg.TYPE_FLOAT}
-            })
-            if ok and coords and coords[1] and coords[2] and coords[3] then
-                _G.Candidates[idx] = {
-                    addr = result.address,
-                    x = coords[1].value,
-                    y = coords[2].value,
-                    z = coords[3].value
-                }
-                idx = idx + 1
-            end
+    local skipCount = 0
+
+    for _, v in ipairs(sj) do
+        if not v.address or v.address < 0x10000 then
+            skipCount = skipCount + 1
+            goto continue
         end
+
+        local markAddr = v.address - 0x30
+        if markAddr < 0x10000 or markAddr > 0x7FFFFFFFFF then
+            skipCount = skipCount + 1
+            goto continue
+        end
+
+        local ok, coords = pcall(gg.getValues, {
+            {address = markAddr + 0x24, flags = gg.TYPE_FLOAT},
+            {address = markAddr + 0x28, flags = gg.TYPE_FLOAT},
+            {address = markAddr + 0x2C, flags = gg.TYPE_FLOAT}
+        })
+
+        if not ok or not coords or not coords[1] or not coords[2] or not coords[3] then
+            skipCount = skipCount + 1
+            goto continue
+        end
+
+        local x, y, z = coords[1].value, coords[2].value, coords[3].value
+
+        if type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then
+            skipCount = skipCount + 1
+            goto continue
+        end
+        if x == 0 and y == 0 and z == 0 then
+            skipCount = skipCount + 1
+            goto continue
+        end
+
+        table.insert(_G.Candidates, {
+            addr = markAddr,
+            x = x, y = y, z = z
+        })
+
+        ::continue::
+    end
+
+    if skipCount > 0 then
+        提示("跳过 " .. skipCount .. " 个无效实体坐标")
+        gg.sleep(600)
     end
 
     if selfCoords then
@@ -4879,19 +4881,17 @@ function HS3()
             flags = gg.TYPE_DWORD,
             value = 0
         }
-        gg.setValues({{address = cand.addr, value = 0, flags = gg.TYPE_DWORD}})
-        gg.sleep(5)
     end
 
     local count = #_G.PlayerData
     提示("共找到玩家:" .. count .. (selfCoords and " (已按距离排序)" or " (未排序)"))
-    gg.sleep(1200)
+    gg.sleep(100)
 end
 
 function filterDynamicEntities(threshold, sortOrder)
     threshold = threshold or 0.05
     sortOrder = sortOrder or 0
-    
+
     if not _G.Candidates or #_G.Candidates == 0 then
         提示("没有候选数据，请先初始化")
         return
@@ -4905,7 +4905,7 @@ function filterDynamicEntities(threshold, sortOrder)
             {address = selfYAddr, flags = gg.TYPE_FLOAT},
             {address = selfZAddr, flags = gg.TYPE_FLOAT}
         })
-        if selfCoords then
+        if selfCoords and selfCoords[1] and selfCoords[2] and selfCoords[3] then
             selfX = selfCoords[1].value
             selfY = selfCoords[2].value
             selfZ = selfCoords[3].value
@@ -4919,35 +4919,38 @@ function filterDynamicEntities(threshold, sortOrder)
 
     local validPlayers = {}
     for _, cand in ipairs(_G.Candidates) do
-        local coords2 = gg.getValues({
+        local ok, curCoords = pcall(gg.getValues, {
             {address = cand.addr + 0x24, flags = gg.TYPE_FLOAT},
             {address = cand.addr + 0x28, flags = gg.TYPE_FLOAT},
             {address = cand.addr + 0x2C, flags = gg.TYPE_FLOAT}
         })
-        if coords2 and coords2[1] and coords2[2] and coords2[3] then
-            local dx = coords2[1].value - cand.x
-            local dy = coords2[2].value - cand.y
-            local dz = coords2[3].value - cand.z
-            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-            if dist > threshold then
-                table.insert(validPlayers, {
-                    addr = cand.addr,
-                    x = coords2[1].value,
-                    y = coords2[2].value,
-                    z = coords2[3].value
-                })
-            end
+        if not ok or not curCoords or not curCoords[1] or not curCoords[2] or not curCoords[3] then
+            goto skip
         end
+        local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
+
+        if x == 0 and y == 0 and z == 0 then
+            goto skip
+        end
+        local dx = x - cand.x
+        local dy = y - cand.y
+        local dz = z - cand.z
+        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+        if dist > threshold then
+            table.insert(validPlayers, {
+                addr = cand.addr,
+                x = x,
+                y = y,
+                z = z
+            })
+        end
+        ::skip::
     end
 
-    if canSort then
+    if canSort and #validPlayers > 0 then
         for _, v in ipairs(validPlayers) do
-            local dx = v.x - selfX
-            local dy = v.y - selfY
-            local dz = v.z - selfZ
-            v.dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            v.dist = math.sqrt((v.x - selfX)^2 + (v.y - selfY)^2 + (v.z - selfZ)^2)
         end
-
         if sortOrder == 1 then
             table.sort(validPlayers, function(a, b) return a.dist > b.dist end)
         else
@@ -4974,7 +4977,7 @@ end
 
 
 function resortHS3(order)
-order = order or 0
+    order = order or 0
     if not _G.Candidates or #_G.Candidates == 0 then
         提示("没有候选数据，请先初始化")
         return
@@ -4989,9 +4992,38 @@ order = order or 0
         {address = selfYAddr, flags = gg.TYPE_FLOAT},
         {address = selfZAddr, flags = gg.TYPE_FLOAT}
     })
+    if not selfCoords or not selfCoords[1] or not selfCoords[2] or not selfCoords[3] then
+        提示("获取自身坐标失败")
+        return
+    end
     local selfX = selfCoords[1].value
     local selfY = selfCoords[2].value
     local selfZ = selfCoords[3].value
+
+    local valid = {}
+    for _, cand in ipairs(_G.Candidates) do
+        local ok, curCoords = pcall(gg.getValues, {
+            {address = cand.addr + 0x24, flags = gg.TYPE_FLOAT},
+            {address = cand.addr + 0x28, flags = gg.TYPE_FLOAT},
+            {address = cand.addr + 0x2C, flags = gg.TYPE_FLOAT}
+        })
+        if ok and curCoords and curCoords[1] and curCoords[2] and curCoords[3] then
+            local x, y, z = curCoords[1].value, curCoords[2].value, curCoords[3].value
+            if not (x == 0 and y == 0 and z == 0) then
+
+                cand.x = x
+                cand.y = y
+                cand.z = z
+                table.insert(valid, cand)
+            end
+        end
+    end
+
+    _G.Candidates = valid
+    if #_G.Candidates == 0 then
+        提示("没有有效的玩家数据")
+        return
+    end
 
     for _, cand in ipairs(_G.Candidates) do
         local dx = cand.x - selfX
@@ -5114,7 +5146,7 @@ local 环绕取值 = 0
 local 环绕半径 = 0
 local 环绕高度 = 0
 local 环绕角度 = 1
-local localAroundActive = false
+fw1 = false
 local centerX, centerY, centerZ
 local 环绕还原 = true
 file.mkdir("/storage/emulated/0/长安/环绕")
@@ -5254,8 +5286,7 @@ function randomCD()
 end
 
 
-
-multiPlayerLoopActive = false
+fw1 = false
 multiPlayerLoopThread = nil
 multiPlayerList = {}
 
@@ -5288,15 +5319,15 @@ function startMultiPlayerLoop()
     table.sort(selectedIndices)
     multiPlayerList = selectedIndices
 
-    if multiPlayerLoopActive then
+    if fw1 then
         stopMultiPlayerLoop()
         gg.sleep(100)
     end
 
-    multiPlayerLoopActive = true
+    fw1 = true
     local threadFunc = function()
         local listIndex = 1
-        while multiPlayerLoopActive do
+        while fw1 do
             local playerIdx = multiPlayerList[listIndex]
             if playerIdx then
                 local func = _G["wj" .. playerIdx .. "tp"]
@@ -5329,8 +5360,8 @@ function startMultiPlayerLoop()
 end
 
 function stopMultiPlayerLoop()
-    if multiPlayerLoopActive then
-        multiPlayerLoopActive = false
+    if fw1 then
+        fw1 = false
         if multiPlayerLoopThread then
             multiPlayerLoopThread = nil
         end
@@ -5577,7 +5608,7 @@ function randomTeleport()
 end
 
 
-playerCycleActive = false
+fw1 = false
 playerCycleThread = nil
 playerCycleList = {}
 
@@ -5612,17 +5643,17 @@ function startPlayerCycle()
     table.sort(selectedIndices)
     playerCycleList = selectedIndices
 
-    if playerCycleActive then
+    if fw1 then
         stopPlayerCycle()
         gg.sleep(100)
     end
 
-    playerCycleActive = true
+    fw1 = true
     
     local threadFunc = function()
         local listIndex = 1
         
-        while playerCycleActive do
+        while fw1 do
             local displayIndex = playerCycleList[listIndex]
             if displayIndex then
                 local actualFuncName = "wj" .. (displayIndex + 50) .. "tp"  -- 转换为 wj51tp、wj52tp...
@@ -5653,8 +5684,8 @@ function startPlayerCycle()
 end
 
 function stopPlayerCycle()
-    if playerCycleActive then
-        playerCycleActive = false
+    if fw1 then
+        fw1 = false
         playerCycleThread = nil
         提示("已停止多玩家循环执行")
     else
@@ -5833,7 +5864,7 @@ function ViewControl:getHorizontalVectors()
 end
 
 function ViewControl:positionLoop()
-    while self.running do
+    while fw1 do
         local fx, fz, rx, rz, pitch = self:getHorizontalVectors()
         local moveX = (fx * self.posForward + rx * self.posRight) * self.posSpeed
         local moveZ = (fz * self.posForward + rz * self.posRight) * self.posSpeed
@@ -5853,7 +5884,7 @@ function ViewControl:positionLoop()
 end
 
 function ViewControl:velocityLoop()
-    while self.running do
+    while fw1 do
         local fx, fz, rx, rz, pitch = self:getHorizontalVectors()
         local vx = (fx * self.velForward + rx * self.velRight) * self.velSpeed
         local vz = (fz * self.velForward + rz * self.velRight) * self.velSpeed
@@ -5868,7 +5899,7 @@ function ViewControl:velocityLoop()
 end
 
 function ViewControl:dualLoop()
-    while self.running do
+    while fw1 do
         local fx, fz, rx, rz, pitch = self:getHorizontalVectors()
         local moveX = (fx * self.posForward + rx * self.posRight) * self.posSpeed
         local moveZ = (fz * self.posForward + rz * self.posRight) * self.posSpeed
@@ -5906,7 +5937,7 @@ function ViewControl:loop()
 end
 
 function ViewControl:start()
-    if self.running then
+    if fw1 then
         提示("已在运行中")
         return
     end
@@ -5916,7 +5947,7 @@ function ViewControl:start()
             return
         end
     end
-    self.running = true
+    fw1 = true
     self.threadObj = luajava.newThread(function()
         self:loop()
     end)
@@ -5926,8 +5957,8 @@ function ViewControl:start()
 end
 
 function ViewControl:stop()
-    if self.running then
-        self.running = false
+    if fw1 then
+        fw1 = false
         self.threadObj = nil
         提示("视角控制已关闭")
     else
@@ -5936,7 +5967,7 @@ function ViewControl:stop()
 end
 
 function ViewControl:toggle()
-    if self.running then
+    if fw1 then
         self:stop()
     else
         self:start()
@@ -5987,7 +6018,7 @@ end
 function ViewControl:setMode(mode)
     mode = tonumber(mode)
     if mode == 1 or mode == 2 or mode == 3 then
-        local wasRunning = self.running
+        local wasRunning = fw1
         if wasRunning then self:stop() end
         self.mode = mode
         local modeName = (mode == 1 and "坐标模式") or (mode == 2 and "速度模式") or "双模式合并"
@@ -6255,7 +6286,7 @@ function EnemyLock:setViewAngles(yaw, pitch)
 end
 
 function EnemyLock:loop()
-    while self.running do
+    while fw1 do
         if self.currentEnemyIndex then
             local enemyCoords = self:getEnemyCoords(self.currentEnemyIndex)
             if not enemyCoords then
@@ -6281,7 +6312,7 @@ function EnemyLock:loop()
 end
 
 function EnemyLock:start(enemyIndex)
-    if self.running then
+    if fw1 then
         self:stop()
         gg.sleep(50)
     end
@@ -6307,7 +6338,7 @@ function EnemyLock:start(enemyIndex)
     end
     
     self.currentEnemyIndex = enemyIndex
-    self.running = true
+    fw1 = true
     
     self.threadObj = luajava.newThread(function()
         self:loop()
@@ -6319,8 +6350,8 @@ function EnemyLock:start(enemyIndex)
 end
 
 function EnemyLock:stop()
-    if self.running then
-        self.running = false
+    if fw1 then
+        fw1 = false
         self.threadObj = nil
         self.currentEnemyIndex = nil
         提示("敌人锁定已停止")
@@ -6331,7 +6362,7 @@ function EnemyLock:stop()
 end
 
 function EnemyLock:toggle()
-    if self.running then
+    if fw1 then
         self:stop()
     else
         if not _G.PlayerData or #_G.PlayerData == 0 then
@@ -11334,7 +11365,7 @@ end
 xjysj = nil
 function 相机Y状态开()
 if not xjysj or #xjysj == 0 then
-search(80, 64, 4)
+search(80, 64, neicun)
 py1(20, 64, 24)
 py1(0.0001, 64, 48)
 xjysj = sj
@@ -11345,8 +11376,8 @@ xg3(nil, 64, 72, false, true, "相机Y状态")
 end
 
 function 相机Y状态关()
- if not xjysj or #xjysj == 0 then
-search(80, 64, 4)
+if not xjysj or #xjysj == 0 then
+search(80, 64, neicun)
 py1(20, 64, 24)
 py1(0.0001, 64, 48)
 xjysj = sj
@@ -11355,6 +11386,30 @@ sj = xjysj
 end
 xg1(10, 64, 72, false)
 xjysj=nil
+end
+
+xnsj = nil
+function 霜鸟锁定数量开()
+if not xnsj or #xnsj == 0 then
+search(1.002666647964E-312, 64, neicun)
+py1(0.9, 64, 284)
+xnsj = sj
+else
+sj = xnsj
+end
+xg3(4, 64, -260, false)
+end
+
+function 霜鸟锁定数量关()
+if not xnsj or #xnsj == 0 then
+search(1.002666647964E-312, 64, neicun)
+py1(0.9, 64, 284)
+xnsj = sj
+else
+sj = xnsj
+end
+xg3(4, 64, -260, false)
+xnsj=nil
 end
 
 function 核心防水开()
@@ -11744,7 +11799,7 @@ end
 
 function 一键开启核心范围执行()
 HK()
-local fw1 = true
+fw1 = true
 local count = 0
 local gd = gg.prompt({'自定义循环次数'},{[1]='1'})
 local max_count = tonumber(gd[1])
@@ -11769,7 +11824,7 @@ end
 
 function 一键关闭核心范围执行()
 HK()
-local fw1 = true
+fw1 = true
 local count = 0
 local gd = gg.prompt({'自定义循环次数'},{[1]='1'})
 local max_count = tonumber(gd[1])
@@ -13688,7 +13743,7 @@ HK()
 特殊视角关()
 end
 ),
-RG.switch("相机Y状态开",
+RG.switch("相机Y状态",
 function() enqueueTask(function()
 HK()
 相机Y状态开()
@@ -13696,6 +13751,16 @@ end) end,
 function()
 HK()
 相机Y状态关()
+end
+),
+RG.switch("霜鸟锁定数量",
+function() enqueueTask(function()
+HK()
+霜鸟锁定数量开()
+end) end,
+function()
+HK()
+霜鸟锁定数量关()
 end
 ),
 RG.box({"物理加速",
@@ -15408,9 +15473,9 @@ function() luajava.newThread(function()
 
         local angle = 0
 
-        localAroundActive = true
+        fw1 = true
 
-        while localAroundActive do
+        while fw1 do
         local radius = 环绕半径 or 0
         local height = 环绕高度 or 0
         local offsetX = targetOffsetX or 0
@@ -15436,7 +15501,7 @@ function() luajava.newThread(function()
         end
 end):start() end,
 function()
-    localAroundActive = false
+    fw1 = false
     if 环绕还原 then
         if selfXAddr and selfYAddr and selfZAddr and _G.userCenterX then
             local success, err = pcall(gg.setValues, {
@@ -15479,7 +15544,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj1tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15493,7 +15558,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj2tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15507,7 +15572,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj3tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15521,7 +15586,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj4tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15535,7 +15600,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj5tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15549,7 +15614,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj6tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15563,7 +15628,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj7tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15577,7 +15642,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj8tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15591,7 +15656,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj9tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15605,7 +15670,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj10tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15619,7 +15684,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj11tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15633,7 +15698,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj12tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15647,7 +15712,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj13tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15661,7 +15726,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj14tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15675,7 +15740,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj15tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15689,7 +15754,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj16tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15703,7 +15768,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj17tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15717,7 +15782,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj18tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15731,7 +15796,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj19tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15745,7 +15810,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj20tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15759,7 +15824,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj21tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15773,7 +15838,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj22tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15787,7 +15852,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj23tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15801,7 +15866,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj24tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15815,7 +15880,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj25tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15829,7 +15894,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj26tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15843,7 +15908,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj27tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15857,7 +15922,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj28tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15871,7 +15936,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj29tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15885,7 +15950,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj30tp()
-gg.sleep(0)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15975,7 +16040,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj51tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -15989,7 +16054,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj52tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16003,7 +16068,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj53tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16017,7 +16082,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj54tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16031,7 +16096,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj55tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16045,7 +16110,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj56tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16059,7 +16124,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj57tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16073,7 +16138,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj58tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16087,7 +16152,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj59tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16101,7 +16166,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj60tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16115,7 +16180,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj61tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16129,7 +16194,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj62tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16143,7 +16208,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj63tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16157,7 +16222,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj64tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16171,7 +16236,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj65tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16185,7 +16250,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj66tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16199,7 +16264,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj67tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16213,7 +16278,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj68tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16227,7 +16292,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj69tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16241,7 +16306,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj70tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16255,7 +16320,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj71tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16269,7 +16334,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj72tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16283,7 +16348,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj73tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16297,7 +16362,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj74tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16311,7 +16376,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj75tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16325,7 +16390,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj76tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16339,7 +16404,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj77tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16353,7 +16418,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj78tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16367,7 +16432,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj79tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -16381,7 +16446,7 @@ HK()
 fw1=true
 while fw1==true do 
 wj80tp()
-gg.sleep(10)
+gg.sleep(1)
 end
 end):start() end,
 function()
@@ -23261,7 +23326,7 @@ HK()
 特殊视角关()
 end
 ),
-RG.switch("相机Y状态开",
+RG.switch("相机Y状态",
 function() enqueueTask(function()
 HK()
 相机Y状态开()
@@ -23269,6 +23334,16 @@ end) end,
 function()
 HK()
 相机Y状态关()
+end
+),
+RG.switch("霜鸟锁定数量",
+function() enqueueTask(function()
+HK()
+霜鸟锁定数量开()
+end) end,
+function()
+HK()
+霜鸟锁定数量关()
 end
 ),
 RG.line(),
@@ -27466,6 +27541,10 @@ end) end},
 }),
 RG.line(),
 },{
+RG.button("强制取消循环功能", 
+function() luajava.newThread(function()
+HK()
+end):start() end),
 RG.button("取消所有冻结", 
 function() luajava.newThread(function()
 gg.clearResults()
