@@ -11897,25 +11897,93 @@ end
 xjysj = nil
 function 相机Y状态开()
 if not xjysj or #xjysj == 0 then
-search(0.0001, 64, 4)
-py1(0.8, 64, 48)
+search(9666035712, 32, neicun)
+py1(3, 32, 52)
+py1(5, 32, 28)
+py1(2, 32, 4)
 xjysj = sj
 else
 sj = xjysj
 end
-xg3(nil, 64, 24, false, true, "相机Y状态")
+xg3(nil, 64, -4, false, true, "相机Y状态")
 end
 
 function 相机Y状态关()
 if not xjysj or #xjysj == 0 then
-search(0.0001, 64, 4)
-py1(0.8, 64, 48)
+search(9666035712, 32, neicun)
+py1(3, 32, 52)
+py1(5, 32, 28)
+py1(2, 32, 4)
 xjysj = sj
 else
 sj = xjysj
 end
-xg1(10, 64, 24, false)
+xg1(10, 64, -4, false)
 xjysj=nil
+end
+
+local camAddresses = {}
+local frozen = false
+
+local function getCameraAddresses()
+    search("1.2566370964050293", 16, 4)
+    if not sj or #sj == 0 then
+        提示("未找到相机特征值，无法获取地址")
+        return false
+    end
+    local baseAddr = sj[1].address
+    camAddresses[1] = baseAddr - 80
+    camAddresses[2] = baseAddr - 84
+    camAddresses[3] = baseAddr - 88
+    return true
+end
+
+local function freezeCamera()
+    if not getCameraAddresses() then return end
+    local current = gg.getValues({
+        {address = camAddresses[1], flags = 16},
+        {address = camAddresses[2], flags = 16},
+        {address = camAddresses[3], flags = 16}
+    })
+    local inputs = gg.prompt(
+        {"目标 X 坐标", "目标 Y 坐标", "目标 Z 坐标"},
+        {tostring(current[1].value), tostring(current[2].value), tostring(current[3].value)},
+        {"number", "number", "number"}
+    )
+    if not inputs then
+        提示("已取消")
+        return
+    end
+    local targetX = tonumber(inputs[1])
+    local targetY = tonumber(inputs[2])
+    local targetZ = tonumber(inputs[3])
+    gg.addListItems({
+        {address = camAddresses[1], flags = 16, value = targetX, freeze = true},
+        {address = camAddresses[2], flags = 16, value = targetY, freeze = true},
+        {address = camAddresses[3], flags = 16, value = targetZ, freeze = true}
+    })
+    frozen = true
+    提示(string.format("相机已冻结 (%.2f, %.2f, %.2f)", targetX, targetY, targetZ))
+end
+
+local function unfreezeCamera()
+    if not frozen then
+        提示("相机未冻结")
+        return
+    end
+    local removed = false
+    for _, addr in ipairs(camAddresses) do
+        if addr and addr ~= 0 then
+            gg.removeListItems({address = addr})
+            removed = true
+        end
+    end
+    if removed then
+        frozen = false
+        提示("相机已解冻")
+    else
+        提示("未找到相机冻结项")
+    end
 end
 
 xnsj = nil
@@ -14283,6 +14351,16 @@ end) end,
 function()
 HK()
 特殊视角关()
+end
+),
+RG.switch("相机坐标",
+function() enqueueTask(function()
+HK()
+freezeCamera()
+end) end,
+function()
+HK()
+unfreezeCamera()
 end
 ),
 RG.switch("相机Y状态",
@@ -23858,6 +23936,16 @@ end) end,
 function()
 HK()
 特殊视角关()
+end
+),
+RG.switch("相机坐标",
+function() enqueueTask(function()
+HK()
+freezeCamera()
+end) end,
+function()
+HK()
+unfreezeCamera()
 end
 ),
 RG.switch("相机Y状态",
