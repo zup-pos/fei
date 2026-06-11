@@ -1347,319 +1347,191 @@ kongzhi_jishi("启动")
 
 
 
-_config = {
-    checkInterval = 1200,
-    isMonitoring = false,
-    currentProcess = nil,
-    lastCheckTime = 0,
-    lastCrashTime = 0
+crashGuard = crashGuard or {
+    enabled = false,
+    targetPkg = nil,
+    targetName = nil,
+    interval = 500,
+    crashCount = 0,
+    state = "normal",
+    lastCrashTime = 0,
+    thread = nil,
+    stopFlag = false,
+    running = false
 }
-_monitorThread = nil
-_shouldStop = false
-_monitorRunning = false
 
-local function safeGetProcessList(retry)
-    retry = retry or 0
-    local app = require("app")
-    local processList = nil
-    local ok, result = pcall(function()
-        return app.runList() or {}
-    end)
-    if not ok then
-        if retry < 2 then
-            gg.sleep(200)
-            return safeGetProcessList(retry + 1)
-        end
-        return {}
+local function getCurrentInfo()
+    local ok, info = pcall(gg.getTargetInfo)
+    if not ok or not info then return nil, nil end
+    local pkg = info.packageName
+    local name = nil
+    if info.activities and info.activities[1] and info.activities[1].label then
+        name = info.activities[1].label
     end
-    processList = result
+    return pkg, name or pkg
+end
 
-    local processes = {}
-    for _, pkg in ipairs(processList) do
-        pkg = tostring(pkg)
-        local success, name = pcall(function()
-            if gg.isPackageInstalled(pkg) then
-                return app.getName(pkg) or pkg
-            end
-            return nil
-        end)
-        if success and name then
-            table.insert(processes, {
-                name = name,
-                package = pkg,
-                nameLower = string.lower(name)
-            })
-        elseif not success and retry < 1 then
-            gg.sleep(100)
-            return safeGetProcessList(retry + 1)
+local function setProcess(pkg)
+    if not pkg then return false end
+    for retry = 1, 3 do
+        pcall(gg.setProcess, pkg)
+        gg.sleep(80)
+        local curPkg, _ = getCurrentInfo()
+        if curPkg == pkg then return true end
+    end
+    return false
+end
+
+local function isTargetAlive()
+    return setProcess(crashGuard.targetPkg)
+end
+
+local function getAllPackages()
+    local ok, list = pcall(gg.getProcessList)
+    if not ok or not list then return {} end
+    local pkgs = {}
+    for _, proc in ipairs(list) do
+        if proc.pkgName and proc.pkgName ~= "" then
+            pkgs[#pkgs + 1] = proc.pkgName
         end
     end
-
-    table.sort(processes, function(a, b)
-        return a.nameLower < b.nameLower
-    end)
-
-    local targetIndex = nil
-    for i, p in ipairs(processes) do
-        if string.find(p.name, "重装上阵") then
-            targetIndex = i
-            break
-        end
-    end
-    if targetIndex then
-        local target = table.remove(processes, targetIndex)
-        table.insert(processes, 1, target)
-    end
-
-    return processes
+    return pkgs
 end
 
-local function showSimpleProcessSelection()
-    local processes = safeGetProcessList()
-    if #processes == 0 then
-        gg.alert("没有找到可用的进程")
-        return nil
-    end
-
-    local choices = {}
-    for i, process in ipairs(processes) do
-        table.insert(choices, string.format("%d. %s", i, process.name))
-    end
-    table.insert(choices, "取消")
-
-    local choice = gg.choice(choices, nil, "选择防崩溃主进程")
-    if not choice or choice > #processes then
-        return nil
-    end
-    return processes[choice]
-end
-
-local function autoSelectProcess()
-    local processes = safeGetProcessList()
-    if #processes == 0 then
-        return nil
-    end
-    return processes[1]
-end
-
-local function safeSetProcess(process, retry)
-    retry = retry or 0
-    if not process then
-        return false
-    end
-
-    local success = pcall(function()
-        gg.setProcess(process.package)
-    end)
-
-    if success then
-        _config.currentProcess = process
-        return true
-    elseif retry < 3 then
-        gg.sleep(200)
-        return safeSetProcess(process, retry + 1)
-    else
-        return false
-    end
-end
-
-local function safeCheckProcessStatus()
-    if not _config.currentProcess then
-        return false
-    end
-
-    local currentTime = os.time()
-    if currentTime - _config.lastCheckTime < (_config.checkInterval / 1000) then
+local function tryRecover()
+    local target = crashGuard.targetPkg
+    if not target then return false end
+    if setProcess(target) then
+        crashGuard.targetName = select(2, getCurrentInfo()) or target
         return true
     end
-    _config.lastCheckTime = currentTime
-
-    local success = pcall(function()
-        gg.setProcess(_config.currentProcess.package)
-    end)
-    return success
-end
-
-local function safeSwitchToOtherProcess()
-    if not _config.currentProcess then
-        return false
-    end
-
-    local processes = safeGetProcessList()
-    if #processes == 0 then
-        return false
-    end
-
-    local originalProcess = _config.currentProcess
-    for _, process in ipairs(processes) do
-        if process.package ~= originalProcess.package then
-            if safeSetProcess(process) then
-                return true, originalProcess, process
-            end
+    local others = getAllPackages()
+    for _, pkg in ipairs(others) do
+        if pkg ~= target and setProcess(pkg) then
+            crashGuard.targetName = select(2, getCurrentInfo()) or pkg
+            return true
         end
     end
     return false
 end
 
-local function optimizedMonitorLoop()
-    _monitorRunning = true
-    while _monitorRunning and not _shouldStop do
-        local isAlive = safeCheckProcessStatus()
-        if not isAlive then
-            _config.lastCrashTime = os.time()
-            提示("检测到进程崩溃，尝试自动切换...")
-            gg.sleep(400)
-
-            local switched, oldProcess, newProcess = safeSwitchToOtherProcess()
-            if switched then
-                提示(string.format("已从 %s 切换到 %s", oldProcess.name, newProcess.name))
-                gg.sleep(400)
-            else
-                提示("自动切换失败，请手动选择新进程")
-                local selected = nil
-                while not _shouldStop and _monitorRunning do
-                    selected = showSimpleProcessSelection()
-                    if not selected then
-                        提示("用户取消选择，防崩溃保护暂停")
-                        _config.isMonitoring = false
-                        _monitorRunning = false
-                        return
-                    end
-                    if safeSetProcess(selected) then
-                        提示(string.format("已切换到 %s，继续监控", selected.name))
-                        break
-                    else
-                        提示("设置进程失败，请重新选择")
-                        gg.sleep(500)
-                    end
+local function monitorLoop()
+    crashGuard.running = true
+    while not crashGuard.stopFlag do
+        local alive = isTargetAlive()
+        if not alive then
+            if crashGuard.state == "normal" then
+                crashGuard.state = "crashing"
+                crashGuard.crashCount = crashGuard.crashCount + 1
+                crashGuard.lastCrashTime = os.time()
+                提示("检测到进程崩溃 (第 " .. crashGuard.crashCount .. " 次)")
+            end
+            gg.sleep(300)
+            if tryRecover() then
+                if crashGuard.targetPkg == (select(1, getCurrentInfo())) then
+                    crashGuard.state = "normal"
+                    提示("已恢复至原进程，监控继续")
+                else
+                    crashGuard.state = "recovered"
+                    提示("已临时切换到其他进程，原进程恢复后会自动切回")
                 end
-                gg.sleep(600)
+            else
+                提示("未找到可用进程，请手动重新附加游戏")
+            end
+        else
+            if crashGuard.state ~= "normal" then
+                crashGuard.state = "normal"
+                提示("进程已恢复正常")
             end
         end
-
-        local startTime = os.time()
-        while os.time() - startTime < (_config.checkInterval / 1000) and _monitorRunning and not _shouldStop do
-            gg.sleep(300)
+        local elapsed = 0
+        while elapsed < crashGuard.interval and not crashGuard.stopFlag do
+            gg.sleep(50)
+            elapsed = elapsed + 50
         end
     end
-    _monitorRunning = false
-    _config.isMonitoring = false
+    crashGuard.running = false
 end
 
 function startCrashProtection()
-    if _config.isMonitoring then
+    if crashGuard.enabled then
         提示("保护已在运行")
         return true
     end
-
-    _shouldStop = false
-    _config.lastCrashTime = 0
-
-    local choice = gg.choice({
-        "自动选择进程",
-        "手动选择进程",
-        "取消"
-    }, nil, "进程防崩溃保护")
-
-    local selectedProcess = nil
-    if choice == 1 then
-        selectedProcess = autoSelectProcess()
-        if not selectedProcess then
-            gg.alert("自动选择失败")
-            return false
-        end
-        提示("自动选择: " .. selectedProcess.name)
-        gg.sleep(500)
-    elseif choice == 2 then
-        selectedProcess = showSimpleProcessSelection()
-        if not selectedProcess then
-            return false
-        end
-    else
+    local pkg, name = getCurrentInfo()
+    if not pkg then
+        gg.alert("请先附加游戏进程")
         return false
     end
-
-    if not safeSetProcess(selectedProcess) then
-        gg.alert("进程设置失败")
-        return false
-    end
-
-    _config.isMonitoring = true
-    _monitorThread = luajava.startThread(function()
-        local success = pcall(optimizedMonitorLoop)
-        if not success then
-            _monitorRunning = false
-            _config.isMonitoring = false
-        end
-    end)
-
-    提示("防崩溃保护已启动")
+    crashGuard.targetPkg = pkg
+    crashGuard.targetName = name or pkg
+    crashGuard.stopFlag = false
+    crashGuard.crashCount = 0
+    crashGuard.state = "normal"
+    crashGuard.lastCrashTime = 0
+    crashGuard.enabled = true
+    crashGuard.thread = luajava.startThread(monitorLoop)
+    提示("防崩溃保护已启动，监控进程：\n" .. (crashGuard.targetName or pkg) .. " (" .. pkg .. ")")
     return true
 end
 
 function stopCrashProtection()
-    local threadAlive = _monitorThread and _monitorThread:isAlive()
-    if not threadAlive then
-        if _config.isMonitoring then
-            _config.isMonitoring = false
-        end
-        _config.currentProcess = nil
-        _config.lastCheckTime = 0
-        _monitorThread = nil
-        提示("保护已停止")
-        return true
+    if not crashGuard.enabled then
+        提示("保护未运行")
+        return false
     end
-
-    _shouldStop = true
-    _monitorRunning = false
-    _config.isMonitoring = false
-
-    local waitTime = 0
-    while _monitorThread and _monitorThread:isAlive() and waitTime < 2000 do
+    crashGuard.stopFlag = true
+    local wait = 0
+    while crashGuard.running and wait < 2000 do
         gg.sleep(50)
-        waitTime = waitTime + 50
+        wait = wait + 50
     end
-
-    _shouldStop = false
-    _config.currentProcess = nil
-    _config.lastCheckTime = 0
-    _monitorThread = nil
-
-    提示("保护已停止")
+    crashGuard.enabled = false
+    crashGuard.thread = nil
+    crashGuard.targetPkg = nil
+    crashGuard.targetName = nil
+    提示("防崩溃保护已停止")
     return true
 end
 
 function getCrashStats()
+    local curPkg, curName = getCurrentInfo()
     return {
-        isMonitoring = _config.isMonitoring,
-        currentProcess = _config.currentProcess,
-        lastCrashTime = _config.lastCrashTime,
-        hasCrashedRecently = _config.lastCrashTime > 0 and (os.time() - _config.lastCrashTime) < 300
+        isMonitoring = crashGuard.enabled,
+        currentProcess = curPkg,
+        currentName = curName,
+        crashCount = crashGuard.crashCount,
+        hasCrashedRecently = (crashGuard.state ~= "normal")
     }
 end
 
 function showProtectionStatus()
+    if not crashGuard.enabled then
+        gg.alert("防崩溃保护未启动")
+        return
+    end
     local stats = getCrashStats()
     local statusText = stats.isMonitoring and "🟢运行中" or "⚪已停止"
-    local processText = stats.currentProcess and stats.currentProcess.name or "未设置"
-    local crashText = stats.hasCrashedRecently and "最近发生过崩溃" or "运行稳定"
-
+    local display = (stats.currentName or "未知") .. " (" .. (stats.currentProcess or "未设置") .. ")"
+    local crashText
+    if stats.hasCrashedRecently then
+        crashText = "近期发生过崩溃"
+    else
+        crashText = string.format("稳定运行（近期崩溃过 %d 次）", stats.crashCount)
+    end
     local info = "防崩溃保护状态\n\n"
     info = info .. "保护状态: " .. statusText .. "\n"
-    info = info .. "当前进程: " .. processText .. "\n"
+    info = info .. "当前进程: " .. display .. "\n"
     info = info .. "运行状态: " .. crashText .. "\n"
-    info = info .. "检测间隔: " .. _config.checkInterval .. "ms\n"
+    info = info .. "检测间隔: " .. crashGuard.interval .. "ms\n"
     gg.alert(info)
 end
 
 function cleanupCrashProtection()
-    if _config.isMonitoring then
+    if crashGuard.enabled then
         stopCrashProtection()
     end
-    _config = nil
-    _monitorThread = nil
-    _shouldStop = false
-    _monitorRunning = false
+    crashGuard = nil
 end
 
 
@@ -3643,7 +3515,6 @@ import "android.view.MotionEvent"
 import "android.view.View"
 import "android.graphics.drawable.GradientDrawable"
 
-context = app.context
 window = context:getSystemService("window")
 
 param1 = {}
