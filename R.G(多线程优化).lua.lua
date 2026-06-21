@@ -1308,7 +1308,7 @@ _AutoPullBack = _AutoPullBack or {
     threshold = 50000,
     checkInterval = 200,
     freezeDuration = 2000,
-    freezeOnPull = false
+    freezeOnPull = true
 }
 
 function getSelfBase()
@@ -4158,7 +4158,7 @@ local function playNewMusic(url)
     local listener = luajava.createProxy("android.media.MediaPlayer$OnPreparedListener", {
         onPrepared = function(mp)
             mp:start()
-            gg.toast("▶ 播放中")
+            提示("▶ 播放中")
         end
     })
     mediaPlayer:setOnPreparedListener(listener)
@@ -4173,11 +4173,11 @@ function toggleMusic(url)
 
     if mediaPlayer and mediaPlayer:isPlaying() then
         mediaPlayer:pause()
-        gg.toast("⏸ 已暂停")
+        提示("⏸ 已暂停")
     else
         if mediaPlayer then
             mediaPlayer:start()
-            gg.toast("▶ 继续播放")
+            提示("▶ 继续播放")
         else
             playNewMusic(url)
         end
@@ -4186,16 +4186,16 @@ end
 
 function togglePause()
     if not mediaPlayer then
-        gg.toast("没有正在播放的音乐")
+        提示("没有正在播放的音乐")
         return
     end
 
     if mediaPlayer:isPlaying() then
         mediaPlayer:pause()
-        gg.toast("⏸ 已暂停")
+        提示("⏸ 已暂停")
     else
         mediaPlayer:start()
-        gg.toast("▶ 继续播放")
+        提示("▶ 继续播放")
     end
 end
 
@@ -4205,9 +4205,9 @@ function stopMusic()
         mediaPlayer:release()
         mediaPlayer = nil
         currentUrl = nil
-        gg.toast("⏹ 已停止播放")
+        提示("⏹ 已停止播放")
     else
-        gg.toast("没有正在播放的音乐")
+        提示("没有正在播放的音乐")
     end
 end
 
