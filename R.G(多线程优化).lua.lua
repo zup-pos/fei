@@ -661,22 +661,38 @@ local function pyFilter(value, lx, py, eq)
         readTab[i] = {address = sj[i].address + offset, flags = lx}
     end
     local vals = gg.getValues(readTab)
-    if not vals then
-        提示("偏移读取失败")
+    if not vals or #vals == 0 then
+        sj = {}
+        提示("偏移读取失败，数据已失效")
+        return
+    end
+    if #vals < len then
+        sj = {}
+        提示("部分地址不可读，数据已失效")
         return
     end
 
     local res = {}
     local idx = 0
     for i = 1, len do
-        local match = (vals[i].value == value)
+        local v = vals[i]
+        if v == nil then
+            goto continue
+        end
+        local match = (v.value == value)
         if (eq and match) or (not eq and not match) then
             idx = idx + 1
             res[idx] = sj[i]
         end
+        ::continue::
     end
-    sj = res
-    提示("共偏移 " .. idx .. " 个数据")
+    if idx == 0 then
+        sj = {}
+        提示("筛选后无数据，请重新搜索")
+    else
+        sj = res
+        提示("共偏移 " .. idx .. " 个数据")
+    end
 end
 
 function gs1(value, lx, signed)
@@ -1011,8 +1027,8 @@ function xqmnb(Search, Modification)
     if #modifyList > 0 then gg.setValues(modifyList) end
     if #freezeList > 0 then gg.addListItems(freezeList) end
     
-    if modifyCount > 0 then 提示(Search[2].name .. '开启成功，共修改' .. modifyCount .. '条数据') end
-    if freezeCount > 0 then 提示(Search[2].name .. '开启成功，共冻结' .. freezeCount .. '条数据') end
+    if modifyCount > 0 then 提示(Search[2].name .. '开启成功，共修改' .. modifyCount .. '个数据') end
+    if freezeCount > 0 then 提示(Search[2].name .. '开启成功，共冻结' .. freezeCount .. '个数据') end
     gg.clearResults()
 end
 
@@ -1284,7 +1300,260 @@ end
 
 
 
+_AutoPullBack = _AutoPullBack or {
+    running = false,
+    thread = nil,
+    stopFlag = false,
+    baseAddr = nil,
+    threshold = 50000,
+    checkInterval = 200,
+    freezeDuration = 2000,
+    freezeOnPull = false
+}
 
+function getSelfBase()
+    gg.clearResults()
+    search(17039364, 4, neicun)
+    py1(16777215, 4, -36)
+    py1(257, 4, -32)
+    if #sj == 0 then return nil end
+    return sj[1].address
+end
+
+function getCoords(base)
+    local tasks = {
+        {address = base - 4, flags = 16},
+        {address = base - 8, flags = 16},
+        {address = base - 12, flags = 16}
+    }
+    local res = gg.getValues(tasks)
+    if res and #res >= 3 then
+        local x = res[1] and res[1].value
+        local y = res[2] and res[2].value
+        local z = res[3] and res[3].value
+        if x ~= nil and y ~= nil and z ~= nil then
+            return x, y, z
+        end
+    end
+    return nil, nil, nil
+end
+
+function setAndFreeze(base, x, y, z)
+    local addrs = {base - 4, base - 8, base - 12}
+    local values = {
+        {address = addrs[1], flags = 16, value = x},
+        {address = addrs[2], flags = 16, value = y},
+        {address = addrs[3], flags = 16, value = z}
+    }
+    gg.setValues(values)
+    if _AutoPullBack.freezeOnPull then
+        gg.addListItems({
+            {address = addrs[1], flags = 16, value = x, freeze = true},
+            {address = addrs[2], flags = 16, value = y, freeze = true},
+            {address = addrs[3], flags = 16, value = z, freeze = true}
+        })
+    end
+end
+
+function unfreeze(base)
+    if _AutoPullBack.freezeOnPull then
+        gg.removeListItems({base - 4, base - 8, base - 12})
+    end
+end
+
+function autoPullBackLoop()
+    local base = _AutoPullBack.baseAddr
+    if not base then
+        提示("基址无效")
+        _AutoPullBack.running = false
+        return
+    end
+
+    local prevX, prevY, prevZ = getCoords(base)
+    if not prevX then
+        提示("无法读取初始坐标")
+        _AutoPullBack.running = false
+        return
+    end
+
+    while not _AutoPullBack.stopFlag do
+        local curX, curY, curZ = getCoords(base)
+        local isValid = true
+        if curX == nil or curY == nil or curZ == nil then
+            isValid = false
+        elseif curX ~= curX or curY ~= curY or curZ ~= curZ then
+            isValid = false
+        elseif math.abs(curX) > 1e9 or math.abs(curY) > 1e9 or math.abs(curZ) > 1e9 then
+            isValid = false
+        end
+
+        if not isValid then
+            local targetX = prevX
+            local targetY = prevY
+            local targetZ = prevZ
+            setAndFreeze(base, targetX, targetY, targetZ)
+            if _AutoPullBack.freezeOnPull then
+                提示("检测到坐标数值异常！已回拉至上一次有效位置并冻结")
+                gg.sleep(_AutoPullBack.freezeDuration)
+                unfreeze(base)
+                提示("解冻，继续")
+            else
+                提示("检测到坐标数值异常！已回拉至上一次有效位置")
+            end
+            local newX, newY, newZ = getCoords(base)
+            if newX == nil or newY == nil or newZ == nil then
+                提示("回拉后读取坐标失败，停止回拉")
+                break
+            end
+            local validAfter = true
+            if newX ~= newX or newY ~= newY or newZ ~= newZ then
+                validAfter = false
+            elseif math.abs(newX) > 1e9 or math.abs(newY) > 1e9 or math.abs(newZ) > 1e9 then
+                validAfter = false
+            end
+            if not validAfter then
+                提示("回拉后坐标仍然异常，停止回拉，请手动处理")
+                break
+            end
+            prevX, prevY, prevZ = newX, newY, newZ
+        else
+            local dx = curX - prevX
+            local dy = curY - prevY
+            local dz = curZ - prevZ
+            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+
+            if dist > _AutoPullBack.threshold then
+                local targetX = prevX
+                local targetY = prevY
+                local targetZ = prevZ
+                setAndFreeze(base, targetX, targetY, targetZ)
+                if _AutoPullBack.freezeOnPull then
+                    提示(string.format("回拉至 (%.0f, %.0f, %.0f) 冻结 %.1fs", targetX, targetY, targetZ, _AutoPullBack.freezeDuration/1000))
+                    gg.sleep(_AutoPullBack.freezeDuration)
+                    unfreeze(base)
+                    提示("解冻，继续")
+                else
+                    提示(string.format("回拉至 (%.0f, %.0f, %.0f)", targetX, targetY, targetZ))
+                end
+                prevX, prevY, prevZ = getCoords(base)
+                if not prevX then break end
+            else
+                prevX, prevY, prevZ = curX, curY, curZ
+            end
+        end
+
+        local elapsed = 0
+        while elapsed < _AutoPullBack.checkInterval and not _AutoPullBack.stopFlag do
+            gg.sleep(20)
+            elapsed = elapsed + 20
+        end
+    end
+
+    if _AutoPullBack.freezeOnPull then
+        unfreeze(base)
+    end
+    _AutoPullBack.running = false
+    _AutoPullBack.thread = nil
+    提示("自动回拉已停止")
+end
+
+function startAutoPullBack()
+    if _AutoPullBack.running then
+        提示("已在运行")
+        return false
+    end
+    local base = getSelfBase()
+    if not base then
+        提示("获取基址失败")
+        return false
+    end
+    _AutoPullBack.baseAddr = base
+    _AutoPullBack.stopFlag = false
+    _AutoPullBack.running = true
+    _AutoPullBack.thread = luajava.startThread(autoPullBackLoop)
+    local freezeMsg = _AutoPullBack.freezeOnPull and "开启" or "关闭"
+    提示(string.format("启动成功 距离阈值=%d 间隔=%dms 冻结=%s", _AutoPullBack.threshold, _AutoPullBack.checkInterval, freezeMsg))
+    return true
+end
+
+function stopAutoPullBack()
+    if not _AutoPullBack.running then
+        提示("未运行")
+        return false
+    end
+    _AutoPullBack.stopFlag = true
+    local wait = 0
+    while _AutoPullBack.running and wait < 2000 do
+        gg.sleep(50)
+        wait = wait + 50
+    end
+    if _AutoPullBack.running then
+        if _AutoPullBack.freezeOnPull then
+            unfreeze(_AutoPullBack.baseAddr)
+        end
+        _AutoPullBack.running = false
+        _AutoPullBack.thread = nil
+        提示("强制停止")
+    end
+    return true
+end
+
+function setFreezeOnPull(flag)
+    _AutoPullBack.freezeOnPull = flag == true
+    提示("回拉冻结已" .. (_AutoPullBack.freezeOnPull and "开启" or "关闭"))
+end
+
+function configureAutoPullBack()
+    local currentThreshold = _AutoPullBack.threshold
+    local currentFreeze = _AutoPullBack.freezeDuration
+    local currentInterval = _AutoPullBack.checkInterval
+
+    local inputs = gg.prompt(
+        {
+            "距离阈值 (坐标单位)",
+            "冻结时间 (毫秒)",
+            "检测间隔 (毫秒，≥50)"
+        },
+        {
+            tostring(currentThreshold),
+            tostring(currentFreeze),
+            tostring(currentInterval)
+        },
+        {
+            "number",
+            "number",
+            "number"
+        }
+    )
+
+    if inputs == nil then
+        提示("已取消配置")
+        return
+    end
+
+    local newThreshold = tonumber(inputs[1])
+    local newFreeze = tonumber(inputs[2])
+    local newInterval = tonumber(inputs[3])
+
+    if newThreshold == nil or newThreshold <= 0 then
+        提示("距离阈值必须为正数")
+        return
+    end
+    if newFreeze == nil or newFreeze < 0 then
+        提示("冻结时间不能为负数")
+        return
+    end
+    if newInterval == nil or newInterval < 50 then
+        提示("检测间隔不能小于 50ms")
+        return
+    end
+
+    _AutoPullBack.threshold = newThreshold
+    _AutoPullBack.freezeDuration = newFreeze
+    _AutoPullBack.checkInterval = newInterval
+
+    提示(string.format("配置已更新\n阈值=%.0f\n冻结时间=%.0fms\n间隔=%.0fms", newThreshold, newFreeze, newInterval))
+end
 
 
 
@@ -3160,13 +3429,13 @@ function 查看保存状态()
     end
 end
 
-local function music_applyOn()
+function music_applyOn()
     pcall(function()
         local f = io.open("/storage/emulated/0/长安/配置文件/animconf", "w")
         if f then f:write("--anim()"); f:close() end
     end)
 end
-local function music_applyOff()
+function music_applyOff()
     pcall(function()
         local f = io.open("/storage/emulated/0/长安/配置文件/animconf", "w")
         if f then f:write("anim()"); f:close() end
@@ -3196,10 +3465,10 @@ music_off = function()
 end
 AS.switchFuncs["启动脚本时播放音乐"] = { on = music_on, off = music_off, applyOn = music_applyOn, applyOff = music_applyOff }
 
-local function pause_applyOn()
+function pause_applyOn()
     pcall(gg.processPause)
 end
-local function pause_applyOff()
+function pause_applyOff()
     pcall(gg.processResume)
 end
 pause_on = function()
@@ -3226,12 +3495,12 @@ pause_off = function()
 end
 AS.switchFuncs["暂停所选进程"] = { on = pause_on, off = pause_off, applyOn = pause_applyOn, applyOff = pause_applyOff }
 
-local function float_applyOn()
+function float_applyOn()
     pcall(function()
         luajava.setFloatingWindowHide(false)
     end)
 end
-local function float_applyOff()
+function float_applyOff()
     pcall(function()
         gg.setVisible(false)
         gg.sleep(50)
@@ -3262,10 +3531,10 @@ float_off = function()
 end
 AS.switchFuncs["修改器悬浮窗显示"] = { on = float_on, off = float_off, applyOn = float_applyOn, applyOff = float_applyOff }
 
-local function voice_applyOn()
+function voice_applyOn()
     pcall(切换语音方式, true)
 end
-local function voice_applyOff()
+function voice_applyOff()
     pcall(切换语音方式, false)
 end
 voice_on = function()
@@ -3292,10 +3561,10 @@ voice_off = function()
 end
 AS.switchFuncs["语音播报开关"] = { on = voice_on, off = voice_off, applyOn = voice_applyOn, applyOff = voice_applyOff }
 
-local function clear_applyOn()
+function clear_applyOn()
     pcall(QC)
 end
-local function clear_applyOff()
+function clear_applyOff()
     pcall(QS)
 end
 clear_on = function()
@@ -3322,10 +3591,10 @@ clear_off = function()
 end
 AS.switchFuncs["清理任务列表提示切换"] = { on = clear_on, off = clear_off, applyOn = clear_applyOn, applyOff = clear_applyOff }
 
-local function toast_applyOn()
+function toast_applyOn()
     pcall(切换提示方式, true)
 end
-local function toast_applyOff()
+function toast_applyOff()
     pcall(切换提示方式, false)
 end
 toast_on = function()
@@ -3352,10 +3621,10 @@ toast_off = function()
 end
 AS.switchFuncs["信息提示方式切换"] = { on = toast_on, off = toast_off, applyOn = toast_applyOn, applyOff = toast_applyOff }
 
-local function pickup_applyOff()
+function pickup_applyOff()
     pcall(拾取冻结, false)
 end
-local function pickup_applyOn()
+function pickup_applyOn()
     pcall(拾取冻结, true)
 end
 pickup_on = function()
@@ -3382,7 +3651,7 @@ pickup_off = function()
 end
 AS.switchFuncs["拾取范围冻结切换"] = { on = pickup_on, off = pickup_off, applyOn = pickup_applyOn, applyOff = pickup_applyOff }
 
-local function coord_applyOn()
+function coord_applyOn()
     pcall(function()
         local last, cd = 0, 10
         function HE()
@@ -3399,7 +3668,7 @@ local function coord_applyOn()
         end
     end)
 end
-local function coord_applyOff()
+function coord_applyOff()
     pcall(function() function HE() end end)
 end
 coord_on = function()
@@ -3426,7 +3695,7 @@ coord_off = function()
 end
 AS.switchFuncs["坐标类自动初始化"] = { on = coord_on, off = coord_off, applyOn = coord_applyOn, applyOff = coord_applyOff }
 
-local function clearfreeze_applyOn()
+function clearfreeze_applyOn()
     pcall(function()
         function HA()
             gg.clearResults()
@@ -3434,7 +3703,7 @@ local function clearfreeze_applyOn()
         end
     end)
 end
-local function clearfreeze_applyOff()
+function clearfreeze_applyOff()
     pcall(function() function HA() fw1 = false end end)
 end
 clearfreeze_on = function()
@@ -3461,12 +3730,58 @@ clearfreeze_off = function()
 end
 AS.switchFuncs["切换非冻结时自动清除冻结"] = { on = clearfreeze_on, off = clearfreeze_off, applyOn = clearfreeze_applyOn, applyOff = clearfreeze_applyOff }
 
-local function auto_applyOn()
+function setPullFreeze(state)
+    if state then
+        setFreezeOnPull(true)
+    else
+        setFreezeOnPull(false)
+    end
+end
+
+function pullFreeze_applyOn()
+    pcall(function()
+        setPullFreeze(true)
+    end)
+end
+
+function pullFreeze_applyOff()
+    pcall(function()
+        setPullFreeze(false)
+    end)
+end
+
+pullFreeze_on = function()
+    luajava.newThread(function()
+        local start = os.clock()
+        writeLog("▶ 用户操作: 回拉时冻结坐标 [关闭]")
+        pullFreeze_applyOff()
+        提示("已关闭回拉时冻结坐标")
+        AS.optionStates["回拉时冻结坐标"] = false
+        AS.triggerSave()
+        writeLog(string.format("   └─ 完成，新状态=false (耗时:%.3fs)", os.clock() - start))
+    end):start()
+end
+
+pullFreeze_off = function()
+    luajava.newThread(function()
+        local start = os.clock()
+        writeLog("▶ 用户操作: 回拉时冻结坐标 [开启]")
+        pullFreeze_applyOn()
+        提示("已开启回拉时冻结坐标")
+        AS.optionStates["回拉时冻结坐标"] = true
+        AS.triggerSave()
+        writeLog(string.format("   └─ 完成，新状态=true (耗时:%.3fs)", os.clock() - start))
+    end):start()
+end
+
+AS.switchFuncs["回拉时冻结坐标"] = { on = pullFreeze_on, off = pullFreeze_off, applyOn = pullFreeze_applyOn, applyOff = pullFreeze_applyOff }
+
+function auto_applyOn()
     AS.optionStates["启动时自动开启上次的选项"] = true
     AS.autoSaveEnabled = true
 end
 
-local function auto_applyOff()
+function auto_applyOff()
     AS.optionStates["启动时自动开启上次的选项"] = false
     AS.autoSaveEnabled = false
 end
@@ -3820,7 +4135,91 @@ end
 
 
 
+local mediaPlayer = nil
+local currentUrl = nil
 
+local function releasePlayer()
+    if mediaPlayer then
+        mediaPlayer:stop()
+        mediaPlayer:release()
+        mediaPlayer = nil
+        currentUrl = nil
+    end
+end
+
+local function playNewMusic(url)
+    if url == currentUrl then return end
+    releasePlayer()
+    currentUrl = url
+
+    mediaPlayer = luajava.newInstance("android.media.MediaPlayer")
+    mediaPlayer:setDataSource(url)
+
+    local listener = luajava.createProxy("android.media.MediaPlayer$OnPreparedListener", {
+        onPrepared = function(mp)
+            mp:start()
+            gg.toast("▶ 播放中")
+        end
+    })
+    mediaPlayer:setOnPreparedListener(listener)
+    mediaPlayer:prepareAsync()
+end
+
+function toggleMusic(url)
+    if url ~= currentUrl then
+        playNewMusic(url)
+        return
+    end
+
+    if mediaPlayer and mediaPlayer:isPlaying() then
+        mediaPlayer:pause()
+        gg.toast("⏸ 已暂停")
+    else
+        if mediaPlayer then
+            mediaPlayer:start()
+            gg.toast("▶ 继续播放")
+        else
+            playNewMusic(url)
+        end
+    end
+end
+
+function togglePause()
+    if not mediaPlayer then
+        gg.toast("没有正在播放的音乐")
+        return
+    end
+
+    if mediaPlayer:isPlaying() then
+        mediaPlayer:pause()
+        gg.toast("⏸ 已暂停")
+    else
+        mediaPlayer:start()
+        gg.toast("▶ 继续播放")
+    end
+end
+
+function stopMusic()
+    if mediaPlayer then
+        mediaPlayer:stop()
+        mediaPlayer:release()
+        mediaPlayer = nil
+        currentUrl = nil
+        gg.toast("⏹ 已停止播放")
+    else
+        gg.toast("没有正在播放的音乐")
+    end
+end
+
+function getMusicStatus()
+    if mediaPlayer and mediaPlayer:isPlaying() then
+        return "▶ 播放中"
+    elseif mediaPlayer then
+        return "⏸ 已暂停"
+    else
+        return "⏹ 未播放"
+    end
+end
 
 
 
@@ -4636,16 +5035,12 @@ function HS3()
     local selfCoords = nil
     local selfBase = nil
 
-    local function newSelfPositioning()
-        gg.clearResults()
-        gg.setRanges(neicun)
-        gg.searchNumber("17039364", gg.TYPE_QWORD, false, gg.SIGN_EQUAL, 0, -1)
-        local count = gg.getResultsCount()
-        if count == 0 then return false end
-        local results = gg.getResults(1)
-        if not results or #results == 0 then return false end
-        selfBase = results[1].address
-        if not selfBase or selfBase == 0 then return false end
+    gg.clearResults()
+    search(17039364, 4, neicun)
+    py1(1111752704, 4, 0x44)
+
+    if sj and #sj > 0 then
+        selfBase = sj[1].address
         selfXAddr = selfBase - 12
         selfYAddr = selfBase - 8
         selfZAddr = selfBase - 4
@@ -4656,19 +5051,12 @@ function HS3()
         })
         if ok and coords and coords[1] and coords[2] and coords[3] then
             selfCoords = coords
-            return true
+            a = {{address = selfBase, flags = gg.TYPE_QWORD, value = 0}}
+            提示("自身坐标初始化成功")
+        else
+            提示("读取坐标失败")
         end
-        return false
-    end
-
-    local success = newSelfPositioning()
-    if not success then
-        提示("快速定位失败，正在重试 (1/2)...")
-        gg.sleep(200)
-        success = newSelfPositioning()
-    end
-    
-    if not success then
+    else
         提示("快速定位失败，尝试备用特征码...")
         gg.clearResults()
         search(17039364, 4, neicun)
@@ -4688,7 +5076,6 @@ function HS3()
             })
             if ok and coords and coords[1] and coords[2] and coords[3] then
                 selfCoords = coords
-                success = true
                 提示("自身坐标初始化成功（备用特征码降级）")
             else
                 提示("备用特征码读取坐标失败")
@@ -4696,9 +5083,6 @@ function HS3()
         else
             提示("自身坐标初始化失败，将无法按距离排序")
         end
-    else
-        a = {{address = selfBase, flags = gg.TYPE_QWORD, value = 0}}
-        提示("自身坐标初始化成功")
     end
 
     if not selfCoords then
@@ -9154,7 +9538,6 @@ end
 function dituxiougai(dimode)
     if dimode == 1 then
         gg.clearResults()
-        gg.clearList()
         gg.searchNumber(":"..yuandituId, gg.TYPE_BYTE, false, gg.SIGN_EQUAL, 0, -1, 0)
         local count = gg.getResultsCount()
         if count == 0 then
@@ -9164,7 +9547,6 @@ function dituxiougai(dimode)
         ditusave = gg.getResults(10000)
         gg.editAll(":"..mubiaodituId, gg.TYPE_BYTE)
         gg.clearResults()
-        gg.clearList()
         提示('已将 '..yuandituName..' 改为 '..mubiaodituName.. '\n切换画质或重新进入对局生效')
     else
         if not ditusave or #ditusave == 0 then
@@ -9172,11 +9554,9 @@ function dituxiougai(dimode)
             return
         end
         gg.clearResults()
-        gg.clearList()
         gg.loadResults(ditusave)
         gg.editAll(":"..yuandituId, gg.TYPE_BYTE)
         gg.clearResults()
-        gg.clearList()
         提示('已将 '..mubiaodituName..' 复原为 '..yuandituName.. '\n切换画质或重新进入对局生效')
     end
 end
@@ -9184,7 +9564,6 @@ end
 function zhuyexiougai(zimode)
     if zimode == 1 then
         gg.clearResults()
-        gg.clearList()
         gg.searchNumber(":"..yuanzituId, gg.TYPE_BYTE, false, gg.SIGN_EQUAL, 0, -1, 0)
         local count = gg.getResultsCount()
         if count == 0 then
@@ -9194,7 +9573,6 @@ function zhuyexiougai(zimode)
         zitusave = gg.getResults(10000)
         gg.editAll(":"..mubiaozituId, gg.TYPE_BYTE)
         gg.clearResults()
-        gg.clearList()
         提示('已将 '..yuanzituName..' 改为 '..mubiaozituName.. '\n切换画质或重新进入对局生效')
     else
         if not zitusave or #zitusave == 0 then
@@ -9202,11 +9580,9 @@ function zhuyexiougai(zimode)
             return
         end
         gg.clearResults()
-        gg.clearList()
         gg.loadResults(zitusave)
         gg.editAll(":"..yuanzituId, gg.TYPE_BYTE)
         gg.clearResults()
-        gg.clearList()
         提示('已将 '..mubiaozituName..' 复原为 '..yuanzituName.. '\n切换画质或重新进入对局生效')
     end
 end
@@ -11512,7 +11888,7 @@ function 频率加速()
         gg.setValues({{address = S_Pointer(basePath, off, true), flags = 16, value = nv}})
     end
     
-    提示(string.format("修改 %d 条 → %s%s", #pointerConfigs, nv, remember and " (已储存)" or ""))
+    提示(string.format("共修改 %d 个数据 → %s%s", #pointerConfigs, nv, remember and " (已储存)" or ""))
 end
 
 function 特殊加速()
@@ -11790,7 +12166,7 @@ else
 sj = xjysj
 end
 xg1(10, 64, -4, false)
-xjysj=nil
+xjysj = nil
 end
 
 local camAddresses = {}
@@ -11857,9 +12233,9 @@ local function unfreezeCamera()
     end
 end
 
-xnsj = nil
+snsj = nil
 function 霜鸟锁定数量开()
-if not xnsj or #xnsj == 0 then
+if not snsj or #snsj == 0 then
 search("2.6527537714E-314", 64, 4)
 py1(0.9, 64, 20)
 --py1(0.8, 64, -100)
@@ -11868,15 +12244,15 @@ py1(0.9, 64, 20)
 py1(0.9, 64, 44)
 py1(0.1, 64, -52)
 --py1(0.9, 64, 68)
-xnsj = sj
+snsj = sj
 else
-sj = xnsj
+sj = snsj
 end
 xg3(4, 64, -4, false, true, "(自定义霜鸟锁定数量)")
 end
 
 function 霜鸟锁定数量关()
-if not xnsj or #xnsj == 0 then
+if not snsj or #snsj == 0 then
 search("2.6527537714E-314", 64, 4)
 py1(0.9, 64, 20)
 --py1(0.8, 64, -100)
@@ -11885,12 +12261,12 @@ py1(0.9, 64, 20)
 py1(0.9, 64, 44)
 py1(0.1, 64, -52)
 --py1(0.9, 64, 68)
-xnsj = sj
+snsj = sj
 else
-sj = xnsj
+sj = snsj
 end
 xg1(3, 64, -4, false)
-xnsj=nil
+snsj = nil
 end
 
 function 核心防水开()
@@ -16032,7 +16408,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj1tp()
 end
 end):start() end,
@@ -16046,7 +16422,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj2tp()
 end
 end):start() end,
@@ -16060,7 +16436,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj3tp()
 end
 end):start() end,
@@ -16074,7 +16450,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj4tp()
 end
 end):start() end,
@@ -16088,7 +16464,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj5tp()
 end
 end):start() end,
@@ -16102,7 +16478,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj6tp()
 end
 end):start() end,
@@ -16116,7 +16492,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj7tp()
 end
 end):start() end,
@@ -16130,7 +16506,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj8tp()
 end
 end):start() end,
@@ -16144,7 +16520,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj9tp()
 end
 end):start() end,
@@ -16158,7 +16534,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj10tp()
 end
 end):start() end,
@@ -16172,7 +16548,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj11tp()
 end
 end):start() end,
@@ -16186,7 +16562,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj12tp()
 end
 end):start() end,
@@ -16200,7 +16576,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj13tp()
 end
 end):start() end,
@@ -16214,7 +16590,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj14tp()
 end
 end):start() end,
@@ -16228,7 +16604,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj15tp()
 end
 end):start() end,
@@ -16242,7 +16618,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj16tp()
 end
 end):start() end,
@@ -16256,7 +16632,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj17tp()
 end
 end):start() end,
@@ -16270,7 +16646,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj18tp()
 end
 end):start() end,
@@ -16284,7 +16660,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj19tp()
 end
 end):start() end,
@@ -16298,7 +16674,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj20tp()
 end
 end):start() end,
@@ -16312,7 +16688,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj21tp()
 end
 end):start() end,
@@ -16326,7 +16702,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj22tp()
 end
 end):start() end,
@@ -16340,7 +16716,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj23tp()
 end
 end):start() end,
@@ -16354,7 +16730,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj24tp()
 end
 end):start() end,
@@ -16368,7 +16744,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj25tp()
 end
 end):start() end,
@@ -16382,7 +16758,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj26tp()
 end
 end):start() end,
@@ -16396,7 +16772,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj27tp()
 end
 end):start() end,
@@ -16410,7 +16786,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj28tp()
 end
 end):start() end,
@@ -16424,7 +16800,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj29tp()
 end
 end):start() end,
@@ -16438,7 +16814,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj30tp()
 end
 end):start() end,
@@ -16527,7 +16903,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj51tp()
 end
 end):start() end,
@@ -16541,7 +16917,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj52tp()
 end
 end):start() end,
@@ -16555,7 +16931,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj53tp()
 end
 end):start() end,
@@ -16569,7 +16945,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj54tp()
 end
 end):start() end,
@@ -16583,7 +16959,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj55tp()
 end
 end):start() end,
@@ -16597,7 +16973,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj56tp()
 end
 end):start() end,
@@ -16611,7 +16987,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj57tp()
 end
 end):start() end,
@@ -16625,7 +17001,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj58tp()
 end
 end):start() end,
@@ -16639,7 +17015,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj59tp()
 end
 end):start() end,
@@ -16653,7 +17029,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj60tp()
 end
 end):start() end,
@@ -16667,7 +17043,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj61tp()
 end
 end):start() end,
@@ -16681,7 +17057,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj62tp()
 end
 end):start() end,
@@ -16695,7 +17071,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj63tp()
 end
 end):start() end,
@@ -16709,7 +17085,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj64tp()
 end
 end):start() end,
@@ -16723,7 +17099,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj65tp()
 end
 end):start() end,
@@ -16737,7 +17113,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj66tp()
 end
 end):start() end,
@@ -16751,7 +17127,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj67tp()
 end
 end):start() end,
@@ -16765,7 +17141,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj68tp()
 end
 end):start() end,
@@ -16779,7 +17155,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj69tp()
 end
 end):start() end,
@@ -16793,7 +17169,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj70tp()
 end
 end):start() end,
@@ -16807,7 +17183,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj71tp()
 end
 end):start() end,
@@ -16821,7 +17197,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj72tp()
 end
 end):start() end,
@@ -16835,7 +17211,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj73tp()
 end
 end):start() end,
@@ -16849,7 +17225,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj74tp()
 end
 end):start() end,
@@ -16863,7 +17239,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj75tp()
 end
 end):start() end,
@@ -16877,7 +17253,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj76tp()
 end
 end):start() end,
@@ -16891,7 +17267,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj77tp()
 end
 end):start() end,
@@ -16905,7 +17281,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj78tp()
 end
 end):start() end,
@@ -16919,7 +17295,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj79tp()
 end
 end):start() end,
@@ -16933,7 +17309,7 @@ function() luajava.newThread(function()
 HK()
 fw1=true
 while fw1 do
-gg.sleep(5)
+gg.sleep(0)
 wj80tp()
 end
 end):start() end,
@@ -17392,8 +17768,16 @@ function() luajava.newThread(function()
 end):start() end,
 function()
 冻结传送切换(false)
-HA()
 提示("已切换为非冻结传送") 
+end
+),
+RG.switch("坐标异常回溯",
+function() luajava.newThread(function()
+configureAutoPullBack()
+startAutoPullBack()
+end):start() end,
+function()
+stopAutoPullBack()
 end
 ),
 RG.line(), 
@@ -17830,9 +18214,31 @@ RG.button("手动输入自定义坐标传送",
 function() enqueueTask(function()
 HK()
 HE()
+if lastRecord then
+    local base = nil
+    if sj and #sj > 0 then
+        base = sj[1].address
+    elseif _selfBase then
+        base = _selfBase
+    end
+    if base then
+        local tasks = {
+            {address = base - 4, flags = 16},   -- X
+            {address = base - 8, flags = 16},   -- Y
+            {address = base - 12, flags = 16}   -- Z
+        }
+        local values = gg.getValues(tasks)
+        if values and values[1] and values[2] and values[3] then
+            lastRecord.x = values[1].value
+            lastRecord.y = values[2].value
+            lastRecord.z = values[3].value
+        end
+    end
+end
+
 if not lastRecord then
-提示("请先初始化")
-return
+    提示("请先初始化")
+    return
 end
 local zdyzb = gg.prompt(
 {"目标X轴", "目标Y轴", "目标Z轴"}, 
@@ -17840,17 +18246,17 @@ local zdyzb = gg.prompt(
 {"number", "number", "number"}
 )
 if zdyzb == nil then
-return 
+    return 
 end
 if not zdyzb[1] or zdyzb[1] == "" then
-提示("X轴不能为空") 
-return
+    提示("X轴不能为空") 
+    return
 elseif not zdyzb[2] or zdyzb[2] == "" then
-提示("Y轴不能为空") 
-return
+    提示("Y轴不能为空") 
+    return
 elseif not zdyzb[3] or zdyzb[3] == "" then
-提示("Z轴不能为空") 
-return
+    提示("Z轴不能为空") 
+    return
 end
 xg1(zdyzb[1],16,-4,cssfdj)
 xg1(zdyzb[2],16,-8,cssfdj)
@@ -21779,833 +22185,827 @@ RG.radio2({
 {"你看到的我DJ/你看到的我",
 function() runAsyncTask(function() 
  提示("正在播放:你看到的我DJ/你看到的我")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/HQYMFrmQ_%E4%BD%A0%E7%9C%8B%E5%88%B0%E7%9A%84%E6%88%91%20%20DJ%E7%89%88%20%20-%20%E9%BB%84%E5%8B%87%20%E4%BB%BB%E4%B9%A6%E6%80%80_%E5%90%88%E5%B9%B6.wav?attname=%E4%BD%A0%E7%9C%8B%E5%88%B0%E7%9A%84%E6%88%91%20%20DJ%E7%89%88%20%20-%20%E9%BB%84%E5%8B%87%20%E4%BB%BB%E4%B9%A6%E6%80%80_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/HQYMFrmQ_%E4%BD%A0%E7%9C%8B%E5%88%B0%E7%9A%84%E6%88%91%20%20DJ%E7%89%88%20%20-%20%E9%BB%84%E5%8B%87%20%E4%BB%BB%E4%B9%A6%E6%80%80_%E5%90%88%E5%B9%B6.wav?attname=%E4%BD%A0%E7%9C%8B%E5%88%B0%E7%9A%84%E6%88%91%20%20DJ%E7%89%88%20%20-%20%E9%BB%84%E5%8B%87%20%E4%BB%BB%E4%B9%A6%E6%80%80_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
  }, {"See You Again (牢大)",
 function() runAsyncTask(function() 
 提示("正在播放:See You Again (牢大)")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/9W65Efvk_See%20You%20Again%20-%20Wiz%20Khalifa%20Charlie%20Puth.flac?attname=See%20You%20Again%20-%20Wiz%20Khalifa%20Charlie%20Puth.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/9W65Efvk_See%20You%20Again%20-%20Wiz%20Khalifa%20Charlie%20Puth.flac?attname=See%20You%20Again%20-%20Wiz%20Khalifa%20Charlie%20Puth.flac")
 end)
 end,
 }, {"Ferrari 🇺🇸腰射",
 function() runAsyncTask(function()
  
 提示("正在播放:Ferrari 🇺🇸腰射")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/0pUfX4Gz_Ferrari%20-%20Bebe%20Rexha.flac?attname=Ferrari%20-%20Bebe%20Rexha.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/0pUfX4Gz_Ferrari%20-%20Bebe%20Rexha.flac?attname=Ferrari%20-%20Bebe%20Rexha.flac")
 end)
 end,
 }, {"ALL MY PEOPLE",
 function() runAsyncTask(function()
  
 提示("正在播放:ALL MY PEOPLE")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/0ybJEu31_All%20My%20People%20-%20Alexandra%20Stan.flac?attname=All%20My%20People%20-%20Alexandra%20Stan.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/0ybJEu31_All%20My%20People%20-%20Alexandra%20Stan.flac?attname=All%20My%20People%20-%20Alexandra%20Stan.flac")
 end)
 end,
 }, {"METAMORPHOSIS",
 function() runAsyncTask(function() 
 提示("正在播放:METAMORPHOSIS")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/NtVQNYhR_METAMORPHOSIS%20-%20INTERWORLD.flac?attname=METAMORPHOSIS%20-%20INTERWORLD.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/NtVQNYhR_METAMORPHOSIS%20-%20INTERWORLD.flac?attname=METAMORPHOSIS%20-%20INTERWORLD.flac")
 end)
 end,
 }, {"Sacred Play Secret Place",
 function() runAsyncTask(function() 
 提示("正在播放:Sacred Play Secret Place")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/EO7l0v1u_Sacred%20Play%20Secret%20Place%20-%20Matryoshka.flac?attname=Sacred%20Play%20Secret%20Place%20-%20Matryoshka.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/EO7l0v1u_Sacred%20Play%20Secret%20Place%20-%20Matryoshka.flac?attname=Sacred%20Play%20Secret%20Place%20-%20Matryoshka.flac")
 end)
 end,
 }, {"LOVELY BASTARDS",
 function() runAsyncTask(function() 
 提示("正在播放:LOVELY BASTARDS")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/9RsLf6tc_LOVELY%20BASTARDS%20-%20ZWE1HVNDXR%20yatashigang.flac?attname=LOVELY%20BASTARDS%20-%20ZWE1HVNDXR%20yatashigang.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/9RsLf6tc_LOVELY%20BASTARDS%20-%20ZWE1HVNDXR%20yatashigang.flac?attname=LOVELY%20BASTARDS%20-%20ZWE1HVNDXR%20yatashigang.flac")
 end)
 end,
 }, {"孤独终究会被圆满补偿",
 function() runAsyncTask(function() 
 提示("正在播放:孤独终究会被圆满补偿")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/21/o6s2koSb_%E4%B9%90%E7%AC%91%E7%AC%91%20-%20%E5%AD%A4%E7%8B%AC%E7%BB%88%E7%A9%B6%E4%BC%9A%E8%A2%AB%E5%9C%86%E6%BB%A1%E8%A1%A5%E5%81%BF.mp3?attname=%E4%B9%90%E7%AC%91%E7%AC%91%20-%20%E5%AD%A4%E7%8B%AC%E7%BB%88%E7%A9%B6%E4%BC%9A%E8%A2%AB%E5%9C%86%E6%BB%A1%E8%A1%A5%E5%81%BF.mp3")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/21/o6s2koSb_%E4%B9%90%E7%AC%91%E7%AC%91%20-%20%E5%AD%A4%E7%8B%AC%E7%BB%88%E7%A9%B6%E4%BC%9A%E8%A2%AB%E5%9C%86%E6%BB%A1%E8%A1%A5%E5%81%BF.mp3?attname=%E4%B9%90%E7%AC%91%E7%AC%91%20-%20%E5%AD%A4%E7%8B%AC%E7%BB%88%E7%A9%B6%E4%BC%9A%E8%A2%AB%E5%9C%86%E6%BB%A1%E8%A1%A5%E5%81%BF.mp3")
 end)
 end,
 }, {"心做",
 function() runAsyncTask(function() 
  提示("正在播放:心做…")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/ZUdWEhLw_%E5%BF%83%E5%81%9A%EF%BC%88%E5%BF%AB%E6%89%8B%E7%83%AD%E9%97%A8%E5%8E%9F%E5%A3%B0%EF%BC%89%20-%20%E9%98%BF%E5%B8%83%20%E9%98%BF%E8%A1%A1_%E5%90%88%E5%B9%B6.wav?attname=%E5%BF%83%E5%81%9A%EF%BC%88%E5%BF%AB%E6%89%8B%E7%83%AD%E9%97%A8%E5%8E%9F%E5%A3%B0%EF%BC%89%20-%20%E9%98%BF%E5%B8%83%20%E9%98%BF%E8%A1%A1_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/ZUdWEhLw_%E5%BF%83%E5%81%9A%EF%BC%88%E5%BF%AB%E6%89%8B%E7%83%AD%E9%97%A8%E5%8E%9F%E5%A3%B0%EF%BC%89%20-%20%E9%98%BF%E5%B8%83%20%E9%98%BF%E8%A1%A1_%E5%90%88%E5%B9%B6.wav?attname=%E5%BF%83%E5%81%9A%EF%BC%88%E5%BF%AB%E6%89%8B%E7%83%AD%E9%97%A8%E5%8E%9F%E5%A3%B0%EF%BC%89%20-%20%E9%98%BF%E5%B8%83%20%E9%98%BF%E8%A1%A1_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"POOR/POOR2",
 function() runAsyncTask(function() 
  提示("正在播放:POOR/POOR2")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/Qo878yhD_POOR%20-%20gqtis_%E5%90%88%E5%B9%B6.wav?attname=POOR%20-%20gqtis_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/Qo878yhD_POOR%20-%20gqtis_%E5%90%88%E5%B9%B6.wav?attname=POOR%20-%20gqtis_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"Loneliness",
 function() runAsyncTask(function() 
  提示("正在播放:Loneliness")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/yGn48wZ7_Loneliness%20-%20LXRY%20PXNK%20CHMCL%20S%C3%98UP.flac?attname=Loneliness%20-%20LXRY%20PXNK%20CHMCL%20S%C3%98UP.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/yGn48wZ7_Loneliness%20-%20LXRY%20PXNK%20CHMCL%20S%C3%98UP.flac?attname=Loneliness%20-%20LXRY%20PXNK%20CHMCL%20S%C3%98UP.flac')
 end)
 end,
 }, {"Fear",
 function() runAsyncTask(function() 
  提示("正在播放:Fear")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/aSKeW9R1_Fear%20-%20FreshmanSound.flac?attname=Fear%20-%20FreshmanSound.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/aSKeW9R1_Fear%20-%20FreshmanSound.flac?attname=Fear%20-%20FreshmanSound.flac')
 end)
 end,
 }, {"leve(Backrooms)",
 function() runAsyncTask(function() 
  提示("正在播放:leve(Backrooms)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/FuTqGzng_%E5%A4%9C%E6%9A%AE%E9%9D%92%20-%20Level%21%20%28Backrooms%29.flac?attname=%E5%A4%9C%E6%9A%AE%E9%9D%92%20-%20Level%21%20%28Backrooms%29.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/FuTqGzng_%E5%A4%9C%E6%9A%AE%E9%9D%92%20-%20Level%21%20%28Backrooms%29.flac?attname=%E5%A4%9C%E6%9A%AE%E9%9D%92%20-%20Level%21%20%28Backrooms%29.flac')
 end)
 end,
 }, {"Sweet Dreams/sweet Dreams(Mixed)",
 function() runAsyncTask(function() 
  提示("正在播放:Sweet Dreams/Sweet Dreams(Mixed)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/1HQn8Y6f_Sweet%20Dreams%20-%20Breathe%20Carolina%20Kaleena%20Zanders%20Dropgun_%E5%90%88%E5%B9%B6.wav?attname=Sweet%20Dreams%20-%20Breathe%20Carolina%20Kaleena%20Zanders%20Dropgun_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/1HQn8Y6f_Sweet%20Dreams%20-%20Breathe%20Carolina%20Kaleena%20Zanders%20Dropgun_%E5%90%88%E5%B9%B6.wav?attname=Sweet%20Dreams%20-%20Breathe%20Carolina%20Kaleena%20Zanders%20Dropgun_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"Drive Forever",
 function() runAsyncTask(function() 
  提示("正在播放:Drive Forever")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/FOMXKmzj_Drive%20Forever%20-%20T3nzu.flac?attname=Drive%20Forever%20-%20T3nzu.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/FOMXKmzj_Drive%20Forever%20-%20T3nzu.flac?attname=Drive%20Forever%20-%20T3nzu.flac')
 end)
 end,
 }, {"Move Your Body (RAIZHELL Remix)",
 function() runAsyncTask(function() 
  提示("正在播放:Move Your Body (RAIZHELL Remix)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/wpKpqDOF_Move%20Your%20Body%20%20RAIZHELL%20Remix%20%20-%20%C3%96wnboss%20SEVEK%20RAIZHELL.flac?attname=Move%20Your%20Body%20%20RAIZHELL%20Remix%20%20-%20%C3%96wnboss%20SEVEK%20RAIZHELL.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/wpKpqDOF_Move%20Your%20Body%20%20RAIZHELL%20Remix%20%20-%20%C3%96wnboss%20SEVEK%20RAIZHELL.flac?attname=Move%20Your%20Body%20%20RAIZHELL%20Remix%20%20-%20%C3%96wnboss%20SEVEK%20RAIZHELL.flac')
 end)
 end,
 }, {"Midnight City",
 function() runAsyncTask(function() 
  提示("正在播放:Midnight City")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/FDs8bqPz_Midnight%20City%20-%20M83.flac?attname=Midnight%20City%20-%20M83.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/FDs8bqPz_Midnight%20City%20-%20M83.flac?attname=Midnight%20City%20-%20M83.flac')
 end)
 end,
 }, {"Kerosene Crystal Castles",
 function() runAsyncTask(function() 
  提示("正在播放:Kerosene Crystal Castles")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/22/jDYJ2zWa_Kerosene%20-%20Crystal%20Castles.flac?attname=Kerosene%20-%20Crystal%20Castles.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/22/jDYJ2zWa_Kerosene%20-%20Crystal%20Castles.flac?attname=Kerosene%20-%20Crystal%20Castles.flac')
 end)
 end,
 }, {"Arabian Adventure Eugene",
 function() runAsyncTask(function() 
  提示("正在播放:Arabian Adventure Eugene")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/22/ww8cjYVv_Arabian%20Adventure%20-%20Eugene%20Star_%E5%90%88%E5%B9%B6.wav?attname=Arabian%20Adventure%20-%20Eugene%20Star_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/22/ww8cjYVv_Arabian%20Adventure%20-%20Eugene%20Star_%E5%90%88%E5%B9%B6.wav?attname=Arabian%20Adventure%20-%20Eugene%20Star_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"Your New Home Gooseworx Evan Alderete",
 function() runAsyncTask(function() 
  提示("正在播放:Your New Home Gooseworx Evan Alderete")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/22/WzEwMyp1_Your%20New%20Home%20-%20Gooseworx%20Evan%20Alderete_%E5%90%88%E5%B9%B6.wav?attname=Your%20New%20Home%20-%20Gooseworx%20Evan%20Alderete_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/22/WzEwMyp1_Your%20New%20Home%20-%20Gooseworx%20Evan%20Alderete_%E5%90%88%E5%B9%B6.wav?attname=Your%20New%20Home%20-%20Gooseworx%20Evan%20Alderete_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"O Come O Come Emmanuel",
 function() runAsyncTask(function() 
  提示("正在播放:O Come O Come Emmanuel")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/22/9MGleKeQ_O%20Come%20O%20Come%20Emmanuel%20-%20Tommee%20Profitt_%E5%90%88%E5%B9%B6.wav?attname=O%20Come%20O%20Come%20Emmanuel%20-%20Tommee%20Profitt_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/22/9MGleKeQ_O%20Come%20O%20Come%20Emmanuel%20-%20Tommee%20Profitt_%E5%90%88%E5%B9%B6.wav?attname=O%20Come%20O%20Come%20Emmanuel%20-%20Tommee%20Profitt_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"Crystal castles Kerosene Slowed",
 function() runAsyncTask(function() 
  提示("正在播放:Crystal castles Kerosene Slowed")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/22/LkoCg3L5_Crystal%20castles%20Kerosene%20-%20Slowed%20-%20Cream%20Connor_%E5%90%88%E5%B9%B6.wav?attname=Crystal%20castles%20Kerosene%20-%20Slowed%20-%20Cream%20Connor_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/22/LkoCg3L5_Crystal%20castles%20Kerosene%20-%20Slowed%20-%20Cream%20Connor_%E5%90%88%E5%B9%B6.wav?attname=Crystal%20castles%20Kerosene%20-%20Slowed%20-%20Cream%20Connor_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 }, {"Everywhere We Go",
 function() runAsyncTask(function() 
  提示("正在播放:Everywhere We Go")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/21/wMxmlPwW_Everywhere%20We%20Go%20-%20%E9%99%88%E5%86%A0%E5%B8%8C%20MC%E4%BB%81%20%E5%8E%A8%E6%88%BF%E4%BB%94%20%E5%BA%94%E9%87%87%E5%84%BF.flac?attname=Everywhere%20We%20Go%20-%20%E9%99%88%E5%86%A0%E5%B8%8C%20MC%E4%BB%81%20%E5%8E%A8%E6%88%BF%E4%BB%94%20%E5%BA%94%E9%87%87%E5%84%BF.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/21/wMxmlPwW_Everywhere%20We%20Go%20-%20%E9%99%88%E5%86%A0%E5%B8%8C%20MC%E4%BB%81%20%E5%8E%A8%E6%88%BF%E4%BB%94%20%E5%BA%94%E9%87%87%E5%84%BF.flac?attname=Everywhere%20We%20Go%20-%20%E9%99%88%E5%86%A0%E5%B8%8C%20MC%E4%BB%81%20%E5%8E%A8%E6%88%BF%E4%BB%94%20%E5%BA%94%E9%87%87%E5%84%BF.flac')
 end)
 end,
 }, {"ありがとう···",
 function() runAsyncTask(function() 
 提示("正在播放:ありがとう···")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/mfyvzHL1_%E3%81%82%E3%82%8A%E3%81%8C%E3%81%A8%E3%81%86%C2%B7%C2%B7%C2%B7%20-%20KOKIA.flac?attname=%E3%81%82%E3%82%8A%E3%81%8C%E3%81%A8%E3%81%86%C2%B7%C2%B7%C2%B7%20-%20KOKIA.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/mfyvzHL1_%E3%81%82%E3%82%8A%E3%81%8C%E3%81%A8%E3%81%86%C2%B7%C2%B7%C2%B7%20-%20KOKIA.flac?attname=%E3%81%82%E3%82%8A%E3%81%8C%E3%81%A8%E3%81%86%C2%B7%C2%B7%C2%B7%20-%20KOKIA.flac")
 end)
 end,
 }, {"Paypnoe",
 function() runAsyncTask(function() 
 提示("正在播放:Paypnoe")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/4KEMMKA7_Payphone%20-%20Maroon%205%20Wiz%20Khalifa.flac?attname=Payphone%20-%20Maroon%205%20Wiz%20Khalifa.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/4KEMMKA7_Payphone%20-%20Maroon%205%20Wiz%20Khalifa.flac?attname=Payphone%20-%20Maroon%205%20Wiz%20Khalifa.flac")
 end)
 end,
 }, {"지나갈테니",
 function() runAsyncTask(function() 
 提示("正在播放:지나갈테니")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/a6M1wiOJ_EXO%20-%20%EC%A7%80%EB%82%98%EA%B0%88%20%ED%85%8C%EB%8B%88%20%28%E9%A1%BA%E5%85%B6%E8%87%AA%E7%84%B6%29%20%28Been%20Through%29.flac?attname=EXO%20-%20%EC%A7%80%EB%82%98%EA%B0%88%20%ED%85%8C%EB%8B%88%20%28%E9%A1%BA%E5%85%B6%E8%87%AA%E7%84%B6%29%20%28Been%20Through%29.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/a6M1wiOJ_EXO%20-%20%EC%A7%80%EB%82%98%EA%B0%88%20%ED%85%8C%EB%8B%88%20%28%E9%A1%BA%E5%85%B6%E8%87%AA%E7%84%B6%29%20%28Been%20Through%29.flac?attname=EXO%20-%20%EC%A7%80%EB%82%98%EA%B0%88%20%ED%85%8C%EB%8B%88%20%28%E9%A1%BA%E5%85%B6%E8%87%AA%E7%84%B6%29%20%28Been%20Through%29.flac")
 end)
 end,
 }, {"我用什么把你留住",
 function() runAsyncTask(function() 
 提示("正在播放:我用什么把你留住")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/wYknROnD_%E6%88%91%E7%94%A8%E4%BB%80%E4%B9%88%E6%8A%8A%E4%BD%A0%E7%95%99%E4%BD%8F%20-%20%E7%A6%8F%E7%A6%84%E5%AF%BFFloruitShow.flac?attname=%E6%88%91%E7%94%A8%E4%BB%80%E4%B9%88%E6%8A%8A%E4%BD%A0%E7%95%99%E4%BD%8F%20-%20%E7%A6%8F%E7%A6%84%E5%AF%BFFloruitShow.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/wYknROnD_%E6%88%91%E7%94%A8%E4%BB%80%E4%B9%88%E6%8A%8A%E4%BD%A0%E7%95%99%E4%BD%8F%20-%20%E7%A6%8F%E7%A6%84%E5%AF%BFFloruitShow.flac?attname=%E6%88%91%E7%94%A8%E4%BB%80%E4%B9%88%E6%8A%8A%E4%BD%A0%E7%95%99%E4%BD%8F%20-%20%E7%A6%8F%E7%A6%84%E5%AF%BFFloruitShow.flac")
 end)
 end,
 }, {"Sample this",
 function() runAsyncTask(function() 
 提示("正在播放:Sample this")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/PKowKIPp_Sample%20this%20-%20RJ%20Pasin.flac?attname=Sample%20this%20-%20RJ%20Pasin.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/PKowKIPp_Sample%20this%20-%20RJ%20Pasin.flac?attname=Sample%20this%20-%20RJ%20Pasin.flac")
 end)
 end,
 }, {"Take me hand",
 function() runAsyncTask(function() 
 提示("正在播放:Take me hand")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/vqzxMgub_Take%20Me%20Hand%20-%20DAISHI%20DANCE%20C%C3%A9cile%20Corbel.flac?attname=Take%20Me%20Hand%20-%20DAISHI%20DANCE%20C%C3%A9cile%20Corbel.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/vqzxMgub_Take%20Me%20Hand%20-%20DAISHI%20DANCE%20C%C3%A9cile%20Corbel.flac?attname=Take%20Me%20Hand%20-%20DAISHI%20DANCE%20C%C3%A9cile%20Corbel.flac")
 end)
 end,
 }, {"Butterflies",
 function() runAsyncTask(function() 
 提示("正在播放:Butterflies")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/v103lxyY_Butterflies%20-%20nohidea..flac?attname=Butterflies%20-%20nohidea..flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/v103lxyY_Butterflies%20-%20nohidea..flac?attname=Butterflies%20-%20nohidea..flac")
 end)
 end,
 }, {"it's 6pm hut I miss u already",
 function() runAsyncTask(function() 
 提示("正在播放:it's 6pm hut I miss u already")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/HFqb4vAg_it%20s%206pm%20but%20I%20miss%20u%20already.%20-%20bbbluelee%20Furyl%20Siren.flac?attname=it%20s%206pm%20but%20I%20miss%20u%20already.%20-%20bbbluelee%20Furyl%20Siren.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/HFqb4vAg_it%20s%206pm%20but%20I%20miss%20u%20already.%20-%20bbbluelee%20Furyl%20Siren.flac?attname=it%20s%206pm%20but%20I%20miss%20u%20already.%20-%20bbbluelee%20Furyl%20Siren.flac")
 end)
 end,
 }, {"Time Stup",
 function() runAsyncTask(function() 
 提示("正在播放:Time Stup")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/m6PwA8Uq_Time%20Stop%20-%20BLACKDD%20CYTEAM%20PICK%20%E7%9F%A5%E6%99%8F.flac?attname=Time%20Stop%20-%20BLACKDD%20CYTEAM%20PICK%20%E7%9F%A5%E6%99%8F.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/m6PwA8Uq_Time%20Stop%20-%20BLACKDD%20CYTEAM%20PICK%20%E7%9F%A5%E6%99%8F.flac?attname=Time%20Stop%20-%20BLACKDD%20CYTEAM%20PICK%20%E7%9F%A5%E6%99%8F.flac")
 end)
 end,
 }, {"橙夏",
 function() runAsyncTask(function() 
 提示("正在播放:橙夏")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/tsxpEuLG_%E6%A9%99%E5%A4%8F%20-%20MORROW.flac?attname=%E6%A9%99%E5%A4%8F%20-%20MORROW.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/tsxpEuLG_%E6%A9%99%E5%A4%8F%20-%20MORROW.flac?attname=%E6%A9%99%E5%A4%8F%20-%20MORROW.flac")
 end)
 end,
 }, {"The Right Path",
 function() runAsyncTask(function() 
 提示("正在播放:The Right Path")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/KMwIehgq_The%20Right%20Path%20-%20Thomas%20Greenberg.flac?attname=The%20Right%20Path%20-%20Thomas%20Greenberg.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/KMwIehgq_The%20Right%20Path%20-%20Thomas%20Greenberg.flac?attname=The%20Right%20Path%20-%20Thomas%20Greenberg.flac")
 end)
 end,
 }, {"凄美(凉)地",
 function() runAsyncTask(function() 
 提示("正在播放:凄美地")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/CeEz5XuZ_%E5%87%84%E7%BE%8E%E5%9C%B0%20-%20%E9%83%AD%E9%A1%B6.flac?attname=%E5%87%84%E7%BE%8E%E5%9C%B0%20-%20%E9%83%AD%E9%A1%B6.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/CeEz5XuZ_%E5%87%84%E7%BE%8E%E5%9C%B0%20-%20%E9%83%AD%E9%A1%B6.flac?attname=%E5%87%84%E7%BE%8E%E5%9C%B0%20-%20%E9%83%AD%E9%A1%B6.flac")
 end)
 end,
 }, {"日暮里",
 function() runAsyncTask(function() 
 提示("正在播放:日暮里")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/U82E3r67_%E6%97%A5%E6%9A%AE%E9%87%8C%20-%20JINBAO.flac?attname=%E6%97%A5%E6%9A%AE%E9%87%8C%20-%20JINBAO.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/U82E3r67_%E6%97%A5%E6%9A%AE%E9%87%8C%20-%20JINBAO.flac?attname=%E6%97%A5%E6%9A%AE%E9%87%8C%20-%20JINBAO.flac")
 end)
 end,
 }, {"His Theme",
 function() runAsyncTask(function() 
 提示("正在播放:His Theme")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/JHleLM6l_His%20Theme%20-%20Toby%20Fox.flac?attname=His%20Theme%20-%20Toby%20Fox.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/JHleLM6l_His%20Theme%20-%20Toby%20Fox.flac?attname=His%20Theme%20-%20Toby%20Fox.flac")
 end)
 end,
 }, {"Windy Hill",
 function() runAsyncTask(function() 
 提示("正在播放:Windy Hill")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/qNvcWVRi_Windy%20Hill%20-%20%E7%BE%BD%E8%82%BF.flac?attname=Windy%20Hill%20-%20%E7%BE%BD%E8%82%BF.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/qNvcWVRi_Windy%20Hill%20-%20%E7%BE%BD%E8%82%BF.flac?attname=Windy%20Hill%20-%20%E7%BE%BD%E8%82%BF.flac")
 end)
 end,
 }, {"Knight(骑士)",
 function() runAsyncTask(function() 
 提示("正在播放:Knight(骑士)")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/22/CMg5k2yg_Knight%20%20%E9%AA%91%E5%A3%AB%20%20-%20Gentleman%20Ghani%20Radio%20Qora%20HJFM%20MAGA.flac?attname=Knight%20%20%E9%AA%91%E5%A3%AB%20%20-%20Gentleman%20Ghani%20Radio%20Qora%20HJFM%20MAGA.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/22/CMg5k2yg_Knight%20%20%E9%AA%91%E5%A3%AB%20%20-%20Gentleman%20Ghani%20Radio%20Qora%20HJFM%20MAGA.flac?attname=Knight%20%20%E9%AA%91%E5%A3%AB%20%20-%20Gentleman%20Ghani%20Radio%20Qora%20HJFM%20MAGA.flac")
 end)
 end,
 }, {"レクイエム",
 function() runAsyncTask(function() 
 提示("正在播放:レクイエム")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/JSbFzJDL_%E3%83%AC%E3%82%AF%E3%82%A4%E3%82%A8%E3%83%A0%20-%20%E6%9F%8A%E5%A5%88%E7%BB%AA.flac?attname=%E3%83%AC%E3%82%AF%E3%82%A4%E3%82%A8%E3%83%A0%20-%20%E6%9F%8A%E5%A5%88%E7%BB%AA.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/JSbFzJDL_%E3%83%AC%E3%82%AF%E3%82%A4%E3%82%A8%E3%83%A0%20-%20%E6%9F%8A%E5%A5%88%E7%BB%AA.flac?attname=%E3%83%AC%E3%82%AF%E3%82%A4%E3%82%A8%E3%83%A0%20-%20%E6%9F%8A%E5%A5%88%E7%BB%AA.flac")
 end)
 end,
 }, {"The Grotto",
 function() runAsyncTask(function() 
 提示("正在播放:The Grotto")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/kjCreHVx_The%20Grotto%20-%20Audiomachine.flac?attname=The%20Grotto%20-%20Audiomachine.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/kjCreHVx_The%20Grotto%20-%20Audiomachine.flac?attname=The%20Grotto%20-%20Audiomachine.flac")
 end)
 end,
 }, {"Sunshine Girl",
 function() runAsyncTask(function() 
 提示("正在播放:Sunshine Girl")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/fVj4JmCx_Sunshine%20Girl%20-%20moumoon.flac?attname=Sunshine%20Girl%20-%20moumoon.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/fVj4JmCx_Sunshine%20Girl%20-%20moumoon.flac?attname=Sunshine%20Girl%20-%20moumoon.flac")
 end)
 end,
 }, {"PDD",
 function() runAsyncTask(function() 
 提示("正在播放:PDD")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/0BqPZInH_PDD%20-%20%E5%BE%90%E6%A2%A6%E5%9C%86.flac?attname=PDD%20-%20%E5%BE%90%E6%A2%A6%E5%9C%86.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/0BqPZInH_PDD%20-%20%E5%BE%90%E6%A2%A6%E5%9C%86.flac?attname=PDD%20-%20%E5%BE%90%E6%A2%A6%E5%9C%86.flac")
 end)
 end,
 }, {"Lata",
 function() runAsyncTask(function() 
 提示("正在播放:Lata")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/kFEko3t7_Lata%20-%20makcumbelov%20DEFOX.flac?attname=Lata%20-%20makcumbelov%20DEFOX.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/kFEko3t7_Lata%20-%20makcumbelov%20DEFOX.flac?attname=Lata%20-%20makcumbelov%20DEFOX.flac")
 end)
 end,
 }, {"Ballin",
 function() runAsyncTask(function() 
 提示("正在播放:Ballin")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/xQ58Sdle_Ballin%20%20-%20Mustard%20Roddy%20Ricch.flac?attname=Ballin%20%20-%20Mustard%20Roddy%20Ricch.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/xQ58Sdle_Ballin%20%20-%20Mustard%20Roddy%20Ricch.flac?attname=Ballin%20%20-%20Mustard%20Roddy%20Ricch.flac")
 end)
 end,
 }, {"最好的安排",
 function() runAsyncTask(function() 
 提示("正在播放:最好的安排")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/7oBL3sas_%E6%9C%80%E5%A5%BD%E7%9A%84%E5%AE%89%E6%8E%92%20-%20%E6%9B%B2%E5%A9%89%E5%A9%B7.flac?attname=%E6%9C%80%E5%A5%BD%E7%9A%84%E5%AE%89%E6%8E%92%20-%20%E6%9B%B2%E5%A9%89%E5%A9%B7.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/7oBL3sas_%E6%9C%80%E5%A5%BD%E7%9A%84%E5%AE%89%E6%8E%92%20-%20%E6%9B%B2%E5%A9%89%E5%A9%B7.flac?attname=%E6%9C%80%E5%A5%BD%E7%9A%84%E5%AE%89%E6%8E%92%20-%20%E6%9B%B2%E5%A9%89%E5%A9%B7.flac")
 end)
 end,
 }, {"不问ciaga(不问别离)",
 function() runAsyncTask(function() 
 提示("正在播放:不问ciaga(不问别离)")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/g3Tn0M46_%E6%8C%87%E5%B0%96%E7%AC%91%20-%20%E4%B8%8D%E9%97%AEciaga%20%28%E4%B8%8D%E9%97%AE%E5%88%AB%E7%A6%BB%29.flac?attname=%E6%8C%87%E5%B0%96%E7%AC%91%20-%20%E4%B8%8D%E9%97%AEciaga%20%28%E4%B8%8D%E9%97%AE%E5%88%AB%E7%A6%BB%29.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/g3Tn0M46_%E6%8C%87%E5%B0%96%E7%AC%91%20-%20%E4%B8%8D%E9%97%AEciaga%20%28%E4%B8%8D%E9%97%AE%E5%88%AB%E7%A6%BB%29.flac?attname=%E6%8C%87%E5%B0%96%E7%AC%91%20-%20%E4%B8%8D%E9%97%AEciaga%20%28%E4%B8%8D%E9%97%AE%E5%88%AB%E7%A6%BB%29.flac")
 end)
 end,
 }, {"月亮之矢",
 function() runAsyncTask(function() 
 提示("正在播放:月亮之矢")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/kYu0TNd2_%E6%9C%88%E4%BA%AE%E4%B9%8B%E7%9F%A2%20-%20%E5%AD%A4%E7%9F%A2%20%E8%99%9E%E5%A8%B1.flac?attname=%E6%9C%88%E4%BA%AE%E4%B9%8B%E7%9F%A2%20-%20%E5%AD%A4%E7%9F%A2%20%E8%99%9E%E5%A8%B1.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/kYu0TNd2_%E6%9C%88%E4%BA%AE%E4%B9%8B%E7%9F%A2%20-%20%E5%AD%A4%E7%9F%A2%20%E8%99%9E%E5%A8%B1.flac?attname=%E6%9C%88%E4%BA%AE%E4%B9%8B%E7%9F%A2%20-%20%E5%AD%A4%E7%9F%A2%20%E8%99%9E%E5%A8%B1.flac")
 end)
 end,
 }, {"天气之子.幻",
 function() runAsyncTask(function() 
 提示("正在播放:天气之子.幻")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/08/10/ezsxCjtg_%E5%A4%A9%E6%B0%94%E4%B9%8B%E5%AD%90_%E5%B9%BB%28BGM%29-99K%E9%87%91-235078537-2000.flac?attname=%E5%A4%A9%E6%B0%94%E4%B9%8B%E5%AD%90_%E5%B9%BB%28BGM%29-99K%E9%87%91-235078537-2000.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/08/10/ezsxCjtg_%E5%A4%A9%E6%B0%94%E4%B9%8B%E5%AD%90_%E5%B9%BB%28BGM%29-99K%E9%87%91-235078537-2000.flac?attname=%E5%A4%A9%E6%B0%94%E4%B9%8B%E5%AD%90_%E5%B9%BB%28BGM%29-99K%E9%87%91-235078537-2000.flac")
 end)
 end,
 }, {"偏爱",
 function() runAsyncTask(function() 
 提示("正在播放:偏爱")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/2CS9PlqG_%E5%81%8F%E7%88%B1%20-%20%E5%BC%A0%E8%8A%B8%E4%BA%AC.flac?attname=%E5%81%8F%E7%88%B1%20-%20%E5%BC%A0%E8%8A%B8%E4%BA%AC.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/2CS9PlqG_%E5%81%8F%E7%88%B1%20-%20%E5%BC%A0%E8%8A%B8%E4%BA%AC.flac?attname=%E5%81%8F%E7%88%B1%20-%20%E5%BC%A0%E8%8A%B8%E4%BA%AC.flac")
 end)
 end,
 }, {"安和桥",
 function() runAsyncTask(function() 
 提示("正在播放:安和桥")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/23/imEzXF67_%E5%AE%89%E5%92%8C%E6%A1%A5%20-%20%E5%AE%87%E8%A5%BF.flac?attname=%E5%AE%89%E5%92%8C%E6%A1%A5%20-%20%E5%AE%87%E8%A5%BF.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/23/imEzXF67_%E5%AE%89%E5%92%8C%E6%A1%A5%20-%20%E5%AE%87%E8%A5%BF.flac?attname=%E5%AE%89%E5%92%8C%E6%A1%A5%20-%20%E5%AE%87%E8%A5%BF.flac")
 end)
 end,
 }, {"The Sound Of Your Fear",
 function() runAsyncTask(function() 
 提示("正在播放:The Sound Of Your Fear")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/24/W8FzUXEZ_The%20Sound%20Of%20Your%20Fear%20-%20Midi%20Blosso.flac?attname=The%20Sound%20Of%20Your%20Fear%20-%20Midi%20Blosso.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/24/W8FzUXEZ_The%20Sound%20Of%20Your%20Fear%20-%20Midi%20Blosso.flac?attname=The%20Sound%20Of%20Your%20Fear%20-%20Midi%20Blosso.flac")
 end)
 end,
 }, {"Arabian Adventure",
 function() runAsyncTask(function() 
 提示("正在播放:Arabian Adventure")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/08/11/n1jgkHoF_Arabian_Adventure-Eugene_Star-364083379-2000.flac?attname=Arabian_Adventure-Eugene_Star-364083379-2000.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/08/11/n1jgkHoF_Arabian_Adventure-Eugene_Star-364083379-2000.flac?attname=Arabian_Adventure-Eugene_Star-364083379-2000.flac")
 end)
 end,
 }, {"Sea of Tranquility",
 function() runAsyncTask(function() 
 提示("正在播放:Sea of Tranquility")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/24/4V7EOSa4_Sea%20of%20Tranquility%20-%20BeMax.flac?attname=Sea%20of%20Tranquility%20-%20BeMax.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/24/4V7EOSa4_Sea%20of%20Tranquility%20-%20BeMax.flac?attname=Sea%20of%20Tranquility%20-%20BeMax.flac")
 end)
 end,
 }, {"Suffocating",
 function() runAsyncTask(function() 
 提示("正在播放:Suffocating")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/24/uNNI5sC3_Suffocating%20-%20%E7%BE%A4%E6%98%9F.flac?attname=Suffocating%20-%20%E7%BE%A4%E6%98%9F.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/24/uNNI5sC3_Suffocating%20-%20%E7%BE%A4%E6%98%9F.flac?attname=Suffocating%20-%20%E7%BE%A4%E6%98%9F.flac")
 end)
 end,
 }, {"说好的幸福呢",
 function() runAsyncTask(function() 
 提示("正在播放:说好的幸福呢")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/10/06/zmnd2lIF_%E8%AF%B4%E5%A5%BD%E7%9A%84%E5%B9%B8%E7%A6%8F%E5%91%A2-%E5%91%A8%E6%9D%B0%E4%BC%A6-440623-2000.flac?attname=%E8%AF%B4%E5%A5%BD%E7%9A%84%E5%B9%B8%E7%A6%8F%E5%91%A2-%E5%91%A8%E6%9D%B0%E4%BC%A6-440623-2000.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/10/06/zmnd2lIF_%E8%AF%B4%E5%A5%BD%E7%9A%84%E5%B9%B8%E7%A6%8F%E5%91%A2-%E5%91%A8%E6%9D%B0%E4%BC%A6-440623-2000.flac?attname=%E8%AF%B4%E5%A5%BD%E7%9A%84%E5%B9%B8%E7%A6%8F%E5%91%A2-%E5%91%A8%E6%9D%B0%E4%BC%A6-440623-2000.flac")
 end)
 end,
 }, {"我是如此相信",
 function() runAsyncTask(function() 
 提示("正在播放:我是如此相信")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/06/26/DjFBZBEj_%E5%91%A8%E6%9D%B0%E4%BC%A6%20-%20%E6%88%91%E6%98%AF%E5%A6%82%E6%AD%A4%E7%9B%B8%E4%BF%A1.flac?attname=%E5%91%A8%E6%9D%B0%E4%BC%A6%20-%20%E6%88%91%E6%98%AF%E5%A6%82%E6%AD%A4%E7%9B%B8%E4%BF%A1.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/06/26/DjFBZBEj_%E5%91%A8%E6%9D%B0%E4%BC%A6%20-%20%E6%88%91%E6%98%AF%E5%A6%82%E6%AD%A4%E7%9B%B8%E4%BF%A1.flac?attname=%E5%91%A8%E6%9D%B0%E4%BC%A6%20-%20%E6%88%91%E6%98%AF%E5%A6%82%E6%AD%A4%E7%9B%B8%E4%BF%A1.flac")
 end)
 end,
 }, {"暮色回响",
 function() runAsyncTask(function() 
  提示("正在播放:暮色回响")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/27/tCG604Jq_SVID_20240627_105841_1_%E8%A3%81%E5%89%AA_%E5%90%88%E5%B9%B6.wav?attname=SVID_20240627_105841_1_%E8%A3%81%E5%89%AA_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/27/tCG604Jq_SVID_20240627_105841_1_%E8%A3%81%E5%89%AA_%E5%90%88%E5%B9%B6.wav?attname=SVID_20240627_105841_1_%E8%A3%81%E5%89%AA_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 },{"Underground",
 function() runAsyncTask(function() 
  提示("正在播放:Underground")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/27/KJMg7wje_Underground%20-%20Lindsey%20Stirling.flac?attname=Underground%20-%20Lindsey%20Stirling.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/27/KJMg7wje_Underground%20-%20Lindsey%20Stirling.flac?attname=Underground%20-%20Lindsey%20Stirling.flac')
 end)
 end,
 },{"Night Crusing",
 function() runAsyncTask(function() 
  提示("正在播放:Night Crusing")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/06/29/0UgXqOru_Night%20Crusing%20%20But%20Slowed%20%20%20prod%20%E7%89%9B%E5%B0%BE%E6%86%B2%E8%BC%94%20%20-%20XyEscape.flac?attname=Night%20Crusing%20%20But%20Slowed%20%20%20prod%20%E7%89%9B%E5%B0%BE%E6%86%B2%E8%BC%94%20%20-%20XyEscape.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/06/29/0UgXqOru_Night%20Crusing%20%20But%20Slowed%20%20%20prod%20%E7%89%9B%E5%B0%BE%E6%86%B2%E8%BC%94%20%20-%20XyEscape.flac?attname=Night%20Crusing%20%20But%20Slowed%20%20%20prod%20%E7%89%9B%E5%B0%BE%E6%86%B2%E8%BC%94%20%20-%20XyEscape.flac')
 end)
 end,
 },{"5:20AM",
 function() runAsyncTask(function() 
  提示("正在播放:5:20AM")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/07/09/VHdUTXtd_5%2020AM%20-%20%E5%88%80%E9%85%B1.flac?attname=5%2020AM%20-%20%E5%88%80%E9%85%B1.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/07/09/VHdUTXtd_5%2020AM%20-%20%E5%88%80%E9%85%B1.flac?attname=5%2020AM%20-%20%E5%88%80%E9%85%B1.flac")
 end)
 end,
 },{"落入凡尘",
 function() runAsyncTask(function() 
  提示("正在播放:落入凡尘")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/07/10/NSASelOw_%E9%BA%A6%E6%8C%AF%E9%B8%BF%20-%20%E9%9B%AA%E8%A7%81%C2%B7%E8%90%BD%E5%85%A5%E5%87%A1%E5%B0%98.flac?attname=%E9%BA%A6%E6%8C%AF%E9%B8%BF%20-%20%E9%9B%AA%E8%A7%81%C2%B7%E8%90%BD%E5%85%A5%E5%87%A1%E5%B0%98.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/07/10/NSASelOw_%E9%BA%A6%E6%8C%AF%E9%B8%BF%20-%20%E9%9B%AA%E8%A7%81%C2%B7%E8%90%BD%E5%85%A5%E5%87%A1%E5%B0%98.flac?attname=%E9%BA%A6%E6%8C%AF%E9%B8%BF%20-%20%E9%9B%AA%E8%A7%81%C2%B7%E8%90%BD%E5%85%A5%E5%87%A1%E5%B0%98.flac")
 end)
 end,
 },{"Counter Attack",
 function() runAsyncTask(function() 
  提示("正在播放:Counter Attack")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/07/10/8rWJkN4y_Samuel%20Kim%20-%20Counter%20Attack-Mankind%20%28Sasha%20Version%29.flac?attname=Samuel%20Kim%20-%20Counter%20Attack-Mankind%20%28Sasha%20Version%29.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/07/10/8rWJkN4y_Samuel%20Kim%20-%20Counter%20Attack-Mankind%20%28Sasha%20Version%29.flac?attname=Samuel%20Kim%20-%20Counter%20Attack-Mankind%20%28Sasha%20Version%29.flac")
 end)
 end,
 },{"The Runner",
 function() runAsyncTask(function() 
  提示("正在播放:The Runner")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/07/10/NKeOD20f_Yubik%20-%20The%20Runner.flac?attname=Yubik%20-%20The%20Runner.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/07/10/NKeOD20f_Yubik%20-%20The%20Runner.flac?attname=Yubik%20-%20The%20Runner.flac")
 end)
 end,
 },{"LOSER/伴奏/原伴奏",
 function() runAsyncTask(function() 
  提示("正在播放:LOSER/伴奏/原伴奏")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/08/06/SnQqhamG_%E7%B1%B3%E6%B4%A5%E7%8E%84%E5%B8%AB%20-%20LOSER_%E5%90%88%E5%B9%B6.wav?attname=%E7%B1%B3%E6%B4%A5%E7%8E%84%E5%B8%AB%20-%20LOSER_%E5%90%88%E5%B9%B6.wav")
+toggleMusic("http://oss2.e-43.com/uploads/2024/08/06/SnQqhamG_%E7%B1%B3%E6%B4%A5%E7%8E%84%E5%B8%AB%20-%20LOSER_%E5%90%88%E5%B9%B6.wav?attname=%E7%B1%B3%E6%B4%A5%E7%8E%84%E5%B8%AB%20-%20LOSER_%E5%90%88%E5%B9%B6.wav")
 end)
 end,
 },{"OAO Wake",
 function() runAsyncTask(function() 
  提示("正在播放:OAO Wake")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/08/06/WI6DTzlo_OAO%20-%20Wake.flac?attname=OAO%20-%20Wake.flac")
+toggleMusic("http://oss2.e-43.com/uploads/2024/08/06/WI6DTzlo_OAO%20-%20Wake.flac?attname=OAO%20-%20Wake.flac")
 end)
 end,
 },{"HMHK",
 function() runAsyncTask(function() 
  提示("正在播放:HMHK")
-gg.playMusic("http://oss2.e-43.com/uploads/2024/11/10/aTRsKNNv_HMHK%20-%20Lifestyle.mp3?attname=HMHK%20-%20Lifestyle.mp3")
+toggleMusic("http://oss2.e-43.com/uploads/2024/11/10/aTRsKNNv_HMHK%20-%20Lifestyle.mp3?attname=HMHK%20-%20Lifestyle.mp3")
 end)
 end,
 },{"此去半生(青衣戏腔版)",
 function() runAsyncTask(function() 
  提示("正在播放:此生过半(戏曲版)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/17/XXec9web_%E6%AD%A4%E5%8E%BB%E5%8D%8A%E7%94%9F%28%E9%9D%92%E8%A1%A3%E6%88%8F%E8%85%94%E7%89%88%29-%E4%BA%AC%E5%89%A7_%E5%90%B4%E6%98%8A-232505324-4000.flac?attname=%E6%AD%A4%E5%8E%BB%E5%8D%8A%E7%94%9F%28%E9%9D%92%E8%A1%A3%E6%88%8F%E8%85%94%E7%89%88%29-%E4%BA%AC%E5%89%A7_%E5%90%B4%E6%98%8A-232505324-4000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/17/XXec9web_%E6%AD%A4%E5%8E%BB%E5%8D%8A%E7%94%9F%28%E9%9D%92%E8%A1%A3%E6%88%8F%E8%85%94%E7%89%88%29-%E4%BA%AC%E5%89%A7_%E5%90%B4%E6%98%8A-232505324-4000.flac?attname=%E6%AD%A4%E5%8E%BB%E5%8D%8A%E7%94%9F%28%E9%9D%92%E8%A1%A3%E6%88%8F%E8%85%94%E7%89%88%29-%E4%BA%AC%E5%89%A7_%E5%90%B4%E6%98%8A-232505324-4000.flac')
 end)
 end,
 },{"Daylight DJ(梅菜扣肉)",
 function() runAsyncTask(function() 
  提示("正在播放:Daylight DJ(梅菜扣肉)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/10/wC29Vynd_%E6%A2%85%E8%8F%9C%E6%89%A3%E8%82%89-%E8%BF%9C%E6%B0%B4%E4%B8%8D%E8%A7%A3%E8%BF%9B%E6%B8%B4-314863600-320.mp3?attname=%E6%A2%85%E8%8F%9C%E6%89%A3%E8%82%89-%E8%BF%9C%E6%B0%B4%E4%B8%8D%E8%A7%A3%E8%BF%9B%E6%B8%B4-314863600-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/10/wC29Vynd_%E6%A2%85%E8%8F%9C%E6%89%A3%E8%82%89-%E8%BF%9C%E6%B0%B4%E4%B8%8D%E8%A7%A3%E8%BF%9B%E6%B8%B4-314863600-320.mp3?attname=%E6%A2%85%E8%8F%9C%E6%89%A3%E8%82%89-%E8%BF%9C%E6%B0%B4%E4%B8%8D%E8%A7%A3%E8%BF%9B%E6%B8%B4-314863600-320.mp3')
 end)
 end,
 },{"AM WAY",
 function() runAsyncTask(function() 
  提示("正在播放:AM WAY")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/07/VoxGO8Jn_My%20Way-Veysigz.mp3?attname=My%20Way-Veysigz.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/07/VoxGO8Jn_My%20Way-Veysigz.mp3?attname=My%20Way-Veysigz.mp3')
 end)
 end,
 },{"nop",
 function() runAsyncTask(function() 
  提示("正在播放:nop")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/07/S8CJLbvK_nop-%E9%99%88%E8%B6%8A%E9%BE%99.mp3?attname=nop-%E9%99%88%E8%B6%8A%E9%BE%99.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/07/S8CJLbvK_nop-%E9%99%88%E8%B6%8A%E9%BE%99.mp3?attname=nop-%E9%99%88%E8%B6%8A%E9%BE%99.mp3')
 end)
 end,
 },{"Watch",
 function() runAsyncTask(function() 
  提示("正在播放:Watch")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/Aj0SllSd_Watch_Me_Fly-Elliot_Brown-12776137-128.mp3?attname=Watch_Me_Fly-Elliot_Brown-12776137-128.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/Aj0SllSd_Watch_Me_Fly-Elliot_Brown-12776137-128.mp3?attname=Watch_Me_Fly-Elliot_Brown-12776137-128.mp3')
 end)
 end,
 },{"Conundrum",
 function() runAsyncTask(function() 
  提示("正在播放:Conundrum")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/kG3wg94B_Conundrum-Audiomachine-386828076-100.ogg?attname=Conundrum-Audiomachine-386828076-100.ogg')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/kG3wg94B_Conundrum-Audiomachine-386828076-100.ogg?attname=Conundrum-Audiomachine-386828076-100.ogg')
 end)
 end,
 },{"我撕裂我的身体",
 function() runAsyncTask(function() 
  提示("正在播放:我撕裂我的身体")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/gii2fyaT_%E6%88%91%E6%92%95%E8%A3%82%E6%88%91%E7%9A%84%E8%BA%AB%E4%BD%93-MISTERK_Tphunk-261474489-2000.flac?attname=%E6%88%91%E6%92%95%E8%A3%82%E6%88%91%E7%9A%84%E8%BA%AB%E4%BD%93-MISTERK_Tphunk-261474489-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/gii2fyaT_%E6%88%91%E6%92%95%E8%A3%82%E6%88%91%E7%9A%84%E8%BA%AB%E4%BD%93-MISTERK_Tphunk-261474489-2000.flac?attname=%E6%88%91%E6%92%95%E8%A3%82%E6%88%91%E7%9A%84%E8%BA%AB%E4%BD%93-MISTERK_Tphunk-261474489-2000.flac')
 end)
 end,
 },{"蝴蝶步(PHONK)",
 function() runAsyncTask(function() 
  提示("正在播放:蝴蝶步(PHONK)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/5xMjF3uK_%E8%9D%B4%E8%9D%B6%E6%AD%A5%28PHONK%29-GTR7-385765042-2000.flac?attname=%E8%9D%B4%E8%9D%B6%E6%AD%A5%28PHONK%29-GTR7-385765042-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/5xMjF3uK_%E8%9D%B4%E8%9D%B6%E6%AD%A5%28PHONK%29-GTR7-385765042-2000.flac?attname=%E8%9D%B4%E8%9D%B6%E6%AD%A5%28PHONK%29-GTR7-385765042-2000.flac')
 end)
 end,
 },{"无仙",
 function() runAsyncTask(function() 
  提示("正在播放:无仙")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/SsUVGVDv_%E6%97%A0%E4%BB%99-Candy_Wind-68687199-2000.flac?attname=%E6%97%A0%E4%BB%99-Candy_Wind-68687199-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/SsUVGVDv_%E6%97%A0%E4%BB%99-Candy_Wind-68687199-2000.flac?attname=%E6%97%A0%E4%BB%99-Candy_Wind-68687199-2000.flac')
 end)
 end,
 },{"Children",
 function() runAsyncTask(function() 
  提示("正在播放:Children")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/5EuPQggh_Children_Of_The_Dark-Mono_Inc_-28131788-128.mp3?attname=Children_Of_The_Dark-Mono_Inc_-28131788-128.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/5EuPQggh_Children_Of_The_Dark-Mono_Inc_-28131788-128.mp3?attname=Children_Of_The_Dark-Mono_Inc_-28131788-128.mp3')
 end)
 end,
 },{"China Rain",
 function() runAsyncTask(function() 
  提示("正在播放:China Rain")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/dEt1Ulu5_China-Rain-%E5%BE%90%E6%A2%A6%E5%9C%86-20275380-2000.flac?attname=China-Rain-%E5%BE%90%E6%A2%A6%E5%9C%86-20275380-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/dEt1Ulu5_China-Rain-%E5%BE%90%E6%A2%A6%E5%9C%86-20275380-2000.flac?attname=China-Rain-%E5%BE%90%E6%A2%A6%E5%9C%86-20275380-2000.flac')
 end)
 end,
 },{"color X",
 function() runAsyncTask(function() 
  提示("正在播放:color X")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/09/DNoyfYMd_color-X-%E5%BE%90%E6%A2%A6%E5%9C%86-23658968-2000.flac?attname=color-X-%E5%BE%90%E6%A2%A6%E5%9C%86-23658968-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/09/DNoyfYMd_color-X-%E5%BE%90%E6%A2%A6%E5%9C%86-23658968-2000.flac?attname=color-X-%E5%BE%90%E6%A2%A6%E5%9C%86-23658968-2000.flac')
 end)
 end,
 },{"Sail",
 function() runAsyncTask(function() 
  提示("正在播放:Sail")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/09/TUaGA4XB_Sail-Awolnation_Aaron_R__Bruno-3380454-192.ogg?attname=Sail-Awolnation_Aaron_R__Bruno-3380454-192.ogg')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/09/TUaGA4XB_Sail-Awolnation_Aaron_R__Bruno-3380454-192.ogg?attname=Sail-Awolnation_Aaron_R__Bruno-3380454-192.ogg')
 end)
 end,
 },{"广寒谣",
 function() runAsyncTask(function() 
  提示("正在播放:广寒谣")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/09/HUVvgYs6_%E5%B9%BF%E5%AF%92%E8%B0%A3-%E4%BC%8A%E6%A0%BC%E8%B5%9B%E5%90%AC_%E4%B8%8D%E9%9D%A0%E8%B0%B1%E7%BB%84%E5%90%88-83594003-2000.flac?attname=%E5%B9%BF%E5%AF%92%E8%B0%A3-%E4%BC%8A%E6%A0%BC%E8%B5%9B%E5%90%AC_%E4%B8%8D%E9%9D%A0%E8%B0%B1%E7%BB%84%E5%90%88-83594003-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/09/HUVvgYs6_%E5%B9%BF%E5%AF%92%E8%B0%A3-%E4%BC%8A%E6%A0%BC%E8%B5%9B%E5%90%AC_%E4%B8%8D%E9%9D%A0%E8%B0%B1%E7%BB%84%E5%90%88-83594003-2000.flac?attname=%E5%B9%BF%E5%AF%92%E8%B0%A3-%E4%BC%8A%E6%A0%BC%E8%B5%9B%E5%90%AC_%E4%B8%8D%E9%9D%A0%E8%B0%B1%E7%BB%84%E5%90%88-83594003-2000.flac')
 end)
 end,
 },{"ID EDIT MIX",
 function() runAsyncTask(function() 
  提示("正在播放:ID EDIT MIX")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/kVkagibg_ID_EDIT_MIX-HINA-325465869-2000.flac?attname=ID_EDIT_MIX-HINA-325465869-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/kVkagibg_ID_EDIT_MIX-HINA-325465869-2000.flac?attname=ID_EDIT_MIX-HINA-325465869-2000.flac')
 end)
 end,
 },{"My Confession",
 function() runAsyncTask(function() 
  提示("正在播放:My Confession")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/RE3mIV0Y_My_Confession-Mark_Stewart_Anderson-293262730-320.mp3?attname=My_Confession-Mark_Stewart_Anderson-293262730-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/RE3mIV0Y_My_Confession-Mark_Stewart_Anderson-293262730-320.mp3?attname=My_Confession-Mark_Stewart_Anderson-293262730-320.mp3')
 end)
 end,
 },{"Just Friends(Explicit)",
 function() runAsyncTask(function() 
  提示("正在播放:Just Friends(Explicit)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/08/dXvTsSn2_Just_Friends(Explicit)-Hayden_James_Boy_Matthews-47019211-2000.flac?attname=Just_Friends%28Explicit%29-Hayden_James_Boy_Matthews-47019211-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/08/dXvTsSn2_Just_Friends(Explicit)-Hayden_James_Boy_Matthews-47019211-2000.flac?attname=Just_Friends%28Explicit%29-Hayden_James_Boy_Matthews-47019211-2000.flac')
 end)
 end,
 },{"Death Is No More",
 function() runAsyncTask(function() 
  提示("正在播放:Death Is No More")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/30/aGGj38KC_Death_Is_No_More-BLESSED_MANE-164190940-2000.flac?attname=Death_Is_No_More-BLESSED_MANE-164190940-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/30/aGGj38KC_Death_Is_No_More-BLESSED_MANE-164190940-2000.flac?attname=Death_Is_No_More-BLESSED_MANE-164190940-2000.flac')
 end)
 end,
 },{"爱的虚伪(Remix)",
 function() runAsyncTask(function() 
  提示("正在播放:爱的虚伪(Remix)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/30/9PmswuSR_%E7%88%B1%E7%9A%84%E8%99%9A%E4%BC%AA%28Remix%29-%E6%9B%B2%E8%82%96%E5%86%B0-304665249-128.mp3?attname=%E7%88%B1%E7%9A%84%E8%99%9A%E4%BC%AA%28Remix%29-%E6%9B%B2%E8%82%96%E5%86%B0-304665249-128.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/30/9PmswuSR_%E7%88%B1%E7%9A%84%E8%99%9A%E4%BC%AA%28Remix%29-%E6%9B%B2%E8%82%96%E5%86%B0-304665249-128.mp3?attname=%E7%88%B1%E7%9A%84%E8%99%9A%E4%BC%AA%28Remix%29-%E6%9B%B2%E8%82%96%E5%86%B0-304665249-128.mp3')
 end)
 end,
 },{"仙尊合集 AkinoYuno",
 function() runAsyncTask(function() 
  提示("正在播放:仙尊合集 AkinoYuno")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/08/30/r2zqZbr2_%E4%BB%99%E5%B0%8A%E5%90%88%E9%9B%86-AkinoYuno-399249048-2000.flac?attname=%E4%BB%99%E5%B0%8A%E5%90%88%E9%9B%86-AkinoYuno-399249048-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/08/30/r2zqZbr2_%E4%BB%99%E5%B0%8A%E5%90%88%E9%9B%86-AkinoYuno-399249048-2000.flac?attname=%E4%BB%99%E5%B0%8A%E5%90%88%E9%9B%86-AkinoYuno-399249048-2000.flac')
 end)
 end,
 },{"Chasing the Dragon",
 function() runAsyncTask(function() 
  提示("正在播放:Chasing the Dragon")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/09/06/n1kF7WQB_Chasing_the_Dragon-Getsix-170518983-2000.flac?attname=Chasing_the_Dragon-Getsix-170518983-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/09/06/n1kF7WQB_Chasing_the_Dragon-Getsix-170518983-2000.flac?attname=Chasing_the_Dragon-Getsix-170518983-2000.flac')
 end)
 end,
 },{"Shadow Lady",
 function() runAsyncTask(function() 
  提示("正在播放:Shadow Lady")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/09/06/yCqWQFTR_Shadow_Lady-Portwave_Dmitriy_Protsenko-83806147-2000.flac?attname=Shadow_Lady-Portwave_Dmitriy_Protsenko-83806147-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/09/06/yCqWQFTR_Shadow_Lady-Portwave_Dmitriy_Protsenko-83806147-2000.flac?attname=Shadow_Lady-Portwave_Dmitriy_Protsenko-83806147-2000.flac')
 end)
 end,
 },{"海琼斯小夜曲",
 function() runAsyncTask(function() 
  提示("正在播放:海琼斯小夜曲")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/03/6l0i21R8_%E6%B5%B7%E7%90%BC%E6%96%AF%E5%B0%8F%E5%A4%9C%E6%9B%B2-%E8%93%9D%E9%B1%BC_-184818461-128.mp3?attname=%E6%B5%B7%E7%90%BC%E6%96%AF%E5%B0%8F%E5%A4%9C%E6%9B%B2-%E8%93%9D%E9%B1%BC_-184818461-128.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/03/6l0i21R8_%E6%B5%B7%E7%90%BC%E6%96%AF%E5%B0%8F%E5%A4%9C%E6%9B%B2-%E8%93%9D%E9%B1%BC_-184818461-128.mp3?attname=%E6%B5%B7%E7%90%BC%E6%96%AF%E5%B0%8F%E5%A4%9C%E6%9B%B2-%E8%93%9D%E9%B1%BC_-184818461-128.mp3')
 end)
 end,
 },{"如果耳机有回音",
 function() runAsyncTask(function() 
  提示("正在播放:如果耳机有回音")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/03/h7wcVN28_%E5%A6%82%E6%9E%9C%E8%80%B3%E6%9C%BA%E6%9C%89%E5%9B%9E%E9%9F%B3-%E5%A5%B6%E7%89%87ouo-417821580-2000.flac?attname=%E5%A6%82%E6%9E%9C%E8%80%B3%E6%9C%BA%E6%9C%89%E5%9B%9E%E9%9F%B3-%E5%A5%B6%E7%89%87ouo-417821580-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/03/h7wcVN28_%E5%A6%82%E6%9E%9C%E8%80%B3%E6%9C%BA%E6%9C%89%E5%9B%9E%E9%9F%B3-%E5%A5%B6%E7%89%87ouo-417821580-2000.flac?attname=%E5%A6%82%E6%9E%9C%E8%80%B3%E6%9C%BA%E6%9C%89%E5%9B%9E%E9%9F%B3-%E5%A5%B6%E7%89%87ouo-417821580-2000.flac')
 end)
 end,
 },{"原野追逐",
 function() runAsyncTask(function() 
  提示("正在播放:原野追逐")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/03/Gm8GRUdn_%E5%8E%9F%E9%87%8E%E8%BF%BD%E9%80%90_%28%E4%B8%8D%E8%A6%81%E6%B8%A9%E5%92%8C%E8%B5%B0%E5%85%A5%E9%82%A3%E8%89%AF%E5%A4%9C%29-%E7%81%B5%E9%AD%82%E9%85%8D%E4%B9%90%E5%B8%88-372154679-2000.flac?attname=%E5%8E%9F%E9%87%8E%E8%BF%BD%E9%80%90_%28%E4%B8%8D%E8%A6%81%E6%B8%A9%E5%92%8C%E8%B5%B0%E5%85%A5%E9%82%A3%E8%89%AF%E5%A4%9C%29-%E7%81%B5%E9%AD%82%E9%85%8D%E4%B9%90%E5%B8%88-372154679-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/03/Gm8GRUdn_%E5%8E%9F%E9%87%8E%E8%BF%BD%E9%80%90_%28%E4%B8%8D%E8%A6%81%E6%B8%A9%E5%92%8C%E8%B5%B0%E5%85%A5%E9%82%A3%E8%89%AF%E5%A4%9C%29-%E7%81%B5%E9%AD%82%E9%85%8D%E4%B9%90%E5%B8%88-372154679-2000.flac?attname=%E5%8E%9F%E9%87%8E%E8%BF%BD%E9%80%90_%28%E4%B8%8D%E8%A6%81%E6%B8%A9%E5%92%8C%E8%B5%B0%E5%85%A5%E9%82%A3%E8%89%AF%E5%A4%9C%29-%E7%81%B5%E9%AD%82%E9%85%8D%E4%B9%90%E5%B8%88-372154679-2000.flac')
 end)
 end,
 },{"Cornfield Chase",
 function() runAsyncTask(function() 
  提示("正在播放:Cornfield Chase")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/03/vpzhhuzx_Cornfield_Chase%28%E7%BA%AF%E9%9F%B3%E4%B9%90%E7%89%88%29-Hans_Zimmer-6367860-2000.flac?attname=Cornfield_Chase%28%E7%BA%AF%E9%9F%B3%E4%B9%90%E7%89%88%29-Hans_Zimmer-6367860-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/03/vpzhhuzx_Cornfield_Chase%28%E7%BA%AF%E9%9F%B3%E4%B9%90%E7%89%88%29-Hans_Zimmer-6367860-2000.flac?attname=Cornfield_Chase%28%E7%BA%AF%E9%9F%B3%E4%B9%90%E7%89%88%29-Hans_Zimmer-6367860-2000.flac')
 end)
 end,
 },{"doodle",
 function() runAsyncTask(function() 
  提示("正在播放:doodle")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/03/AGNtdiqt_doodle-Zachz_Winner-338938940-2000.flac?attname=doodle-Zachz_Winner-338938940-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/03/AGNtdiqt_doodle-Zachz_Winner-338938940-2000.flac?attname=doodle-Zachz_Winner-338938940-2000.flac')
 end)
 end,
 },{"窒 Suffocating",
 function() runAsyncTask(function() 
  提示("正在播放:窒 Suffocating")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/10/cVXZQlHj_%E5%8F%88%E6%98%AF%E5%BF%AB%E4%B9%90%E7%9A%84%E4%B8%80%E5%A4%A9%20-%20%E3%80%8A%E7%AA%92%20Suffocating%E3%80%8B%E6%8B%BC%E9%9F%B3%E5%B8%88BGM&Lona.X%20%E5%B0%8F%E6%96%B0%EF%BC%9A%E7%BA%AF%E9%9F%B3%E4%B9%90%EF%BC%8C%E8%AF%B7%E6%AC%A3%E8%B5%8F.mp3?attname=%E5%8F%88%E6%98%AF%E5%BF%AB%E4%B9%90%E7%9A%84%E4%B8%80%E5%A4%A9%20-%20%E3%80%8A%E7%AA%92%20Suffocating%E3%80%8B%E6%8B%BC%E9%9F%B3%E5%B8%88BGM&Lona.X%20%E5%B0%8F%E6%96%B0%EF%BC%9A%E7%BA%AF%E9%9F%B3%E4%B9%90%EF%BC%8C%E8%AF%B7%E6%AC%A3%E8%B5%8F.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/10/cVXZQlHj_%E5%8F%88%E6%98%AF%E5%BF%AB%E4%B9%90%E7%9A%84%E4%B8%80%E5%A4%A9%20-%20%E3%80%8A%E7%AA%92%20Suffocating%E3%80%8B%E6%8B%BC%E9%9F%B3%E5%B8%88BGM&Lona.X%20%E5%B0%8F%E6%96%B0%EF%BC%9A%E7%BA%AF%E9%9F%B3%E4%B9%90%EF%BC%8C%E8%AF%B7%E6%AC%A3%E8%B5%8F.mp3?attname=%E5%8F%88%E6%98%AF%E5%BF%AB%E4%B9%90%E7%9A%84%E4%B8%80%E5%A4%A9%20-%20%E3%80%8A%E7%AA%92%20Suffocating%E3%80%8B%E6%8B%BC%E9%9F%B3%E5%B8%88BGM&Lona.X%20%E5%B0%8F%E6%96%B0%EF%BC%9A%E7%BA%AF%E9%9F%B3%E4%B9%90%EF%BC%8C%E8%AF%B7%E6%AC%A3%E8%B5%8F.mp3')
 end)
 end,
 },{"Glichery Sea Of Problems (Explicit)",
 function() runAsyncTask(function() 
  提示("正在播放:Glichery Sea Of Problems (Explicit)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/10/wPVuZECH_Glichery%20-%20Sea%20Of%20Problems%20%28Explicit%29.flac?attname=Glichery%20-%20Sea%20Of%20Problems%20%28Explicit%29.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/10/wPVuZECH_Glichery%20-%20Sea%20Of%20Problems%20%28Explicit%29.flac?attname=Glichery%20-%20Sea%20Of%20Problems%20%28Explicit%29.flac')
 end)
 end,
 },{"防空警报...",
 function() runAsyncTask(function() 
  提示("正在播放:防空警报...")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/12/01/S6Ty4Dyc_42865095.128.vcc.mp3?attname=42865095.128.vcc.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/12/01/S6Ty4Dyc_42865095.128.vcc.mp3?attname=42865095.128.vcc.mp3')
 end)
 end,
 },{"星と僕らと",
 function() runAsyncTask(function() 
  提示("正在播放:星と僕らと")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/phXNP1Yx_%E6%98%9F%E3%81%A8%E5%83%95%E3%82%89%E3%81%A8_%28tofubeats_Remix%29-%E7%9B%AE%E9%BB%92%E5%B0%86%E5%8F%B8-63514193-2000.flac?attname=%E6%98%9F%E3%81%A8%E5%83%95%E3%82%89%E3%81%A8_%28tofubeats_Remix%29-%E7%9B%AE%E9%BB%92%E5%B0%86%E5%8F%B8-63514193-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/phXNP1Yx_%E6%98%9F%E3%81%A8%E5%83%95%E3%82%89%E3%81%A8_%28tofubeats_Remix%29-%E7%9B%AE%E9%BB%92%E5%B0%86%E5%8F%B8-63514193-2000.flac?attname=%E6%98%9F%E3%81%A8%E5%83%95%E3%82%89%E3%81%A8_%28tofubeats_Remix%29-%E7%9B%AE%E9%BB%92%E5%B0%86%E5%8F%B8-63514193-2000.flac')
 end)
 end,
 },{"Cry For Me",
 function() runAsyncTask(function() 
  提示("正在播放:Cry For Me")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/JmeA5neJ_Cry_For_Me_(feat__Ami)-Michita_Ami-396482335-2000.flac?attname=Cry_For_Me_%28feat__Ami%29-Michita_Ami-396482335-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/JmeA5neJ_Cry_For_Me_(feat__Ami)-Michita_Ami-396482335-2000.flac?attname=Cry_For_Me_%28feat__Ami%29-Michita_Ami-396482335-2000.flac')
 end)
 end,
 },{"EEYUH! x Fluxxwave",
 function() runAsyncTask(function() 
  提示("正在播放:EEYUH! x Fluxxwave")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/3dBX8T6L_EEYUH__x_Fluxxwave-Clovis_Reyes_Hr_Irokz-370941571-2000.flac?attname=EEYUH__x_Fluxxwave-Clovis_Reyes_Hr_Irokz-370941571-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/3dBX8T6L_EEYUH__x_Fluxxwave-Clovis_Reyes_Hr_Irokz-370941571-2000.flac?attname=EEYUH__x_Fluxxwave-Clovis_Reyes_Hr_Irokz-370941571-2000.flac')
 end)
 end,
 },{"SCARSONG",
 function() runAsyncTask(function() 
  提示("正在播放:SCARSONG")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/jZKTyIwe_SCARSONG-flash8-51498270-320.mp3?attname=SCARSONG-flash8-51498270-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/jZKTyIwe_SCARSONG-flash8-51498270-320.mp3?attname=SCARSONG-flash8-51498270-320.mp3')
 end)
 end,
 },{"X-GALACTICO",
 function() runAsyncTask(function() 
  提示("正在播放:X-GALACTICO")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/JJ25p3rm_X-GALACTICO.mp3?attname=X-GALACTICO.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/JJ25p3rm_X-GALACTICO.mp3?attname=X-GALACTICO.mp3')
 end)
 end,
 },{"所有心事都放晴(新版)",
 function() runAsyncTask(function() 
  提示("正在播放:所有心事都放晴(新版)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/DJdhyrAI_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E6%96%B0%E7%89%88%29-%E6%97%A9%E6%99%9A%E6%99%9A-434771089-2000.flac?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E6%96%B0%E7%89%88%29-%E6%97%A9%E6%99%9A%E6%99%9A-434771089-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/DJdhyrAI_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E6%96%B0%E7%89%88%29-%E6%97%A9%E6%99%9A%E6%99%9A-434771089-2000.flac?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E6%96%B0%E7%89%88%29-%E6%97%A9%E6%99%9A%E6%99%9A-434771089-2000.flac')
 end)
 end,
 },{"所有心事都放晴(航天小曲DJ)",
 function() runAsyncTask(function() 
  提示("正在播放:所有心事都放晴(航天小曲DJ)")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/T4Yh840E_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E8%88%AA%E5%A4%A9%E5%B0%8F%E6%9B%B2DJ%29-%E8%BD%A6%E5%8F%8BDJ%E5%A4%A7%E5%A4%A7-433694969-320.mp3?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E8%88%AA%E5%A4%A9%E5%B0%8F%E6%9B%B2DJ%29-%E8%BD%A6%E5%8F%8BDJ%E5%A4%A7%E5%A4%A7-433694969-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/T4Yh840E_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E8%88%AA%E5%A4%A9%E5%B0%8F%E6%9B%B2DJ%29-%E8%BD%A6%E5%8F%8BDJ%E5%A4%A7%E5%A4%A7-433694969-320.mp3?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4_%28%E8%88%AA%E5%A4%A9%E5%B0%8F%E6%9B%B2DJ%29-%E8%BD%A6%E5%8F%8BDJ%E5%A4%A7%E5%A4%A7-433694969-320.mp3')
 end)
 end,
 },{"所有心事都放晴-尤宏",
 function() runAsyncTask(function() 
  提示("正在播放:所有心事都放晴")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/29/jNIp2M2b_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4-%E5%B0%A4%E5%AE%8F-412688497-2000.flac?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4-%E5%B0%A4%E5%AE%8F-412688497-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/29/jNIp2M2b_%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4-%E5%B0%A4%E5%AE%8F-412688497-2000.flac?attname=%E6%89%80%E6%9C%89%E5%BF%83%E4%BA%8B%E9%83%BD%E6%94%BE%E6%99%B4-%E5%B0%A4%E5%AE%8F-412688497-2000.flac')
 end)
 end,
 },{"但-草东没有派对",
 function() runAsyncTask(function() 
  提示("正在播放:但-草东没有派对")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/30/y61u8BAU_%E4%BD%86-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-269038147-2000.flac?attname=%E4%BD%86-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-269038147-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/30/y61u8BAU_%E4%BD%86-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-269038147-2000.flac?attname=%E4%BD%86-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-269038147-2000.flac')
 end)
 end,
 },{"烂泥-草东没有派对",
 function() runAsyncTask(function() 
  提示("正在播放:烂泥-草东没有派对")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/qb1bZH2p_%E7%83%82%E6%B3%A5-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-7065590-2000.flac?attname=%E7%83%82%E6%B3%A5-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-7065590-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/qb1bZH2p_%E7%83%82%E6%B3%A5-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-7065590-2000.flac?attname=%E7%83%82%E6%B3%A5-%E8%8D%89%E4%B8%9C%E6%B2%A1%E6%9C%89%E6%B4%BE%E5%AF%B9-7065590-2000.flac')
 end)
 end,
 },{"莫名其妙的BGM",
 function() runAsyncTask(function() 
  提示("正在播放:莫名其妙的BGM")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/11/30/1T7yubZc_%E8%8E%AB%E5%90%8D%E5%85%B6%E5%A6%99%E7%9A%84BGM-AEC-419737865-2000.flac?attname=%E8%8E%AB%E5%90%8D%E5%85%B6%E5%A6%99%E7%9A%84BGM-AEC-419737865-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/11/30/1T7yubZc_%E8%8E%AB%E5%90%8D%E5%85%B6%E5%A6%99%E7%9A%84BGM-AEC-419737865-2000.flac?attname=%E8%8E%AB%E5%90%8D%E5%85%B6%E5%A6%99%E7%9A%84BGM-AEC-419737865-2000.flac')
 end)
 end,
 },{"え！？やば、、、、",
 function() runAsyncTask(function() 
  提示("正在播放:え！？やば、、、、")
-gg.playMusic('http://oss2.e-43.com/uploads/2024/12/13/ECjpctKg_%E3%81%88%EF%BC%81%EF%BC%9F%E3%82%84%E3%81%B0%E3%80%81%E3%80%81%E3%80%81%E3%80%81-%E3%81%95%E3%82%93%E3%81%86%E3%81%95%E3%81%8E-266713696-2000.flac?attname=%E3%81%88%EF%BC%81%EF%BC%9F%E3%82%84%E3%81%B0%E3%80%81%E3%80%81%E3%80%81%E3%80%81-%E3%81%95%E3%82%93%E3%81%86%E3%81%95%E3%81%8E-266713696-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2024/12/13/ECjpctKg_%E3%81%88%EF%BC%81%EF%BC%9F%E3%82%84%E3%81%B0%E3%80%81%E3%80%81%E3%80%81%E3%80%81-%E3%81%95%E3%82%93%E3%81%86%E3%81%95%E3%81%8E-266713696-2000.flac?attname=%E3%81%88%EF%BC%81%EF%BC%9F%E3%82%84%E3%81%B0%E3%80%81%E3%80%81%E3%80%81%E3%80%81-%E3%81%95%E3%82%93%E3%81%86%E3%81%95%E3%81%8E-266713696-2000.flac')
 end)
 end,
 },{"lovely",
 function() runAsyncTask(function() 
  提示("正在播放:lovely")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/zpBROSm8_lovely-Billie_Eilish_Khalid-41209455-2000.flac?attname=lovely-Billie_Eilish_Khalid-41209455-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/zpBROSm8_lovely-Billie_Eilish_Khalid-41209455-2000.flac?attname=lovely-Billie_Eilish_Khalid-41209455-2000.flac')
 end)
 end,
 },{"Savage-Bahari",
 function() runAsyncTask(function() 
  提示("正在播放:Savage-Bahari")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/YH3iqm0u_Savage-Bahari-145232697-2000.flac?attname=Savage-Bahari-145232697-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/YH3iqm0u_Savage-Bahari-145232697-2000.flac?attname=Savage-Bahari-145232697-2000.flac')
 end)
 end,
 },{"Towards the Light",
 function() runAsyncTask(function() 
  提示("正在播放:Towards the Light")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/VGLaskQU_Towards_the_Light-Jacoo-155378832-2000.flac?attname=Towards_the_Light-Jacoo-155378832-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/VGLaskQU_Towards_the_Light-Jacoo-155378832-2000.flac?attname=Towards_the_Light-Jacoo-155378832-2000.flac')
 end)
 end,
 },{"End (Interlude)",
 function() runAsyncTask(function() 
  提示("正在播放:End (Interlude)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/V09glivF_End_(Interlude)-Sadako-160055990-192.ogg?attname=End_%28Interlude%29-Sadako-160055990-192.ogg')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/V09glivF_End_(Interlude)-Sadako-160055990-192.ogg?attname=End_%28Interlude%29-Sadako-160055990-192.ogg')
 end)
 end,
 },{"LOW (PHONK)",
 function() runAsyncTask(function() 
  提示("正在播放:LOW (PHONK)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/03/21/zjsBjK9A_LOW_%28PHONK%29-%E8%80%B3%E6%9C%B5%E8%B6%85%E5%B8%82-441796380-2000.flac?attname=LOW_%28PHONK%29-%E8%80%B3%E6%9C%B5%E8%B6%85%E5%B8%82-441796380-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/03/21/zjsBjK9A_LOW_%28PHONK%29-%E8%80%B3%E6%9C%B5%E8%B6%85%E5%B8%82-441796380-2000.flac?attname=LOW_%28PHONK%29-%E8%80%B3%E6%9C%B5%E8%B6%85%E5%B8%82-441796380-2000.flac')
 end)
 end,
 },{"天真的橡皮 (DJ版)",
 function() runAsyncTask(function() 
  提示("正在播放:天真的橡皮 (DJ版)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/04/20/oCJLSwfP_%E5%A4%A9%E7%9C%9F%E7%9A%84%E6%A9%A1%E7%9A%AE_%28DJ%E7%89%88%29-%E7%99%BD%E6%B0%B4%E5%AF%92-366417693-100.ogg?attname=%E5%A4%A9%E7%9C%9F%E7%9A%84%E6%A9%A1%E7%9A%AE_%28DJ%E7%89%88%29-%E7%99%BD%E6%B0%B4%E5%AF%92-366417693-100.ogg')
+toggleMusic('http://oss2.e-43.com/uploads/2025/04/20/oCJLSwfP_%E5%A4%A9%E7%9C%9F%E7%9A%84%E6%A9%A1%E7%9A%AE_%28DJ%E7%89%88%29-%E7%99%BD%E6%B0%B4%E5%AF%92-366417693-100.ogg?attname=%E5%A4%A9%E7%9C%9F%E7%9A%84%E6%A9%A1%E7%9A%AE_%28DJ%E7%89%88%29-%E7%99%BD%E6%B0%B4%E5%AF%92-366417693-100.ogg')
 end)
 end,
 },{"未闻花名",
 function() runAsyncTask(function() 
  提示("正在播放:未闻花名")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/03/3mdJCfMU_secret_base_%EF%BD%9E%E5%90%9B%E3%81%8C%E3%81%8F%E3%82%8C%E3%81%9F%E3%82%82%E3%81%AE%EF%BD%9E_%2810_years_after_Ver_%29-%E8%8C%85%E9%87%8E%E6%84%9B%E8%A1%A3_%E6%88%B8%E6%9D%BE%E9%81%A5_%E6%97%A9%E8%A6%8B%E6%B2%99%E7%B9%94-169738803-2000.flac?attname=secret_base_%EF%BD%9E%E5%90%9B%E3%81%8C%E3%81%8F%E3%82%8C%E3%81%9F%E3%82%82%E3%81%AE%EF%BD%9E_%2810_years_after_Ver_%29-%E8%8C%85%E9%87%8E%E6%84%9B%E8%A1%A3_%E6%88%B8%E6%9D%BE%E9%81%A5_%E6%97%A9%E8%A6%8B%E6%B2%99%E7%B9%94-169738803-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/03/3mdJCfMU_secret_base_%EF%BD%9E%E5%90%9B%E3%81%8C%E3%81%8F%E3%82%8C%E3%81%9F%E3%82%82%E3%81%AE%EF%BD%9E_%2810_years_after_Ver_%29-%E8%8C%85%E9%87%8E%E6%84%9B%E8%A1%A3_%E6%88%B8%E6%9D%BE%E9%81%A5_%E6%97%A9%E8%A6%8B%E6%B2%99%E7%B9%94-169738803-2000.flac?attname=secret_base_%EF%BD%9E%E5%90%9B%E3%81%8C%E3%81%8F%E3%82%8C%E3%81%9F%E3%82%82%E3%81%AE%EF%BD%9E_%2810_years_after_Ver_%29-%E8%8C%85%E9%87%8E%E6%84%9B%E8%A1%A3_%E6%88%B8%E6%9D%BE%E9%81%A5_%E6%97%A9%E8%A6%8B%E6%B2%99%E7%B9%94-169738803-2000.flac')
 end)
 end,
 },{"知我(剑来)/伴奏",
 function() runAsyncTask(function() 
  提示("正在播放:知我(剑来)/伴奏")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/20/xWxtwMOu_%E5%9B%BD%E9%A3%8E%E5%A0%82%20%E5%93%A6%E6%BC%8F%20-%20%E7%9F%A5%E6%88%91_%E5%90%88%E5%B9%B6.wav?attname=%E5%9B%BD%E9%A3%8E%E5%A0%82%20%E5%93%A6%E6%BC%8F%20-%20%E7%9F%A5%E6%88%91_%E5%90%88%E5%B9%B6.wav')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/20/xWxtwMOu_%E5%9B%BD%E9%A3%8E%E5%A0%82%20%E5%93%A6%E6%BC%8F%20-%20%E7%9F%A5%E6%88%91_%E5%90%88%E5%B9%B6.wav?attname=%E5%9B%BD%E9%A3%8E%E5%A0%82%20%E5%93%A6%E6%BC%8F%20-%20%E7%9F%A5%E6%88%91_%E5%90%88%E5%B9%B6.wav')
 end)
 end,
 },{"バケモノの唄(Inst.)",
 function() runAsyncTask(function() 
  提示("正在播放:バケモノの唄(Inst.)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/10/2upPNPe2_%E3%83%90%E3%82%B1%E3%83%A2%E3%83%8E%E3%81%AE%E5%94%84_%28Inst_%29-shino-273294608-2000.flac?attname=%E3%83%90%E3%82%B1%E3%83%A2%E3%83%8E%E3%81%AE%E5%94%84_%28Inst_%29-shino-273294608-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/10/2upPNPe2_%E3%83%90%E3%82%B1%E3%83%A2%E3%83%8E%E3%81%AE%E5%94%84_%28Inst_%29-shino-273294608-2000.flac?attname=%E3%83%90%E3%82%B1%E3%83%A2%E3%83%8E%E3%81%AE%E5%94%84_%28Inst_%29-shino-273294608-2000.flac')
 end)
 end,
 },{"Untitled Slowed",
 function() runAsyncTask(function() 
  提示("正在播放:Untitled Slowed")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/17/nXUhaONK_Untitled_Slowed-CaugarLion-293840956-2000.flac?attname=Untitled_Slowed-CaugarLion-293840956-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/17/nXUhaONK_Untitled_Slowed-CaugarLion-293840956-2000.flac?attname=Untitled_Slowed-CaugarLion-293840956-2000.flac')
 end)
 end,
 },{"Baby, Don't Cry(人鱼的眼泪)",
 function() runAsyncTask(function() 
  提示("正在播放:Baby, Don't Cry(人鱼的眼泪)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/17/mACRjn5m_Baby_Don%27t_Cry_%28%E4%BA%BA%E9%B1%BC%E7%9A%84%E7%9C%BC%E6%B3%AA%29-EXO-10494677-2000.flac?attname=Baby_Don%27t_Cry_%28%E4%BA%BA%E9%B1%BC%E7%9A%84%E7%9C%BC%E6%B3%AA%29-EXO-10494677-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/17/mACRjn5m_Baby_Don%27t_Cry_%28%E4%BA%BA%E9%B1%BC%E7%9A%84%E7%9C%BC%E6%B3%AA%29-EXO-10494677-2000.flac?attname=Baby_Don%27t_Cry_%28%E4%BA%BA%E9%B1%BC%E7%9A%84%E7%9C%BC%E6%B3%AA%29-EXO-10494677-2000.flac')
 end)
 end,
 },{"Baby, Don't Cry(非原伴奏)",
 function() runAsyncTask(function() 
  提示("正在播放:Baby, Don't Cry(非原伴奏)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/17/S4HFyt7z_Baby_don%27t_Cry_%28%E4%BC%B4%E5%A5%8F%29-%E5%92%A9%E5%92%A9%E4%BE%9D-396657213-320.mp3?attname=Baby_don%27t_Cry_%28%E4%BC%B4%E5%A5%8F%29-%E5%92%A9%E5%92%A9%E4%BE%9D-396657213-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/17/S4HFyt7z_Baby_don%27t_Cry_%28%E4%BC%B4%E5%A5%8F%29-%E5%92%A9%E5%92%A9%E4%BE%9D-396657213-320.mp3?attname=Baby_don%27t_Cry_%28%E4%BC%B4%E5%A5%8F%29-%E5%92%A9%E5%92%A9%E4%BE%9D-396657213-320.mp3')
 end)
 end,
 },{"Rise进行曲",
 function() runAsyncTask(function() 
  提示("正在播放:Rise进行曲")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/23/erQgAiyn_Rise%E8%BF%9B%E8%A1%8C%E6%9B%B2-DJ%E5%95%8A%E6%99%BA-456292464-2000.flac?attname=Rise%E8%BF%9B%E8%A1%8C%E6%9B%B2-DJ%E5%95%8A%E6%99%BA-456292464-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/23/erQgAiyn_Rise%E8%BF%9B%E8%A1%8C%E6%9B%B2-DJ%E5%95%8A%E6%99%BA-456292464-2000.flac?attname=Rise%E8%BF%9B%E8%A1%8C%E6%9B%B2-DJ%E5%95%8A%E6%99%BA-456292464-2000.flac')
 end)
 end,
 },{"Savage (bitmastr remix)",
 function() runAsyncTask(function() 
  提示("正在播放:Savage (bitmastr remix)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/05/23/TRsFQdBv_Savage_(bitmastr_remix)-Bahari-153921378-2000.flac?attname=Savage_%28bitmastr_remix%29-Bahari-153921378-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/05/23/TRsFQdBv_Savage_(bitmastr_remix)-Bahari-153921378-2000.flac?attname=Savage_%28bitmastr_remix%29-Bahari-153921378-2000.flac')
 end)
 end,
 },{"不愿回头",
 function() runAsyncTask(function() 
  提示("正在播放:不愿回头")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/06/01/mvk93wb7_%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-7185615-2000.flac?attname=%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-7185615-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/06/01/mvk93wb7_%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-7185615-2000.flac?attname=%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-7185615-2000.flac')
 end)
 end,
 },{"不愿回头(原版伴奏)",
 function() runAsyncTask(function() 
  提示("正在播放:不愿回头(原版伴奏)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/06/01/OMES5bza_%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4_%28%E5%8E%9F%E7%89%88%E4%BC%B4%E5%A5%8F%29-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-77405784-2000.flac?attname=%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4_%28%E5%8E%9F%E7%89%88%E4%BC%B4%E5%A5%8F%29-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-77405784-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/06/01/OMES5bza_%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4_%28%E5%8E%9F%E7%89%88%E4%BC%B4%E5%A5%8F%29-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-77405784-2000.flac?attname=%E4%B8%8D%E6%84%BF%E5%9B%9E%E5%A4%B4_%28%E5%8E%9F%E7%89%88%E4%BC%B4%E5%A5%8F%29-%E5%8D%97%E5%BE%81%E5%8C%97%E6%88%98NZBZ-77405784-2000.flac')
 end)
 end,
 },{"東京上空",
 function() runAsyncTask(function() 
  提示("正在播放:東京上空")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/n7oKJZ28_%E6%9D%B1%E4%BA%AC%E4%B8%8A%E7%A9%BA-RADWIMPS-246876791-2000.flac?attname=%E6%9D%B1%E4%BA%AC%E4%B8%8A%E7%A9%BA-RADWIMPS-246876791-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/n7oKJZ28_%E6%9D%B1%E4%BA%AC%E4%B8%8A%E7%A9%BA-RADWIMPS-246876791-2000.flac?attname=%E6%9D%B1%E4%BA%AC%E4%B8%8A%E7%A9%BA-RADWIMPS-246876791-2000.flac')
 end)
 end,
 },{"PASSO BEM SOLTO",
 function() runAsyncTask(function() 
  提示("正在播放:PASSO BEM SOLTO")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/w8Pm8tq8_PASSO%20BEM%20SOLTO-Atlxs&Emirhxn.mp3?attname=PASSO%20BEM%20SOLTO-Atlxs&Emirhxn.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/w8Pm8tq8_PASSO%20BEM%20SOLTO-Atlxs&Emirhxn.mp3?attname=PASSO%20BEM%20SOLTO-Atlxs&Emirhxn.mp3')
 end)
 end,
 },{"Crucified",
 function() runAsyncTask(function() 
  提示("正在播放:Crucified")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/mmjpIIPD_Crucified-Army_Of_Lovers-2498871-128.mp3?attname=Crucified-Army_Of_Lovers-2498871-128.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/mmjpIIPD_Crucified-Army_Of_Lovers-2498871-128.mp3?attname=Crucified-Army_Of_Lovers-2498871-128.mp3')
 end)
 end,
 },{"Automotivo Bayside 2.0",
 function() runAsyncTask(function() 
  提示("正在播放:Automotivo Bayside 2.0")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/Ai64ewcH_Automotivo_Bayside_2_0-TOKYOPHILE-341654537-2000.flac?attname=Automotivo_Bayside_2_0-TOKYOPHILE-341654537-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/Ai64ewcH_Automotivo_Bayside_2_0-TOKYOPHILE-341654537-2000.flac?attname=Automotivo_Bayside_2_0-TOKYOPHILE-341654537-2000.flac')
 end)
 end,
 },{"Eu Sento Gabu (BGM)",
 function() runAsyncTask(function() 
  提示("正在播放:Eu Sento Gabu (BGM)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/nY6ygI2O_Eu_Sento_Gabu_(BGM)-Don81-415392114-320.mp3?attname=Eu_Sento_Gabu_%28BGM%29-Don81-415392114-320.mp3')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/nY6ygI2O_Eu_Sento_Gabu_(BGM)-Don81-415392114-320.mp3?attname=Eu_Sento_Gabu_%28BGM%29-Don81-415392114-320.mp3')
 end)
 end,
 },{"SPACE!",
 function() runAsyncTask(function() 
  提示("正在播放:SPACE!")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/zp8LzM6d_SPACE_-NAOMI-365676628-2000.flac?attname=SPACE_-NAOMI-365676628-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/zp8LzM6d_SPACE_-NAOMI-365676628-2000.flac?attname=SPACE_-NAOMI-365676628-2000.flac')
 end)
 end,
 },{"Hi",
 function() runAsyncTask(function() 
  提示("正在播放:Hi")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/9fmZOb3f_Hi-TEMPOREX-452670062-2000.flac?attname=Hi-TEMPOREX-452670062-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/9fmZOb3f_Hi-TEMPOREX-452670062-2000.flac?attname=Hi-TEMPOREX-452670062-2000.flac')
 end)
 end,
 },{"Six Forty Seven",
 function() runAsyncTask(function() 
  提示("正在播放:Six Forty Seven")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/07/31/sh9l27Xt_Six_Forty_Seven-Instupendo-168236786-2000.flac?attname=Six_Forty_Seven-Instupendo-168236786-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/07/31/sh9l27Xt_Six_Forty_Seven-Instupendo-168236786-2000.flac?attname=Six_Forty_Seven-Instupendo-168236786-2000.flac')
 end)
 end,
 },{"track1",
 function() runAsyncTask(function() 
  提示("正在播放:track1")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/08/08/yqxyWndo_track1-%E9%93%83%E6%9C%A8%E5%B7%9D-452520290-2000.flac?attname=track1-%E9%93%83%E6%9C%A8%E5%B7%9D-452520290-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/08/08/yqxyWndo_track1-%E9%93%83%E6%9C%A8%E5%B7%9D-452520290-2000.flac?attname=track1-%E9%93%83%E6%9C%A8%E5%B7%9D-452520290-2000.flac')
 end)
 end,
 },{"hypnotic (super slowed)",
 function() runAsyncTask(function() 
  提示("正在播放:hypnotic (super slowed)")
-gg.playMusic('http://oss2.e-43.com/uploads/2025/08/08/rlTq90bf_hypnotic_(super_slowed)-ISQ-377641456-2000.flac?attname=hypnotic_%28super_slowed%29-ISQ-377641456-2000.flac')
+toggleMusic('http://oss2.e-43.com/uploads/2025/08/08/rlTq90bf_hypnotic_(super_slowed)-ISQ-377641456-2000.flac?attname=hypnotic_%28super_slowed%29-ISQ-377641456-2000.flac')
 end)
 end,
 }
 }),
-
 }),
-RG.button("停止播放音乐",
+RG.button("(暂停/继续)播放音乐",
 function() runAsyncTask(function() 
-提示("正在停止播放...")
-for i=1,100 do
-gg.playMusic("stop")
-gg.playMusic("stop")
-gg.playMusic("stop")
-gg.playMusic("stop")
-gg.playMusic("stop")
-gg.playMusic("stop")
-end
-提示("已停止播放")
-end)
-end
+    togglePause()
+end) end
+),
+RG.button("(停止)播放音乐",
+function() runAsyncTask(function() 
+    stopMusic()
+end) end
 ),
 RG.line(),
 RG.box({"闪退功能",---box示例 可以删掉
@@ -28592,6 +28992,9 @@ RG.switch("坐标类自动初始化", coord_off, coord_on),
 RG.line(),
 RG.check({ "关闭/启用" }),
 RG.switch("切换非冻结时自动清除冻结", clearfreeze_off, clearfreeze_on),
+RG.line(),
+RG.check({ "false/true" }),
+RG.switch("坐标异常回溯时冻结坐标", pullFreeze_off, pullFreeze_on),
 RG.line(),
 RG.check({ "启用/关闭" }),
 RG.switch("启动时自动开启上次的选项", auto_off, auto_on),
