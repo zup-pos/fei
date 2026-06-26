@@ -2491,6 +2491,7 @@ end
 firadio[#firadio+1]=radios
 return luajava.loadlayout(firadio)
 end
+
 function newcheck(radio)
 firadio={LinearLayout,layout_width = 'match_parent',layout_height = "match_parent",orientation="vertical"}
 if type(radio[1])=="string" or type(radio[1])=="number"  then
@@ -3207,6 +3208,95 @@ return {
 end
 
 
+
+local mediaPlayer = nil
+local currentUrl = nil
+
+local function releasePlayer()
+    if mediaPlayer then
+        mediaPlayer:stop()
+        mediaPlayer:release()
+        mediaPlayer = nil
+        currentUrl = nil
+    end
+end
+
+local function playNewMusic(url)
+    if url == currentUrl then return end
+    releasePlayer()
+    currentUrl = url
+
+    mediaPlayer = luajava.newInstance("android.media.MediaPlayer")
+    mediaPlayer:setDataSource(url)
+
+    local listener = luajava.createProxy("android.media.MediaPlayer$OnPreparedListener", {
+        onPrepared = function(mp)
+            mp:start()
+            提示("▶ 播放中")
+        end
+    })
+    mediaPlayer:setOnPreparedListener(listener)
+    mediaPlayer:prepareAsync()
+end
+
+function toggleMusic(url)
+    if url ~= currentUrl then
+        playNewMusic(url)
+        return
+    end
+
+    if mediaPlayer and mediaPlayer:isPlaying() then
+        mediaPlayer:pause()
+        提示("⏸ 已暂停")
+    else
+        if mediaPlayer then
+            mediaPlayer:start()
+            提示("▶ 继续播放")
+        else
+            playNewMusic(url)
+        end
+    end
+end
+
+function togglePause()
+    if not mediaPlayer then
+        提示("没有正在播放的音乐")
+        return
+    end
+
+    if mediaPlayer:isPlaying() then
+        mediaPlayer:pause()
+        提示("⏸ 已暂停")
+    else
+        mediaPlayer:start()
+        提示("▶ 继续播放")
+    end
+end
+
+function stopMusic()
+    if mediaPlayer then
+        mediaPlayer:stop()
+        mediaPlayer:release()
+        mediaPlayer = nil
+        currentUrl = nil
+        提示("⏹ 已停止播放")
+    else
+        提示("没有正在播放的音乐")
+    end
+end
+
+function getMusicStatus()
+    if mediaPlayer and mediaPlayer:isPlaying() then
+        return "▶ 播放中"
+    elseif mediaPlayer then
+        return "⏸ 已暂停"
+    else
+        return "⏹ 未播放"
+    end
+end
+
+
+
 local windowManager = require('windowManager')
 local LayoutParams = luajava.bindClass('android.view.WindowManager$LayoutParams')
 
@@ -3235,7 +3325,7 @@ genshinbg=luajava.loadlayout({
 	},
 })
 windowManager:addView(genshinbg)
-gg.playMusic("/sdcard/长安/图片/genshinmp3")
+toggleMusic("/sdcard/长安/图片/genshinmp3")
 gg.sleep(1)
 luajava.runUiThread(function() 
 	yuanshen:setVisibility(View.VISIBLE)
@@ -3653,18 +3743,18 @@ AS.switchFuncs["拾取范围冻结切换"] = { on = pickup_on, off = pickup_off,
 
 function coord_applyOn()
     pcall(function()
-        local last, cd = 0, 10
+        local czjs, cd = 0, 10
         function HE()
             local now = os.time()
-            if now - last < cd then
-                last = now
+            if now - czjs < cd then
+                czjs = now
                 提示("重复触发，冷却重置")
                 return
             end
             clearLastRecord()
             startRecording()
             提示("已执行坐标初始化记录")
-            last = now
+            czjs = now
         end
     end)
 end
@@ -4135,91 +4225,7 @@ end
 
 
 
-local mediaPlayer = nil
-local currentUrl = nil
 
-local function releasePlayer()
-    if mediaPlayer then
-        mediaPlayer:stop()
-        mediaPlayer:release()
-        mediaPlayer = nil
-        currentUrl = nil
-    end
-end
-
-local function playNewMusic(url)
-    if url == currentUrl then return end
-    releasePlayer()
-    currentUrl = url
-
-    mediaPlayer = luajava.newInstance("android.media.MediaPlayer")
-    mediaPlayer:setDataSource(url)
-
-    local listener = luajava.createProxy("android.media.MediaPlayer$OnPreparedListener", {
-        onPrepared = function(mp)
-            mp:start()
-            提示("▶ 播放中")
-        end
-    })
-    mediaPlayer:setOnPreparedListener(listener)
-    mediaPlayer:prepareAsync()
-end
-
-function toggleMusic(url)
-    if url ~= currentUrl then
-        playNewMusic(url)
-        return
-    end
-
-    if mediaPlayer and mediaPlayer:isPlaying() then
-        mediaPlayer:pause()
-        提示("⏸ 已暂停")
-    else
-        if mediaPlayer then
-            mediaPlayer:start()
-            提示("▶ 继续播放")
-        else
-            playNewMusic(url)
-        end
-    end
-end
-
-function togglePause()
-    if not mediaPlayer then
-        提示("没有正在播放的音乐")
-        return
-    end
-
-    if mediaPlayer:isPlaying() then
-        mediaPlayer:pause()
-        提示("⏸ 已暂停")
-    else
-        mediaPlayer:start()
-        提示("▶ 继续播放")
-    end
-end
-
-function stopMusic()
-    if mediaPlayer then
-        mediaPlayer:stop()
-        mediaPlayer:release()
-        mediaPlayer = nil
-        currentUrl = nil
-        提示("⏹ 已停止播放")
-    else
-        提示("没有正在播放的音乐")
-    end
-end
-
-function getMusicStatus()
-    if mediaPlayer and mediaPlayer:isPlaying() then
-        return "▶ 播放中"
-    elseif mediaPlayer then
-        return "⏸ 已暂停"
-    else
-        return "⏹ 未播放"
-    end
-end
 
 
 
@@ -8362,9 +8368,9 @@ end
 local function moveDownSelected(t, selectedIndices)
     if #selectedIndices == 0 then return end
     table.sort(selectedIndices)
-    local last = selectedIndices[#selectedIndices]
+    local mksj = selectedIndices[#selectedIndices]
     local hasAfter = false
-    for i = last + 1, #t do
+    for i = mksj + 1, #t do
         local isSelected = false
         for _, idx in ipairs(selectedIndices) do
             if idx == i then isSelected = true break end
@@ -8387,9 +8393,9 @@ local function moveDownSelected(t, selectedIndices)
 
     local beforeCount = 0
     for _, idx in ipairs(selectedIndices) do
-        if idx < last then beforeCount = beforeCount + 1 end
+        if idx < mksj then beforeCount = beforeCount + 1 end
     end
-    local insertPos = last - beforeCount + 1
+    local insertPos = mksj - beforeCount + 1
     for i, v in ipairs(values) do
         table.insert(t, insertPos + i - 1, v)
     end
@@ -11431,7 +11437,7 @@ function 爬墙()
 gg.sleep(300)
 search(17039360,4,neicun)
 py1(65792,4,56)
-xg1(900,16,-8,true)
+xg3(900,16,-8,true,true)
 end
 
 cachedZuanDiAddrs = nil
@@ -12041,6 +12047,11 @@ function 停止发包开()
     gg.clearResults()
     gg.searchNumber("-2.01750163e20", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
     local results = gg.getResults(500)
+    if #results == 0 then
+        gg.clearResults()
+        提示("未找到主特征码")
+        return
+    end
     for i, v in ipairs(results) do
         v.address = v.address - (is64 and 8 or 4)
     end
@@ -12048,13 +12059,23 @@ function 停止发包开()
     
     gg.refineNumber("1.40129846e-44", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
     local results2 = gg.getResults(500)
+    if #results2 == 0 then
+        gg.clearResults()
+        提示("未找到副特征码")
+        return
+    end
     for i, v in ipairs(results2) do
         v.address = v.address + (is64 and 20 or 12)
     end
     gg.loadResults(results2)
-    gg.editAll("946767.125", gg.TYPE_FLOAT)
-    gg.clearResults()
-    提示("已开启停止发包")
+    if gg.getResultCount() > 0 then
+        gg.editAll("946767.125", gg.TYPE_FLOAT)
+        gg.clearResults()
+        提示("已开启停止发包")
+    else
+        gg.clearResults()
+        提示("未找到最终目标")
+    end
 end
 
 function 停止发包关()
@@ -12064,6 +12085,11 @@ function 停止发包关()
     gg.clearResults()
     gg.searchNumber("-2.01750163e20", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
     local results = gg.getResults(500)
+    if #results == 0 then
+        gg.clearResults()
+        提示("未找到主特征码")
+        return
+    end
     for i, v in ipairs(results) do
         v.address = v.address - (is64 and 8 or 4)
     end
@@ -12071,13 +12097,23 @@ function 停止发包关()
     
     gg.refineNumber("1.40129846e-44", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
     local results2 = gg.getResults(500)
+    if #results2 == 0 then
+        gg.clearResults()
+        提示("未找到副特征码")
+        return
+    end
     for i, v in ipairs(results2) do
         v.address = v.address + (is64 and 20 or 12)
     end
     gg.loadResults(results2)
-    gg.editAll("4.51408149e27", gg.TYPE_FLOAT)
-    gg.clearResults()
-    提示("已关闭停止发包")
+    if gg.getResultCount() > 0 then
+        gg.editAll("4.51408149e27", gg.TYPE_FLOAT)
+        gg.clearResults()
+        提示("已关闭停止发包")
+    else
+        gg.clearResults()
+        提示("未找到最终目标")
+    end
 end
 
 function 核心加速开()
@@ -12279,6 +12315,65 @@ xg1(3, 64, -4, false)
 snsj = nil
 end
 
+hxtycdsj = nil
+function 萌新CD开()
+if not hxtycdsj or #hxtycdsj == 0 then
+search("5.6e-322;3", 64, 4)
+gs1(3, 64)
+hxtycdsj = sj
+else
+sj = hxtycdsj
+end
+xg3(0.01, 64, 0, false, true, "自定义萌新CD")
+end
+
+qjjssj = nil
+qjjs = nil
+function 全局加速开()
+if not qjjssj or #qjjssj == 0 then
+search(500,16,gg.REGION_CODE_APP)
+qjjssj = gg.getResults(200)
+else
+sj = qjjssj
+end
+xg3("-99999999114514",16,0,false,true)
+qjjs = last
+end
+
+function 全局加速关()
+if not qjjssj or #qjjssj == 0 then
+search(qjjs,16,gg.REGION_CODE_APP)
+qjjssj = gg.getResults(200)
+else
+sj = qjjssj
+end
+xg1(500,16,0,false)
+qjjssj = nil
+end
+
+bszmpsj = nil
+bszmp = nil
+function 仿gg变速自瞄炮开()
+if not bszmpsj or #bszmpsj == 0 then
+search(500,16,gg.REGION_CODE_APP)
+bszmpsj = gg.getResults(200)
+else
+sj = bszmpsj
+end
+xg3("-9999999999929194514",16,0,false,true)
+bszmp = qjjs
+end
+
+function 仿gg变速自瞄炮关()
+if not bszmpsj or #bszmpsj == 0 then
+search(bszmp,16,gg.REGION_CODE_APP)
+bszmpsj = gg.getResults(200)
+else
+sj = bszmpsj
+end
+xg1(500,16,0,false)
+bszmpsj = nil
+end
 
 hxtycdsj = nil
 function 萌新CD开()
@@ -13821,37 +13916,11 @@ end
 创建开关页面("全局加速",
 function()
 HK()
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-提示("开启失败")
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-99999999114514", FLOAT)
-提示("开启成功")
-gg.clearResults()
-end
+全局加速开()
 end,
 function()
 HK()
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-99999999114514", FLOAT)
-gg.clearResults()
-end
-gg.clearResults()
-gg.searchNumber("-99999999114514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("500", FLOAT)
-提示("恢复")
-gg.clearResults()
+全局加速关()
 end
 )
 
@@ -17486,29 +17555,13 @@ RG.buts({
 {"全局加速" ,
 function() enqueueTask(function()
 HK()
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-提示("开启失败")
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-99999999114514", FLOAT)
-提示("开启成功")
-gg.clearResults()
-end
+全局加速开()
 end) end
 },
 {"恢复全局" ,
 function() enqueueTask(function()
 HK()
-gg.clearResults()
-gg.searchNumber("-99999999114514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("500", FLOAT)
-提示("恢复")
-gg.clearResults()
+全局加速关()
 end) end
 },
 }),
@@ -17518,9 +17571,7 @@ RG.check({"天线",}),
 RG.box({"天线功能",---box示例 可以删掉
 RG.button("添加模块天线",
 function() enqueueTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(gg.REGION_VIDEO)
 gg.searchNumber("-5", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -17528,20 +17579,15 @@ if gg.getResultCount() == 0 then
 提示("开启失败")
 else
 gg.searchNumber("-5",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-
 gg.editAll("114514", FLOAT)
 gg.clearResults()
 提示("开启成功")
 end
- 
-
 --添加模块天线")
 end) end),
 RG.button("关闭模块天线",
 function() enqueueTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(gg.REGION_VIDEO)
 gg.searchNumber("114514", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -17553,15 +17599,11 @@ gg.searchNumber("114514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
 gg.editAll("-5", FLOAT)
 gg.clearResults()
 end
- 
-
 --关闭模块天线")
 end) end),
 RG.button("添加特殊天线",
 function() enqueueTask(function()
-
 HK()
-
 search(-943501312,4,neicun)
 py1(2,4,-436)
 py1(-257,4,-432)
@@ -17575,16 +17617,11 @@ py1(1203982336,4,8)
 py1(1203982336,4,12)
 py1(112,4,556)
 xg1(114514,16,-480,true)
-
- 
-
 --添加特殊天线")
 end) end),
 RG.button("添加萌新天线",
 function() enqueueTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(neicun)
 gg.searchNumber("0.65025615692", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -17592,15 +17629,11 @@ gg.getResults(100)
 gg.editAll("99.64384", gg.TYPE_FLOAT)
 提示("开启")
 gg.clearResults()
- 
-
 --添加萌新天线")
 end) end),
 RG.button("关闭萌新天线",
 function() enqueueTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(neicun)
 gg.searchNumber("99.64384", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -17673,11 +17706,9 @@ RG.line(),
 RG.box({"获取他人坐标",
 RG.button("初始化他人坐标",
 function() luajava.newThread(function()
-
 HK()
-  
 提示("正在初始化")       
-    editData(
+editData(
 {
 {["memory"] = neicun},
 {["name"] = "找敌"},
@@ -17688,7 +17719,6 @@ HK()
 {["value"] = 1145141919,["offset"] =-0x30, ["type"] = D,["freeze"] = false},
 }
 )
-
 gg.clearResults()
 gg.setRanges(neicun)
 --检查遗留数据(敌人)
@@ -21428,35 +21458,13 @@ end) end,
 RG.box({"仿gg变速自瞄炮(不是灵体)",---box示例 可以删掉
  RG.button("开启",
 function() enqueueTask(function()
-
 HK()
- 
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-提示("开启失败")
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-9999999999929194514", FLOAT)
-提示("开启成功")
-gg.clearResults()
-end
- 
-
-
+仿gg变速自瞄炮开()
 end) end),
 RG.button("关闭",
 function() enqueueTask(function()
-
 HK()
- 
-gg.searchNumber("-9999999999929194514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("500", FLOAT)
-提示("恢复成功")
-gg.clearResults()
+仿gg变速自瞄炮关()
 end) end),
 }),
 RG.box({"改装类", 
@@ -24598,9 +24606,7 @@ RG.line(),
 RG.box({"天线功能",---box示例 可以删掉
 RG.switch("添加模块天线",
 function() runAsyncTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(gg.REGION_VIDEO)
 gg.searchNumber("-5", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -24614,9 +24620,7 @@ gg.clearResults()
 end
 end) end,
 function() runAsyncTask(function()
-
 HK()
-
 gg.clearResults()
 gg.setRanges(gg.REGION_VIDEO)
 gg.searchNumber("114514", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -24631,9 +24635,7 @@ end
 end) end),
 RG.button("添加特殊天线",
 function() enqueueTask(function()
-
 HK()
-
 search(-943501312,4,neicun)
 py1(2,4,-436)
 py1(-257,4,-432)
@@ -24647,14 +24649,11 @@ py1(1203982336,4,8)
 py1(1203982336,4,12)
 py1(112,4,556)
 xg1(114514,16,-480,true)
- 
  --添加特殊天线")
 end) end),
 RG.switch("添加萌新天线",
 function() runAsyncTask(function()
-
 HK()
-
 gg.clearResults()
  gg.setRanges(neicun)
  gg.searchNumber("0.65025615692", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
@@ -24664,121 +24663,73 @@ gg.clearResults()
  gg.clearResults()
 end) end,
 function() runAsyncTask(function()
-
 HK()
-
 gg.clearResults()
- gg.setRanges(neicun)
- gg.searchNumber("99.64384", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
- gg.getResults(100)
- gg.editAll("0.65025615692", gg.TYPE_FLOAT)
- 提示("关闭")
- gg.clearResults()
+gg.setRanges(neicun)
+gg.searchNumber("99.64384", gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
+gg.getResults(100)
+gg.editAll("0.65025615692", gg.TYPE_FLOAT)
+提示("关闭")
+gg.clearResults()
 end) end),
 }), 
 RG.box({"设置速度显示数值",---box示例 可以删掉
-
 RG.button("100000000",
 function() enqueueTask(function()
 
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(100000000,16,4,true)
-
- 
-
-
 end) end), 
-
 RG.button("10",
 function() enqueueTask(function()
-
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(10,16,4,true)
-
- 
-
-
 end) end),
-
- RG.button("3",
+RG.button("3",
 function() enqueueTask(function()
-
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(3,16,4,true)
-
- 
-
-
 end) end),
-
-
 RG.button("-3",
 function() enqueueTask(function()
-
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(-3,16,4,true)
-
- 
-
-
 end) end),
 RG.button("0",
 function() enqueueTask(function()
-
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(0,16,4,true)
-
- 
-
-
 end) end),
-
 RG.button("恢复",
 function() enqueueTask(function()
-
 HK()
-
 search(1889785610,4,neicun)
 py1(1889785610,4,-24)
 py1(1072693248,4,76)
 xg1(0,16,4,true)
-
- 
-
-
 end) end),
-
-
 }),
 RG.line(),
-
 },{
 RG.check({" 32位功能",}),
 RG.button("#一键变速升空范围#",
 function() enqueueTask(function()
-
 HK()
- 
 search(17039364,4,neicun)
 py1(16777215,4,-40)
 py1(257,4,-36)
@@ -24842,15 +24793,10 @@ local t = {"libclient.so:bss", "Cb"}
 local tt = {0xD81098, 0x724, 0x8, 0x90}
 local ttt = S_Pointer(t, tt)
 gg.setValues({{address = ttt, flags = 16, value = 200}})
-
-
 end) end),
 RG.button("∷恢复变速升空范围∷",
 function() enqueueTask(function()
-
 HK()
- 
-
 gg.sleep(2506)
 gg.setSpeed(1)
 search(17039364,4,neicun)
@@ -24858,63 +24804,11 @@ py1(16777215,4,-40)
 py1(257,4,-36)
 py1(17039364,4,0)
 xg1(4000,16,-8,false)
-
- end) end),
-RG.button("全图毒人Promax(作者独用)",
-function() enqueueTask(function()
-
-HK()
- 
-
-X=[[
-✨此脚本已开启如下功能✨
- Base64编码-[字符保护]————["✨Base64编码已开启✨"]
- Rc4源码加密-[对称保护]———["✨Rc4源码加密已开启✨"]
- Xor源码加密-[排列保护]———["✨Xor源码加密已开启✨"]
- 验证拆卸工具-[防止拆卸]——["✨验证拆卸工具已开启✨"]
- 表情混淆-[防止修复]——————["✨表情混淆已开启✨"]
- 混淆转换-[混淆转换]——————["✨字符转换未开启✨"]
- 源码汇编-[格式代码]——————["✨源码汇编已开启✨"]
- 
- 加密工具:吟霖加密
- 加密强度综合评定: ★★★★☆
- 加密时间:2024年06月22日13:54:48
---注: 加密强度判定条件为开启功能数量 仅供参考
-
-
- ꯭《꯭吟꯭霖꯭风꯭雪꯭》꯭ ꯭作꯭者꯭:꯭興꯭月꯭.꯭
- 
- ꯭ ꯭ ꯭ ꯭ ꯭ ꯭-꯭-꯭ ꯭风꯭雪꯭压꯭我꯭两꯭三꯭年꯭꯭꯭꯭我꯭心꯭早꯭已꯭无꯭怨꯭言꯭.꯭/꯭
- ꯭ ꯭ ꯭ ꯭ ꯭ ꯭-꯭-꯭ ꯭三꯭言꯭两꯭语꯭并꯭我꯭心꯭ ꯭闭꯭口꯭不꯭提꯭是꯭曾꯭经꯭.꯭/꯭
- ꯭ ꯭ ꯭ ꯭ ꯭ ꯭-꯭-꯭ ꯭砥꯭砺꯭坚꯭韧꯭映꯭风꯭雪꯭꯭꯭悲꯭欢꯭离꯭合꯭皆꯭成꯭往꯭.꯭/꯭
- ꯭ ꯭ ꯭ ꯭ ꯭ ꯭-꯭- ꯭待꯭到꯭春꯭风꯭吹꯭又꯭暖꯭꯭꯭绽꯭放꯭笑꯭颜꯭迎꯭朝꯭阳꯭.꯭/꯭
- 
- 
-喵~
-ﾍ^ヽ､　 /⌒､　　_,_
-　 |　　￣7　 (⌒r⌒7/
-　 レ　　　＼_/￣＼_｣
-＿/　　　　　　　 {
-_ﾌ　●　　　　　　　ゝ
-_人　　　ο　　●　 ナ
-　 `ト､＿　　　　　メ
-　　　 /　 ￣ ーィﾞ
-　　 〈ﾟ･｡｡｡･ﾟ 　丶
-
-
-꯭꯭꯭p꯭꯭꯭s꯭꯭꯭.꯭꯭꯭想꯭꯭꯭要꯭꯭꯭留꯭꯭꯭住꯭꯭꯭雪꯭꯭꯭花꯭꯭꯭꯭꯭꯭但꯭꯭꯭在꯭꯭꯭手꯭꯭꯭心꯭꯭꯭里꯭꯭꯭꯭꯭꯭她꯭꯭꯭只꯭꯭꯭会꯭꯭꯭融꯭꯭꯭化꯭꯭꯭的꯭꯭꯭更꯭꯭꯭快꯭꯭.꯭꯭꯭/꯭꯭꯭
-
- ꯭؁꯭F꯭i꯭n꯭a꯭l꯭ ꯭o꯭w꯭n꯭e꯭r꯭ ꯭o꯭f꯭ ꯭C꯭o꯭p꯭y꯭r꯭i꯭g꯭h꯭t꯭ ꯭©꯭ ꯭2꯭0꯭2꯭4꯭ ꯭b꯭y꯭.꯭興꯭꯭月꯭؁꯭
-]]
-loadYunLuaGroup("httpByQnqZUua3tXt02eF9j+eSfhM7u/rb2jvE7kKW2LUU9ri5bx2rZDPBr/lxdpdCKfc/yhKStX1Et/cpykabhu9CWSEtVsbKZrNtU/0lBpbEQ/hro3a2FQMPTE0lrrOkWMBaDzECAow6j/mqBdcUsEzh4Qn93mfyzvjC0NE9Du2lcF+i2ECVOSaZxvyH6wb8JmimHAsQr4CGUD6MDCe6afdVpXeyTbi08GJOnhZ61cPcxLMWsqq4io2Vy5mU6sITgKUBs36D1eY00+NpSbA2DP3eaXOphFwauc9P70dKsF4IY2Fzt3d/rvR/B8ESCH9VlGu5c2CsYirP2TH900umphMjGzsQG2OLVZQN51sGO6WnxwpyitwDRHUEGFo3QHnn3ZUzbEH1/aTTCYuzZzxiX9CYuPzClsi1MpcstwAFylenSHGRo3TRs/7SOXBV9obGzCsgAx1zDRgzGabpqakk3TkW1i49e6+cXNYVb4AGBb3biLktNgXFB3QMlUVWGgpHetsrB9NECKipwp6TfMip58ujhSdYbNiWrfQOJl02Ewqd42il2NJE+P+5ItNzQ+4JLs5HiXCn+yeUALqM+WhEezd9ZtwklvGfczGbEWDzAPks1cWnKvOHzWHixg5zZeiZxGGJiMXYkfOQcKsIBGbzs78o/D+vwcvYCyTy3zbsBCNanrmdF0rRZA3SBNBkcXjmXOmp9yNz6tpcT14WSJOPEgnYsszdlXgG+W4sYZcQdS2HDVZE303DBOO4NYfzU1UZvSMyo2vcOzvRwfHG2XRQJUI1Kup4uYMwQSh4PoXcDfZuc/3OLbz8oPnnF5ju8ZiHgCsa7YXAPew02QC4H2MDuDhJs5fmwKfyj2HHJzWSeq5sqWi9e/aviAIPhg75tzfbpNABakK2JkJjx9Ii/eLU8TvYDubCC2P91qyz+1vznwUzDqzfFdfA86hSO4M864CQeAaiPbpWquOrNL5CevNanKagX73mVGc0lSPHtAgvvmlyzu5yhZQu/JvoKYzC0ukycnV0wtOQzyVVWDKGAt0ZgIW/rpUBYnKgX6ZXxqn9lQ9KM8CyDtrTmo9tBPk3U44Pa1hoKGqhKHsDx5+4CxJ1PkGKO1UHBcYaC43HQzP8BewBH35hCaoNBgaXBWmcosfAdoNbiXYvfwXkppcV2yTDZnXe4dd9KIbdOCJs4AM1qRVxLeC94Or0amsDfUpLkjLg7n1oq6tFxNJP6al2Vdx2OYGDH78A8a8MV5PMx03kk1YMA4LcdMWikJ5JsqSk6sVzDdADCARR819Wixn1GzDzZzQPP8II/QosC0Br08TqsQXBzv0SrBd/Il/omYPHvebHq31Xm5qJ9pKkk1To9Yma2D/44sgsJEdIf0UCY93n0X+EJ/eMOJfDZwxAh1j3RE4W0tDf6pkSeqBI/mGTn6367p45pNE4rjbWr9nkC9oj3uyLvN2RYEVtnAkbWILT6D1jQcwG6rf6k0")
-XYNB("🤗😇😡😌😳😋😅😤😀😒😉😕😚😠😡😃😜😨😏😋😉😲🤗😀😪😖😅😙😟😗😜🙄😐😥😄😉😣😭🤑😢😊🤯😉😳😣🤩😠😄🙄🙂😷😊😰😉😂😡😷😝😀😚😙😶😡😳😇😤🤗🤒😍😁😡🙁😞😩😫😳😶😱😟😳😅😛😶😂😱😲😋🤩😱😃😙😳😞🤩😙😋😏🙄😗😞😌😇🤓🤯😥😡🙄😓😘😭😰😆😌😟😣😉😖😂😗😀😤😔😫😭😀😕☺️😂🤔😣😰😪😎🤑😪😄😝🤨🤨☺️🙃🤨😨😡😪🤨😇😎🤑😠😪🙃😕😲😎😎😳😊😡😫😞😠🤗😙🙃😛😤🤩😋🤯😨😪😝😡😓😡😁😎🤣😉😆🤩😥🤒😘😘😝😜😳🤩😂😪😡😂😚🥵😶🙄😱🤐😜😓😏😆😡🙁😪😗😒🤩😒🤗😲😫🙂😄😲😄😄😄🤔🤐😘😤🤒🤑😱😀😎🤨🙂🤒😄😡😡🤑🥵🤯😒😉😇😄😝😀🤔😪😷😢😐🙄🤑😫😣🙂😏🤔😂☺️😊😫😩😉😊☺️🤨🙁😪😔😌😔😊☺️😚🤩😄😔😢😳😒☺️😜😒😁😩😁😍😏😜😝😙😒😱😜😕🤔🤐😥😱😂🙄😁😋🙃☺️😱😤😣😁🤨😨🤣😁😄🤐😒😥😍😍😱😅😫😟🥵😪😗🤗😤😣🤣😩🙂😢😣😗😢😴😖😨😥😏🤯😤🥵😃😏😴😓😔😝😛😷🤨🤓😥😄🤔🙃🤐😠😔😰😖😗😠🙁😎😭😇😫😖🥵😅😟😚😤😔😃😤😓🤐🤣😠😤🤔😙🤩😭🤑😣😁🥵🙄🤓😂🤨🤒😂😅😉🤣😪🙃😌😪😘🤓😠😁😌😐😠🤨😪🙂😂😓😓🤯😉😳😋😫😒😠😊😞😐😖🤔😩🤒😲🤔😡😪😅😁🙃😏😄😊😞😙😝😪☺️😷😴😚😂🤒😳😤😖🤔🙃😄😚🙁😱😨😫😪🙃😐😠😅🤑😏😭😪☺️😏😃🤓😨😆🙄🤗😆😄😲🤓😋😎😟😎🤐😩😋☺️😉😗🤩😜😐😀😂😢😋😐😉😂☺️😍😀😰🙁😷😜😳😕😗😗😉😃🙄😢😊😔😀😉😠😝😚😍😘🙂😚😉🤨🤒🥵☺️😇😷🤐😚😇😢😆😄😒🤗🤩😍😥😛😶😲😂😴😳😞😞😣😔😇🙃😟🤒😓😠😂🙁🤐🤗🤐😗😟😔😠😲😅🤓🤔😞🙁😁😜😎🤨😜😥😥🙁😩😗🤯😂🙂😣😖😫😚😠😙😨🤑🤒😶😄🤒😍🤩😳😰😂😜😗😕😂😗😜😒😚😝😀😄🙃🤯😂😕😜😂😡😪😨😀😝😅😩😴😖😶😶🤐😟😌🤗😗😏😭🤓😞🤔😳🤗🤐😰🤣🤔😝😣😄😇🤓🤣🤐😒😃🤒😟🙃😨😂😭😊😒😶😂😫😇😋😁😠😨🤔😢🤔😠😒😌🙄😞😐🥵😩😝🤯😨😞😄🤨😘😏😋😟🤯😁🤒😱😠😌😲😱🤯☺️🙄😏😀😔😣😳😁😁😅😭😪😩😟😁🥵😞🤔😠😨😤😇😏🤑🥵🤔🤩😚😖😫🥵😟😙😒😄🤩🤔😟😀😤😫😌😫😜😷😪😍😙🥵😏😳😒😒🤐😠😏😀😌🤯😓😘😃😷😕😷🤗😘😷😱😊🤩😀😍😍😠😐😒😠🙁😋😡😖😜😃🤣😨😟😜😌😗😢😐😜😖😤😆😠😙😚🤣😙😆😶🙄😳😟😶😝🤒😚😫😆🙄😂😓😂😅😚😭😲😁🤗😶😚😎😋😪🤣😋😓😍😥😆🤔😓😇😒☺️😃😨😴😶😥😨😣😒😀🤨😡😨😝😂😆🙁😘😪😡😩🤔😫😃😲🤑😱😶😙😳😅😂😭🙂😫😗😳😪😜🤯😷🤓🤑🤒😢🥵😫😙😶😌😚😭😶😝🤓😐😫🙁😅😌😝☺️😘😌😪😣😘🤨😴😥🤔🤑😥😒😃😙😗🤔😠😄😱😰😕😡😊😖😩😇🤗🤒😭😃🤐😎🤩🤓😎😇🤩🤣😂🤓🙃😗🤑😔😨🙁😎😥😷😆😩☺️🙃😠☺️🤩😪😉🙄😅😅😞😔😂🤨😆🤣😶😛😤😤😌🙁😎😍🤩🤑😂🤓😨😡🤗😏😌😖😜😶😎🤐😟😢🙂😘😅😚🤗😇😥😔😒😚😭😙😷🙁😡😎😃😷😌😘😕😗🤐😁😢😲🤓😱🤯🙂😐😢😎🙁🥵😀🤒🤒😐😟🤐😳😚😪🙄😎🤓😉😷😖😠😴🤑🤨😲😀😫😞😌😍😉😖😆😴🤣😚🙁😀😙😠😒😷😥🤯😋🤑😖😥😐😔😩😭😷🤨😟🤣🙄🙄🙁🙄😘😇😤😰😣😴😐😥😋😟😥😉😪😂😥🤨🤣😊😎😠😓😏😷😫😟😁😂😷😆😎😁😛😓😡😎😢😛🙂😟😨😪😴🙂😱🤔😆😊😰🤒😖😙🤣😀😆😉🤗😘😔😩😌😔😗😥😖😞😲😕😎😔🤑🤑😋😭🙁😔😘😘😚😋🤔😋🤣😉😱🙂🤒😎😐😫😓😗😒😥😰😄🤒😤🤒😎😙😚😨🤐🤐😞🥵😁😶😕😲🤩🤐😘😋😟☺️🤗😣😰😄😔🤔🤗😃😞😪😟😋😗😖😐😫🤨😤😚😰😃😌😃😂🤨😃🤣🙂😭😳🤐😓😆😛🤔😏😃😁🤐😱😝😰😛😫🤨😏😟😇😫😤😠🥵😄😃😞😲😐😶😐😭😩😆😲😭🙄🥵🙃😳😫😕😌😋😕🤑☺️🤒😅😤🙄😊😟🤨🙁😜🤐😄😫😫🤗😛😣🙂🤐😞😏🤓🤑😔😢🙁😰😔☺️🤣😣😱😗😳😛😙😃😳😥😩😪😷😘😎😟😍🤣🤩😖😎😕😋😚🤣😘🤩😣😲🤓😋🤣😉😩😗🙂😖🤐🤯☺️😝😆🤓😰🤩😨🤨😷😇😶😜😕😭🤒😏🤣🤩😎😜😕🙂🤩😟😎😋😗🤓🤩🤣😩😋😋😃😲🤗😙😠😅😱😩🤔😌😱😰🤗😐😤🤗🤣😲😘😐😕😣😪🤐😌😄😅😟😛😅🤯🙂😕☺️😎😲😷😊🤒😟😏😟😛😔🤗😊😪😣😢😱😱😗😏🙄😄😫😷🤐😶😋🤨😛😢🤑😃😴🙃😓🤣🙁😢😊😙😲😇😃🙂😢😃😗😭😗😣🤑😷😙😳😩😞😶😋😊😚😉😎😟😁😶😎😝😂😔😪😭😨😚😢😄😣😉🤣🤣😚😎😷☺️☺️😖😉😨😣😂🤔😪😂😂😊🙄😉😍😤😐😁😖😊😂😨😀😋😡😤😷😞🥵😢😇😲😁😓😞😟🤓😛😭😥😚😆🤐😥😐😨😥😥🤗😅😫😁😙🙁😡😱😌😱😡😳😭😖🙄😃🤓😴🥵🙃🤒😤😋😏😇🤨😃😚🤩😇😠😐😘🤒🤓😨😉😭😥😛😡😁😁😀😘🤩😇🤓😐😕😱😂😄😣😥🤗😄😆😅🙄😓😀😛😒😎😌😏😀😟🙁😥🤒😪🤑😄😎😙😨😫😙🤯😒😁☺️🤔☺️🤗😳😙🤒🙃😏😗🤒😂😱🙃😛🙄😖🤩😍🤯😁🤒😚☺️😨😍🤒🙁😄😔😇😡😁☺️😌🤓😳☺️😴😋🤩🤐😏😗😢😗😚😒😃😙😏🤨🤗😕😍😐😶😍😥😭🤒😭😎🙃😖😛😷😀😎🤯😜😕😊😚😐😷😟😭😀🙄😓😄😢😃🤩😝😪😃🤩😚🤩😲😊😶🤒😛🥵😲😗🤔😄😉😛😲😐😀🤨😩😂😍🤗😐😳🙁😉😗😚😗😕🤐😉🤒😫😱🙃😗😊😪😢😗☺️😕🤯🙂😅🤩🤔😎😠😰🤩😒🤓🤑😠😂🤑😩😌😣🥵🙃😘🤯☺️😉🤯😋😡😣🤔😃😩😉😩😍😥😓😤😐😀😞🤯🤨😟🙁🤯😊😠😏😪😠😄😭😕😪😝😴😉😢😚😝😗😨😙😶😨😴🙄😇😭😠😍😶😉🙃😴😨😜🙁😅🤒😃🙄🤣😂😍😕😥😒🤣😍🤐🙃😍😊😞😣😡😛😟😅😤😄😗🤓🙄😫😘😛🤩😢😝😠","b4843decea86933ed818f43ec2302fe6")
- end) end),
+end) end
+),
 RG.button("拾取范围",
 function() enqueueTask(function()
-
 HK()
- 
-
 search(2.7551769886168823E-40,16,neicun)
 py1(9.183409485952689E-41,16,48)
 py1(9.183549615799121E-41,16,72)
@@ -24925,14 +24819,12 @@ py1(2.7551769886168823E-40,16,208)
 xg1(9999999,16,120,false)
 xg1(9999999,16,124,false)
 xg1(9999999,16,116,false)
-
- end) end),
+end) end),
 RG.line(),
 RG.box({"风声加速(解体修复",
 RG.radio({'加速',
 {"开启加速",
 function() enqueueTask(function()
-
 HK()
 py1(1.7999999523162842,16,-48)
 py1(1.75,16,0)
@@ -24943,12 +24835,9 @@ end) end
 }),
 RG.line(),
 RG.box({"设置踏空",---box示例 可以删掉
-
 RG.switch("车体踏空",
 function() runAsyncTask(function()
-
 HK()
- 
 search(1.9375,16,neicun)
 py1(2.125,16,16)
 xg1(3.75,16,304,true)
@@ -24969,16 +24858,10 @@ editData(
 提示('开启成功')
 end) end,
 function() runAsyncTask(function()
-
 HK()
- 
 search(1.9375,16,neicun)
 py1(2.125,16,16)
 xg1(1.9375,16,304,true)
-
- 
-
-
 end) end
 ),
 }),
@@ -24987,41 +24870,14 @@ RG.box({"全局变速",
 RG.buts({
 {"全局加速" ,
 function() enqueueTask(function()
-
 HK()
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-提示("开启失败")
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-99999999114514", FLOAT)
-提示("开启成功")
-gg.clearResults()
-end
- 
-
-
+全局加速开()
 end) end
 },
 {"恢复全局" ,
 function() enqueueTask(function()
-
 HK()
- 
-
-gg.clearResults()
-gg.searchNumber("-99999999114514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("500", FLOAT)
-提示("恢复")
-gg.clearResults()
-
- 
-
-
+全局加速关()
 end) end
 },
 }),
@@ -25030,36 +24886,26 @@ RG.line(),
 RG.box({"cd类(易闪退",---box示例 可以删掉
 RG.button("萌新无CD",
 function() enqueueTask(function()
-
 HK()
-
 search(1811205465,4,neicun)
 py1(2047957257,4,36)
 py1(1342253149,4,48)
 xg1(0,16,8,true)
-
-
 end) end),
- }),
+}),
 RG.line(),
 RG.box({"后坐类",---box示例 可以删掉
 RG.button("高后坐",
 function() enqueueTask(function()
-
 HK()
 search(17039364,4,neicun)
 py1(16777215,4,-40)
 py1(257,4,-36)
 py1(17039364,4,0)
 xg1(3,16,96,true)
-
- 
-
-
 end) end),
 RG.button("反后坐",
 function() enqueueTask(function()
-
 HK()
 search(17039364,4,neicun)
 py1(16777215,4,-40)
@@ -25067,27 +24913,18 @@ py1(257,4,-36)
 py1(17039364,4,0)
 xg1(5000,16,-8,false)
 xg1(-3,16,96,true)
-
-
-
 end) end),
 RG.button("自定义后坐",
 function() enqueueTask(function()
-
 HK()
 search(17039364,4,neicun)
 py1(16777215,4,-40)
 py1(257,4,-36)
 py1(17039364,4,0)
 xg3(nil,16,96,true,"(自定义后坐力)")
-
- 
-
-
 end) end),
 RG.button("恢复后坐",
 function() enqueueTask(function()
-
 HK()
 search(17039364,4,neicun)
 py1(16777215,4,-36)
@@ -25099,7 +24936,6 @@ RG.line(),
 RG.box({"飞天类",---box示例 可以删掉
 RG.button("极高空",
 function() enqueueTask(function()
-
 HK()
 search(17039364,4,neicun)
 py1(16777215,4,-40)
@@ -25555,29 +25391,13 @@ RG.buts({
 {"全局加速" ,
 function() enqueueTask(function()
 HK()
-gg.clearResults()
-gg.setRanges(gg.REGION_CODE_APP)
-gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-if gg.getResultCount() == 0 then
-提示("开启失败")
-else
-gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("-99999999114514", FLOAT)
-提示("开启成功")
-gg.clearResults()
-end
+全局加速开()
 end) end
 },
 {"恢复全局" ,
 function() enqueueTask(function()
 HK()
-gg.clearResults()
-gg.searchNumber("-99999999114514",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-gg.getResults(200)--设置修改前200个代码
-gg.editAll("500", FLOAT)
-提示("恢复")
-gg.clearResults()
+全局加速关()
 end) end
 }, 
 }),
@@ -25892,43 +25712,68 @@ end) end
 newcheck({nil,
 {"不倒翁",
 function() enqueueTask(function()
-
 HK()
- 
 editData(
 {
 {["memory"] = gg.REGION_C_ALLOC},
 {["name"] = ""},
 {["value"] = 17039364, ["type"] = D},
-{["lv"] = 1111752704,["offset"] =0x44, ["type"] = D},
+{["lv"] = 1111752704, ["offset"] = 0x44, ["type"] = D},
 },
 {
-{["value"] = 0,["offset"] =-0x1C, ["type"] = F,["freeze"] = true},
-{["value"] = 0,["offset"] =-0x14, ["type"] = F,["freeze"] = true},
+{["value"] = 0, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = true},
+{["value"] = 0, ["offset"] = -0x14, ["type"] = F, ["freeze"] = true},
 }
 )
 end) end,
- },
- {"反向不倒翁",
-
 function() enqueueTask(function()
-
 HK()
- 
 editData(
 {
 {["memory"] = gg.REGION_C_ALLOC},
 {["name"] = ""},
 {["value"] = 17039364, ["type"] = D},
-{["lv"] = 1111752704,["offset"] =0x44, ["type"] = D},
+{["lv"] = 1111752704, ["offset"] = 0x44, ["type"] = D},
 },
 {
-{["value"] = -1,["offset"] =-0x1C, ["type"] = F,["freeze"] = true},
-{["value"] = -1,["offset"] =-0x14, ["type"] = F,["freeze"] = true},
+{["value"] = 原值, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = false},
+{["value"] = 原值, ["offset"] = -0x14, ["type"] = F, ["freeze"] = false},
 }
 )
- end) end,
- },
+end) end
+},
+{"反向不倒翁",
+function() enqueueTask(function()
+HK()
+editData(
+{
+{["memory"] = gg.REGION_C_ALLOC},
+{["name"] = ""},
+{["value"] = 17039364, ["type"] = D},
+{["lv"] = 1111752704, ["offset"] = 0x44, ["type"] = D},
+},
+{
+{["value"] = -1, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = true},
+{["value"] = -1, ["offset"] = -0x14, ["type"] = F, ["freeze"] = true},
+}
+)
+end) end,
+function() enqueueTask(function()
+HK()
+editData(
+{
+{["memory"] = gg.REGION_C_ALLOC},
+{["name"] = ""},
+{["value"] = 17039364, ["type"] = D},
+{["lv"] = 1111752704, ["offset"] = 0x44, ["type"] = D},
+},
+{
+{["value"] = -1, ["offset"] = -0x1C, ["type"] = F, ["freeze"] = false},
+{["value"] = -1, ["offset"] = -0x14, ["type"] = F, ["freeze"] = false},
+}
+)
+end) end
+},
 }),
 newradio({nil,
 {"开启穿墙",
@@ -27441,7 +27286,7 @@ end) end
 RG.line(),
 RG.box({"一键组合技",
 newcheck({nil,
-{"飞天灵体" ,
+{"飞天灵体",
 function() enqueueTask(function()
 HK()
 gg.clearResults()
@@ -27460,38 +27305,54 @@ py1(16777215,4,-36)
 py1(257,4,-32)
 xg1(4000,16,-8,false)
 提示("请不要解体/修复")
-end) end
-}, 
-{"飞天灵体\n+反后坐" ,
+end) end,
 function() enqueueTask(function()
-
+local t = {"libclient.so:bss", "Cb"}
+local tt = {0x453CBC}
+local ttt = S_Pointer(t, tt, true)
+gg.setValues({{address = ttt, flags = 16, value = 30}})
+提示("已关闭灵体")
+end) end
+},
+{"飞天灵体\n+反后坐",
+function() enqueueTask(function()
 HK()
 gg.clearResults()
 search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
-xg1(5671311400,16,-8,true)--真身高度
+xg1(5671311400,16,-8,true)
 search(1077149696,4,neicun)
 py1(1071644672,4,-96)
 py1(1202590843,4,-52)
-xg1(0,64,236,true)--枪口无上抬
+xg1(0,64,236,true)
 gg.sleep(3009)
 local t = {"libclient.so:bss", "Cb"}
 local tt = {0x453CBC}
 local ttt = S_Pointer(t, tt, true)
-gg.setValues({{address = ttt, flags = 16, value = 200}})--灵体
+gg.setValues({{address = ttt, flags = 16, value = 200}})
 gg.sleep(3109)
 search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
-xg1(4000,16,-8,false)--回地面
-xg1(-95.14,16,96,true)--反后坐
+xg1(4000,16,-8,false)
+xg1(-95.14,16,96,true)
 提示("请不要解体/修复")
-end) end
-}, 
-{"飞天灵体\n+全局变速" ,
+end) end,
 function() enqueueTask(function()
-
+local t = {"libclient.so:bss", "Cb"}
+local tt = {0x453CBC}
+local ttt = S_Pointer(t, tt, true)
+gg.setValues({{address = ttt, flags = 16, value = 30}})
+search(17039364,4,neicun)
+py1(16777215,4,-36)
+py1(257,4,-32)
+xg1(0.007352941203862429,16,96,false)
+提示("已关闭飞天灵体+反后坐")
+end) end
+},
+{"飞天灵体\n+全局变速",
+function() enqueueTask(function()
 HK()
 gg.clearResults()
 search(17039364,4,neicun)
@@ -27507,68 +27368,58 @@ gg.sleep(3109)
 search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
-xg1(4000,16,-8,false)--回地面
+xg1(4000,16,-8,false)
 gg.sleep(900)
 提示("开启成功")
-gg.clearResults()
-	gg.setRanges(gg.REGION_CODE_APP)
-	gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-	if gg.getResultCount() == 0 then
-		提示("开启失败")
-		else
-		gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-	gg.getResults(200)--设置修改前200个代码
-		gg.editAll("-9999999999929194514", FLOAT)
-		提示("全局变速开启成功")
-		gg.clearResults()
-	end
+search(500,16,gg.REGION_CODE_APP)
+sj = gg.getResults(200)
+xg1("-9999999999929194514",16,0,false)
 提示("请不要解体/修复")
 gg.clearResults()
 search(17039364,4,neicun)
-	py1(16777215,4,-36)
-	py1(257,4,-32)
-	xg1(567311400,16,-8,true)
+py1(16777215,4,-36)
+py1(257,4,-32)
+xg1(567311400,16,-8,true)
 gg.sleep(3009)
-	local t = {"libclient.so:bss", "Cb"}
+local t = {"libclient.so:bss", "Cb"}
 local tt = {0x453CBC}
 local ttt = S_Pointer(t, tt, true)
 gg.setValues({{address = ttt, flags = 16, value = 200}})
 gg.sleep(3109)
 search(17039364,4,neicun)
-	py1(16777215,4,-36)
-	py1(257,4,-32)
-	xg1(4000,16,-8,false)--回地面
+py1(16777215,4,-36)
+py1(257,4,-32)
+xg1(4000,16,-8,false)
 gg.sleep(900)
 提示("开启成功")
-gg.clearResults()
-	gg.setRanges(gg.REGION_CODE_APP)
-	gg.searchNumber("500", FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-	if gg.getResultCount() == 0 then
-		提示("开启失败")
-		else
-		gg.searchNumber("500",FLOAT , false, gg.SIGN_EQUAL, 0, -1)
-	gg.getResults(200)--设置修改前200个代码
-		gg.editAll("-9999999999929194514", FLOAT)
-		提示("全局变速开启成功")
-		gg.clearResults()
-	end
+search(500,16,gg.REGION_CODE_APP)
+sj = gg.getResults(200)
+xg1("-9999999999929194514",16,0,false)
 提示("请不要解体/修复")
-end) end
-}, 
-{"擂台使\n用灵体",
+end) end,
 function() enqueueTask(function()
-
+local t = {"libclient.so:bss", "Cb"}
+local tt = {0x453CBC}
+local ttt = S_Pointer(t, tt, true)
+gg.setValues({{address = ttt, flags = 16, value = 30}})
+search("-9999999999929194514",16,gg.REGION_CODE_APP)
+xg1(500,16,0,false)
+提示("已关闭飞天灵体+全局变速")
+end) end
+},
+{"擂台使用灵体",
+function() enqueueTask(function()
 HK()
 提示("真身传送至高台柱子里")
 gg.clearResults()
 search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
-xg1(20,16,-8,false)--y
+xg1(20,16,-8,false)
 xg1(547,16,-4,false)
 xg1(-616,16,-12,false)
 gg.sleep(500)
-xg1(20,16,-8,false)--y
+xg1(20,16,-8,false)
 xg1(547,16,-4,false)
 xg1(-616,16,-12,false)
 gg.sleep(1109)
@@ -27590,11 +27441,11 @@ gg.clearResults()
 search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
-xg1(20,16,-8,false)--y
+xg1(20,16,-8,false)
 xg1(547,16,-4,false)
 xg1(-616,16,-12,false)
 gg.sleep(500)
-xg1(20,16,-8,false)--y
+xg1(20,16,-8,false)
 xg1(547,16,-4,false)
 xg1(-616,16,-12,false)
 gg.sleep(1109)
@@ -27609,11 +27460,17 @@ search(17039364,4,neicun)
 py1(16777215,4,-36)
 py1(257,4,-32)
 xg1(5000,16,-8,false)
-
-end) end},
-})
+end) end,
+function() enqueueTask(function()
+local t = {"libclient.so:bss", "Cb"}
+local tt = {0x453CBC}
+local ttt = S_Pointer(t, tt, true)
+gg.setValues({{address = ttt, flags = 16, value = 30}})
+提示("已关闭灵体")
+end) end
+},
 }),
-
+}),
 RG.check({"以下功能搭配灵体使用",}),
 RG.check({"范围伤害",}),
 RG.box({"设置范围伤害",
