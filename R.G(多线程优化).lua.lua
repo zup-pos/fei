@@ -165,6 +165,7 @@ writeLog("=== 脚本启动 ===")
 
 
 --全局函数
+pageState = false
 neicun = 4
 jishi_yunxing = false
 kaishi_shijian = nil
@@ -2272,199 +2273,192 @@ end
 swcbg=getShape3()
 
 
+
+
+-- ==================== 终极任务队列系统 ====================
 local taskQueue = {}
 local isDispatcherActive = false
 local cleanupSystem = {
-isCleaning = false,
-cleanupStartTime = 0,
-maxCleanupTime = 10000,
-originalTaskQueue = nil,
-cleanupThread = nil
+    isCleaning = false,
+    cleanupStartTime = 0,
+    maxCleanupTime = 3000,
+    originalTaskQueue = nil,
+    cleanupThread = nil,
+    blocked = false,
+    forceStop = false
 }
 
-local function startCleanupLoop()
-if cleanupSystem.isCleaning then
-提示("[清除系统] 清除正在进行中，跳过重复启动")
-return
-end
-
-cleanupSystem.isCleaning = true
-cleanupSystem.cleanupStartTime = os.time()
-
-cleanupSystem.originalTaskQueue = #taskQueue
-
-提示("[清除系统] 开始清除循环，目标队列长度: " .. cleanupSystem.originalTaskQueue)
-
-cleanupSystem.cleanupThread = luajava.newThread(function()
-local 清除成功 = false
-local 最后检查时间 = os.time()
-
-while cleanupSystem.isCleaning do
-local 当前时间 = os.time()
-local 已运行时间 = 当前时间 - cleanupSystem.cleanupStartTime
-
-if 已运行时间 >= cleanupSystem.maxCleanupTime / 1000 then
-提示("[清除系统] 清除超时，强制恢复")
-break
-end
-
-if 当前时间 - 最后检查时间 >= 0.01 then
-最后检查时间 = 当前时间
-
-isDispatcherActive = false
-
-local 当前队列长度 = #taskQueue
-taskQueue = {}
-
-if 当前队列长度 == 0 then
-清除成功 = true
-提示("[清除系统] 队列已清空，清除成功")
-break
-else
-提示("[清除系统] 清除中... 剩余任务: " .. 当前队列长度)
-end
-end
-
-luajava.sleep(10)
-end
-
-cleanupSystem.isCleaning = false
-
-local 清除数量 = cleanupSystem.originalTaskQueue or 0
-if 清除成功 then
-清理提示("✅ 清除成功！共清除 " .. 清除数量 .. " 个任务")
-else
-清理提示("⚠️ 清除超时，已强制停止 " .. 清除数量 .. " 个任务")
-end
-end)
-
-cleanupSystem.cleanupThread:start()
-end
-
-
-local function clearTaskQueue()
-提示("[清除指令] 用户请求清除任务队列")
-
-
-if #taskQueue == 0 then
-清理提示("📭 任务队列已经是空的")
-return true
-end
-
-startCleanupLoop()
-
-return true
-end
-
-
+-- 任务调度器
 local function startTaskDispatcher()
-if isDispatcherActive or cleanupSystem.isCleaning then return end
-isDispatcherActive = true
+    if isDispatcherActive or cleanupSystem.isCleaning or cleanupSystem.blocked then
+        return
+    end
+    isDispatcherActive = true
 
-luajava.newThread(function()
-while isDispatcherActive do
+    luajava.newThread(function()
+        while isDispatcherActive do
+            -- 循环开始时检查
+            if cleanupSystem.blocked or cleanupSystem.isCleaning then
+                isDispatcherActive = false
+                break
+            end
 
-if cleanupSystem.isCleaning then
-isDispatcherActive = false
-提示("[调度器] 检测到清除状态，停止执行")
-break
+            if #taskQueue == 0 then
+                isDispatcherActive = false
+                break
+            end
+
+            -- 取出任务
+            local currentTask = table.remove(taskQueue, 1)
+            
+            -- 【关键】取出后立即检查，若清理已触发则丢弃
+            if cleanupSystem.blocked or cleanupSystem.isCleaning then
+                isDispatcherActive = false
+                break
+            end
+
+            if type(currentTask) == "function" then
+                -- 执行前再次确认
+                if cleanupSystem.blocked or cleanupSystem.isCleaning then
+                    isDispatcherActive = false
+                    break
+                end
+                -- 执行任务
+                local success, err = pcall(currentTask)
+                if not success then
+                    提示("任务执行失败：" .. tostring(err))
+                end
+            end
+            luajava.sleep(10)  -- 短睡眠，让出CPU
+        end
+        isDispatcherActive = false
+    end):start()
 end
 
-if #taskQueue == 0 then
-isDispatcherActive = false
-break
-end
-
-local currentTask = table.remove(taskQueue, 1)
-if type(currentTask) == "function" then
-
-if cleanupSystem.isCleaning then
-isDispatcherActive = false
-break
-end
-
-local success, err = pcall(currentTask)
-if not success then
-提示("任务执行失败：" .. tostring(err))
-end
-
-if cleanupSystem.isCleaning then
-isDispatcherActive = false
-break
-end
-end
-
-luajava.sleep(50)
-end
-isDispatcherActive = false
-end):start()
-end
-
+-- 任务入队
 local function enqueueTask(taskFunc)
-
-if cleanupSystem.isCleaning then
-提示("[入队] 系统正在清除中，拒绝新任务")
-return false
+    if cleanupSystem.blocked then
+        return false
+    end
+    if cleanupSystem.isCleaning then
+        return false
+    end
+    if type(taskFunc) ~= "function" then 
+        return 
+    end
+    if not taskQueue then
+        taskQueue = {}
+    end
+    if #taskQueue >= 50 then
+        table.remove(taskQueue, 1)
+    end
+    table.insert(taskQueue, taskFunc)
+    startTaskDispatcher()
+    return true
 end
 
-if type(taskFunc) ~= "function" then 
-return 
+-- 清理循环（内部使用）
+local function startCleanupLoop()
+    if cleanupSystem.isCleaning then
+        return
+    end
+
+    cleanupSystem.isCleaning = true
+    cleanupSystem.cleanupStartTime = os.time()
+    cleanupSystem.originalTaskQueue = #taskQueue
+    cleanupSystem.forceStop = true   -- 通知正在执行的任务尽快退出
+
+    -- 立即清空队列并冻结
+    taskQueue = {}
+    cleanupSystem.blocked = true
+    isDispatcherActive = false
+
+    cleanupSystem.cleanupThread = luajava.newThread(function()
+        local startTime = os.time()
+        -- 等待当前任务结束（最大等待 maxCleanupTime）
+        while isDispatcherActive do
+            if os.time() - startTime >= cleanupSystem.maxCleanupTime / 1000 then
+                break
+            end
+            luajava.sleep(50)
+        end
+
+        -- 清理完成，自动解冻
+        cleanupSystem.isCleaning = false
+        cleanupSystem.blocked = false
+        cleanupSystem.forceStop = false
+        if cleanupSystem.cleanupThread then
+            cleanupSystem.cleanupThread = nil
+        end
+        清理提示("✅ 任务队列已清理，系统已恢复")
+    end)
+
+    cleanupSystem.cleanupThread:start()
 end
 
-if not taskQueue then
-taskQueue = {}
+-- 一键清理并恢复（外部调用）
+function cleanAndUnfreeze()
+    if cleanupSystem.isCleaning then
+        提示("清理正在进行中")
+        return
+    end
+    if cleanupSystem.blocked and not cleanupSystem.isCleaning then
+        -- 已冻结但不在清理中（异常状态），直接解冻
+        cleanupSystem.blocked = false
+        提示("已恢复")
+        return
+    end
+    startCleanupLoop()
 end
 
-if #taskQueue >= 50 then
-table.remove(taskQueue, 1)
-end
-
-table.insert(taskQueue, taskFunc)
-startTaskDispatcher()
-return true
-end
 
 
-
-function RG.button(txt,func )
+function RG.button(txt, func, direct)
     if not txt then txt = "未设置" end
     
-	local tid=guid()..guid()
-	_ENV[tid]=luajava.loadlayout (
-		{
-			LinearLayout ,
-			layout_width = 'fill_parent' ,
-			layout_hight = "fill_parent" , {
-				LinearLayout ,
-				layout_width = "fill_parent" ,
-				gravity = "center_horizontal" ,
-				layout_marginTop = "5dp" ,
-				layout_marginBottom = "5dp" ,
-				background = luajava.loadlayout {
-					GradientDrawable ,
-					color = "#00000000" ,
-					cornerRadius = 8
-				} ,
-				onClick = function()
-					RG.controlWater(_ENV[tid],200)
-					enqueueTask(function()
-						pcall(func)
-					end)
-				end
-				,
-    			{
-    				TextView,
-    				text = txt,
-    				textSize = "12sp",
-    				layout_width = "wrap_content",
-    			},
-background = luajava.loadlayout {
-					GradientDrawable ,
-					color = "#00000000" ,
-					cornerRadius = 8
-				} ,			
-			} } )
-	return _ENV[tid]
+    local tid = guid()..guid()
+    _ENV[tid] = luajava.loadlayout(
+        {
+            LinearLayout,
+            layout_width = 'fill_parent',
+            layout_height = "fill_parent", {
+                LinearLayout,
+                layout_width = "fill_parent",
+                gravity = "center_horizontal",
+                layout_marginTop = "5dp",
+                layout_marginBottom = "5dp",
+                background = luajava.loadlayout {
+                    GradientDrawable,
+                    color = "#00000000",
+                    cornerRadius = 8
+                },
+                onClick = function()
+                    RG.controlWater(_ENV[tid], 200)
+                    if direct then
+                        luajava.newThread(function()
+                            pcall(func)
+                        end):start()
+                    else
+                        enqueueTask(function()
+                            pcall(func)
+                        end)
+                    end
+                end,
+                {
+                    TextView,
+                    text = txt,
+                    textSize = "12sp",
+                    layout_width = "wrap_content",
+                },
+                background = luajava.loadlayout {
+                    GradientDrawable,
+                    color = "#00000000",
+                    cornerRadius = 8
+                },
+            }
+        }
+    )
+    return _ENV[tid]
 end
 
 
@@ -11637,9 +11631,9 @@ py1(0.19999998807907104,16,-140)
 py1(3.7414668997472616E-43,16,-136)
 py1(4.203895392974451E-45,16,-128)
 py1(2.7551769886168823E-40,16,0)
-xg1(9999,16,-120,冻结拾取范围)
-xg1(9999,16,-116,冻结拾取范围)
-xg1(9999,16,-124,冻结拾取范围)
+xg3(9999,16,-120,冻结拾取范围)
+xg4(9999,16,-116,冻结拾取范围)
+xg4(9999,16,-124,冻结拾取范围)
 end
 
 function 弱网()
@@ -11805,11 +11799,9 @@ end
 function 穿墙推荐解体()
 search(8.2795719786463182E-41,16,neicun)
 py1(5.739718509874451E-42,16,12)
-xg1(0,64,40,true)
-xg1(0,64,72,true)
-xg1(0,64,76,true)
-xg1(0,64,72,true)
-xg1(0,64,76,true)
+xg3(0,64,40,false,true,"(自定义穿墙,提示:不推荐改太大,容易闪退)")
+xg4(0,64,72,false)
+xg4(0,64,76,false)
 end
 
 function 转圈圈()
@@ -12328,7 +12320,6 @@ xg3(0.01, 64, 0, false, true, "自定义萌新CD")
 end
 
 qjjssj = nil
-qjjs = nil
 function 全局加速开()
 if not qjjssj or #qjjssj == 0 then
 search(500,16,gg.REGION_CODE_APP)
@@ -12337,12 +12328,11 @@ else
 sj = qjjssj
 end
 xg3("-99999999114514",16,0,false,true)
-qjjs = last
 end
 
 function 全局加速关()
 if not qjjssj or #qjjssj == 0 then
-search(qjjs,16,gg.REGION_CODE_APP)
+search(500,16,gg.REGION_CODE_APP)
 qjjssj = gg.getResults(200)
 else
 sj = qjjssj
@@ -12352,7 +12342,6 @@ qjjssj = nil
 end
 
 bszmpsj = nil
-bszmp = nil
 function 仿gg变速自瞄炮开()
 if not bszmpsj or #bszmpsj == 0 then
 search(500,16,gg.REGION_CODE_APP)
@@ -12361,12 +12350,11 @@ else
 sj = bszmpsj
 end
 xg3("-9999999999929194514",16,0,false,true)
-bszmp = qjjs
 end
 
 function 仿gg变速自瞄炮关()
 if not bszmpsj or #bszmpsj == 0 then
-search(bszmp,16,gg.REGION_CODE_APP)
+search(500,16,gg.REGION_CODE_APP)
 bszmpsj = gg.getResults(200)
 else
 sj = bszmpsj
@@ -13942,6 +13930,13 @@ HK()
 end
 )
 
+创建按钮页面("🗑️清理任务列表🗑️",
+function() 
+HK()
+cleanAndUnfreeze()
+end
+)
+
 创建开关页面("快速弱网",
 function()
 HK()
@@ -15136,105 +15131,105 @@ RG.check({"范围伤害",}),
 RG.box({"设置范围伤害",
 RG.box1({"设置核心范围",
 RG.switch("萌新范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 萌新范围开()
-end):start() end,
+end) end,
 function()
 HK()
 萌新范围关()
 end
 ),
 RG.switch("铠鼠范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铠鼠范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铠鼠范围关()
 end
 ),
 RG.switch("火萤范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 火萤范围开()
-end):start() end,
+end) end,
 function()
 HK()
 火萤范围关()
 end
 ),
 RG.switch("风声范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 风声范围开()
-end):start() end,
+end) end,
 function()
 HK()
 风声范围关()
 end
 ),
 RG.switch("大家伙范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 大家伙范围开()
-end):start() end,
+end) end,
 function()
 HK()
 大家伙范围关()
 end
 ),
 RG.switch("夜莺范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 夜莺范围开()
-end):start() end,
+end) end,
 function()
 HK()
 夜莺范围关()
 end
 ),
 RG.switch("网虫范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 网虫范围开()
-end):start() end,
+end) end,
 function()
 HK()
 网虫范围关()
 end
 ),
 RG.switch("幻灵范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 幻灵范围开()
-end):start() end,
+end) end,
 function()
 HK()
 幻灵范围关()
 end
 ),
 RG.switch("铁驭/赋能/序列范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铁驭范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铁驭范围关()
 end
 ),
 RG.button('一键开启核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键开启核心范围执行()
-end):start() end),
+end) end),
 RG.button('一键关闭核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键关闭核心范围执行()
-end):start() end),
+end) end),
 }),
 RG.line(),
 RG.check({"false/true",}),
@@ -16242,18 +16237,18 @@ RG.box({"锁核",
 RG.box1({"坐标锁核",
 RG.radio1({"",
 {"初始化坐标锁核" ,
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 cleanHS3()
 gg.sleep(300)
 HS3()
-end):start() end
+end) end
 },
 {"初始化自身坐标" ,
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 HS4()
-end):start() end
+end) end
 },
 {"实体坐标排序(近→远)" ,
 function() luajava.newThread(function()
@@ -16415,7 +16410,7 @@ end
 ),
 RG.switch("原地环绕(自己)",
 function() luajava.newThread(function()
-        HK()
+HK()
         if not selfXAddr or not selfYAddr or not selfZAddr then
             提示("请先初始化自身坐标")
             return
@@ -17647,7 +17642,7 @@ end) end),
 {--2
 RG.box({"获取个人坐标",
 RG.button("初始化自身坐标",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 提示("初始化需约15秒")   
 gg.clearResults()
@@ -17660,7 +17655,7 @@ gg.searchNumber("17039364", gg.TYPE_DWORD, false, gg.SIGN_EQUAL, 0, -1)
 zszb=gg.getResults(1)
 提示('初始化个人坐标成功')
 end
-end):start() end), 
+end) end),
 RG.button("获取自身坐标",
 function() luajava.newThread(function()
 HK()
@@ -17705,7 +17700,7 @@ HK()
 RG.line(), 
 RG.box({"获取他人坐标",
 RG.button("初始化他人坐标",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 提示("正在初始化")       
 editData(
@@ -17765,7 +17760,7 @@ end
 a=gg.getListItems(1)
 gg.clearResults()
 提示('初始化完成')
-end):start() end), 
+end) end),
 RG.button("获取他人坐标",
 function() luajava.newThread(function()
 
@@ -23432,105 +23427,105 @@ RG.check({"范围伤害",}),
 RG.box({"设置范围伤害",
 RG.box1({"设置核心范围",
 RG.switch("萌新范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 萌新范围开()
-end):start() end,
+end) end,
 function()
 HK()
 萌新范围关()
 end
 ),
 RG.switch("铠鼠范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铠鼠范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铠鼠范围关()
 end
 ),
 RG.switch("火萤范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 火萤范围开()
-end):start() end,
+end) end,
 function()
 HK()
 火萤范围关()
 end
 ),
 RG.switch("风声范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 风声范围开()
-end):start() end,
+end) end,
 function()
 HK()
 风声范围关()
 end
 ),
 RG.switch("大家伙范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 大家伙范围开()
-end):start() end,
+end) end,
 function()
 HK()
 大家伙范围关()
 end
 ),
 RG.switch("夜莺范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 夜莺范围开()
-end):start() end,
+end) end,
 function()
 HK()
 夜莺范围关()
 end
 ),
 RG.switch("网虫范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 网虫范围开()
-end):start() end,
+end) end,
 function()
 HK()
 网虫范围关()
 end
 ),
 RG.switch("幻灵范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 幻灵范围开()
-end):start() end,
+end) end,
 function()
 HK()
 幻灵范围关()
 end
 ),
 RG.switch("铁驭/赋能/序列范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铁驭范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铁驭范围关()
 end
 ),
 RG.button('一键开启核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键开启核心范围执行()
-end):start() end),
+end) end),
 RG.button('一键关闭核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键关闭核心范围执行()
-end):start() end),
+end) end),
 }),
 RG.line(),
 RG.check({"false/true",}),
@@ -24828,7 +24823,15 @@ function() enqueueTask(function()
 HK()
 py1(1.7999999523162842,16,-48)
 py1(1.75,16,0)
-xg1(9,64,-4,true)
+xg3(9,64,-4,true)
+end) end
+},
+{"关闭加速",
+function() enqueueTask(function()
+HK()
+py1(1.7999999523162842,16,-48)
+py1(1.75,16,0)
+xg1(1.875,64,-4,false)
 end) end
 },
 }),
@@ -27476,105 +27479,105 @@ RG.check({"范围伤害",}),
 RG.box({"设置范围伤害",
 RG.box1({"设置核心范围",
 RG.switch("萌新范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 萌新范围开()
-end):start() end,
+end) end,
 function()
 HK()
 萌新范围关()
 end
 ),
 RG.switch("铠鼠范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铠鼠范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铠鼠范围关()
 end
 ),
 RG.switch("火萤范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 火萤范围开()
-end):start() end,
+end) end,
 function()
 HK()
 火萤范围关()
 end
 ),
 RG.switch("风声范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 风声范围开()
-end):start() end,
+end) end,
 function()
 HK()
 风声范围关()
 end
 ),
 RG.switch("大家伙范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 大家伙范围开()
-end):start() end,
+end) end,
 function()
 HK()
 大家伙范围关()
 end
 ),
 RG.switch("夜莺范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 夜莺范围开()
-end):start() end,
+end) end,
 function()
 HK()
 夜莺范围关()
 end
 ),
 RG.switch("网虫范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 网虫范围开()
-end):start() end,
+end) end,
 function()
 HK()
 网虫范围关()
 end
 ),
 RG.switch("幻灵范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 幻灵范围开()
-end):start() end,
+end) end,
 function()
 HK()
 幻灵范围关()
 end
 ),
 RG.switch("铁驭/赋能/序列范围",
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 铁驭范围开()
-end):start() end,
+end) end,
 function()
 HK()
 铁驭范围关()
 end
 ),
 RG.button('一键开启核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键开启核心范围执行()
-end):start() end),
+end) end),
 RG.button('一键关闭核心范围',
-function() luajava.newThread(function()
+function() enqueueTask(function()
 HK()
 一键关闭核心范围执行()
-end):start() end),
+end) end),
 }),
 RG.line(),
 RG.check({"false/true",}),
@@ -28365,6 +28368,7 @@ RG.button("取消所有冻结",
 function() luajava.newThread(function()
 gg.clearResults()
 gg.clearList()
+提示("已清理")
 end):start() end),
 RG.button("📜更新日志📜" ,
 function() luajava.newThread(function()
@@ -28427,14 +28431,10 @@ end
 end
 showPrompt()
 end):start() end),
-RG.button("🗑️清理任务列表🗑️", 
+RG.button("🗑️清理任务列表🗑️",
 function() luajava.newThread(function()
-clearTaskQueue()
-gg.sleep(100)
-clearTaskQueue()
-gg.sleep(100)
-clearTaskQueue()
-end):start() end),
+    cleanAndUnfreeze()
+end):start() end, true),           --true优先强制执行
 RG.button("⚙️自动选择进程⚙️" ,
 function() runAsyncTask(function()
 local function getZzszProcesses()
