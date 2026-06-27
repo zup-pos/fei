@@ -11819,9 +11819,15 @@ xg3(969.37,16,56,true,true,"(自定义转圈圈)")
 end
 
 function 恢复娱乐功能()
+local items = gg.getListItems() or {}
+local count = #items
 gg.clearResults()
 gg.clearList()
-提示("恢复成功")
+if count > 0 then
+    提示("已清理 " .. count .. " 项冻结")
+else
+    提示("没有冻结项需要清理")
+end
 end
 
 
@@ -17843,6 +17849,7 @@ function() luajava.newThread(function()
 提示("已切换为冻结传送")
 end):start() end,
 function()
+HA()
 冻结传送切换(false)
 提示("已切换为非冻结传送") 
 end
@@ -28361,14 +28368,25 @@ RG.line(),
 },{
 RG.button("强制取消循环功能", 
 function() luajava.newThread(function()
-HK()
+if fw1 == true then 
+提示("检测到正在执行循环功能\n为防止卡顿\n正在尝试关闭循环功能后再执行功能")   
 fw1=false
+gg.sleep(3000)
+else
+提示("没有循环在运行")
+end
 end):start() end),
 RG.button("取消所有冻结", 
 function() luajava.newThread(function()
+local items = gg.getListItems() or {}
+local count = #items
 gg.clearResults()
 gg.clearList()
-提示("已清理")
+if count > 0 then
+    提示("已清理 " .. count .. " 项冻结")
+else
+    提示("没有冻结项需要清理")
+end
 end):start() end),
 RG.button("📜更新日志📜" ,
 function() luajava.newThread(function()
