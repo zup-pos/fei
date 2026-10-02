@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终整合版 - 动态穿墙防回弹 + 透视UI实时同步 + 渲染属性冻结机制)
+-- Version: 7.7.5 (最终整合版 - 动态防回弹穿墙 + 透视UI实时同步 + 渲染开关冻结修复)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -186,15 +186,15 @@ local originalLighting = {}
 local nightVisionMaintainConnection = nil
 local atmosphereInstance = nil
 local originalAtmosphere = {}
-local lightingFrozenConnections = {} -- 【新增】光照属性冻结连接池
+local lightingFrozenConnections = {} -- 【核心】光照属性冻结连接池
 
 -- 【新增】渲染特效开关（根据需求：默认全部关闭，仅光亮开启）
 local nightVisionSettings = {
-    shadows = false,     -- 是否关闭全局阴影 (GlobalShadows = false)
-    envAo = false,       -- 是否关闭环境光遮蔽 (EnvironmentDiffuseScale = 0)
-    fog = false,         -- 是否关闭传统迷雾 (FogEnd = 100000)
-    atmosphere = false,  -- 是否关闭大气迷雾 (Atmosphere.Density = 0)
-    ambient = true       -- 是否强制环境光全亮 (Ambient = Color3.new(1,1,1))，默认开启
+    shadows = false,     -- 是否关闭全局阴影
+    envAo = false,       -- 是否关闭环境光遮蔽
+    fog = false,         -- 是否关闭传统迷雾
+    atmosphere = false,  -- 是否关闭大气迷雾
+    ambient = true       -- 是否强制环境光全亮，默认开启
 }
 
 -- ==================== 有效Humanoid状态 ====================
@@ -385,7 +385,6 @@ local function disableBuildingRemoval()
     buildingRemovalEnabled = false
     local count = 0
     
-    -- 用pcall包裹，防止某个建筑部件被销毁或锁定导致整个恢复过程中断
     for part, data in pairs(modifiedBuildingParts) do
         pcall(function()
             if part and part.Parent then
@@ -642,7 +641,7 @@ local function applySpeedMode(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 透视基础（整合冻结机制） ====================
+-- ==================== 透视基础（整合冻结机制与修复） ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -658,7 +657,6 @@ local function saveOriginalLighting()
         EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
     }
     
-    -- 保存 Atmosphere 状态
     atmosphereInstance = Lighting:FindFirstChildOfClass("Atmosphere")
     if atmosphereInstance then
         originalAtmosphere = {
@@ -678,21 +676,20 @@ local function restoreLighting()
         pcall(function() Lighting[prop] = val end)
     end
     
-    -- 恢复 Atmosphere 状态
     if atmosphereInstance and atmosphereInstance.Parent then
         for prop, val in pairs(originalAtmosphere) do
             pcall(function() atmosphereInstance[prop] = val end)
         end
     end
     
-    -- 断开所有冻结连接
+    -- 断开所有冻结连接，并解除状态
     for _, conn in pairs(lightingFrozenConnections) do
         pcall(function() conn:Disconnect() end)
     end
     lightingFrozenConnections = {}
 end
 
--- 冻结属性辅助函数
+-- 【修复核心】冻结属性辅助函数
 local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
     local connKey = instance:GetFullName() .. "_" .. propName
     if lightingFrozenConnections[connKey] then
@@ -700,8 +697,11 @@ local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
         lightingFrozenConnections[connKey] = nil
     end
     
+    -- 无论是开启还是关闭，都要立刻应用目标值
+    pcall(function() instance[propName] = targetValue end)
+    
     if isFrozen then
-        pcall(function() instance[propName] = targetValue end)
+        -- 监听变化，强行改回
         lightingFrozenConnections[connKey] = instance:GetPropertyChangedSignal(propName):Connect(function()
             pcall(function()
                 if instance[propName] ~= targetValue then
@@ -940,10 +940,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（整合新测试版的6项控制） ====================
+-- ==================== 创建透视悬浮窗（整合新测试版的6项控制 + UI刷新修复） ====================
 local function createNightVisionWindow()
     local winWidth = 190
-    local winHeight = 110 -- 紧凑尺寸，刚好包裹内容
+    local winHeight = 110 -- 紧凑尺寸
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -1028,14 +1028,16 @@ local function createNightVisionWindow()
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
 
-    -- 【新增】渲染开关按钮群（与测试版同步，6个按钮）
+    -- 【核心修复】记录所有按钮及状态刷新函数，便于重置时同步UI
+    local windowButtons = {}
+
     local function createToggleBtn(name, key, xPos, yPos)
         local btn = Instance.new("TextButton")
         btn.Parent = bg
         btn.Size = UDim2.new(0, 55, 0, 18)
         btn.Position = UDim2.new(0, xPos, 0, yPos)
-        btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
-        btn.Text = name .. (nightVisionSettings[key] and " 开" or " 关")
+        btn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        btn.Text = name .. " 关"
         btn.TextColor3 = Color3.new(1, 1, 1)
         btn.Font = Enum.Font.Gotham
         btn.TextSize = 9
@@ -1043,17 +1045,25 @@ local function createNightVisionWindow()
         btnCorner.CornerRadius = UDim.new(0, 3)
         btnCorner.Parent = btn
 
-        -- 初始化颜色状态
-        btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
+        -- 定义UI更新函数
+        local function updateBtnUI()
+            local isOn = nightVisionSettings[key]
+            btn.BackgroundColor3 = isOn and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
+            btn.Text = name .. (isOn and " 开" or " 关")
+        end
+        
+        updateBtnUI() -- 初始化UI
 
         btn.MouseButton1Click:Connect(function()
             nightVisionSettings[key] = not nightVisionSettings[key]
-            btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
-            btn.Text = name .. (nightVisionSettings[key] and " 开" or " 关")
+            updateBtnUI()
             if nightVisionEnabled then
-                applyNightVision() -- 立即生效
+                applyNightVision()
             end
         end)
+        
+        table.insert(windowButtons, { updateUI = updateBtnUI })
+        return btn
     end
 
     -- 第一排：阴影、遮蔽、迷雾
@@ -1079,23 +1089,18 @@ local function createNightVisionWindow()
     resetCorner.Parent = resetBtn
 
     resetBtn.MouseButton1Click:Connect(function()
-        -- 重置所有渲染属性并断开冻结连接
+        -- 1. 恢复原始渲染属性并断开冻结
         restoreLighting()
         
-        -- 重置设置表为默认状态（只开亮光）
+        -- 2. 重置设置表为默认状态（只开亮光）
         nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true }
         
-        -- 手动更新所有按钮的状态与颜色（通过刷新界面或者重新遍历按钮，这里简单刷新一下光亮按钮）
-        for _, child in ipairs(bg:GetChildren()) do
-            if child:IsA("TextButton") and child ~= closeBtn and child ~= resetBtn then
-                -- 这里比较粗暴，因为按钮文本会变化，我们直接重新读取设置表
-                -- 为了精确，我们调用一次 applyNightVision，然后让界面在下一帧重新渲染
-                -- 更好的做法是重新设置按钮，但最简单的是通知用户重开透视或手动点一下。
-                -- 我们可以在此处硬编码重设文本，比较麻烦，所以推荐用户重开透视。
-            end
+        -- 3. 【核心修复】刷新所有按钮的UI状态，确保视觉与逻辑同步
+        for _, item in ipairs(windowButtons) do
+            item.updateUI()
         end
         
-        -- 恢复后立刻应用一次，确保亮光默认开启
+        -- 4. 立即应用一次新的状态（亮光开启，其他关闭）
         if nightVisionEnabled then
             applyNightVision()
         end
@@ -1816,7 +1821,8 @@ function showMainMenu()
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
                     "8. 【修复】透视模式拖拽进度条时主UI数值不更新的Bug",
-                    "9. 【新增】透视悬浮窗集成6项渲染控制（含冻结机制、环境光遮蔽、大气迷雾）",
+                    "9. 【新增】透视悬浮窗集成6项渲染控制（含冻结机制）",
+                    "10.【修复】渲染开关恢复逻辑与重置UI不同步问题",
                     "",
                     "感谢使用！"
                 }
