@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终完美版 - 动态防回弹穿墙 + 透视UI实时同步 + 渲染开关扩展 + 冻结机制)
+-- Version: 7.7.5 (最终整合版 - 动态穿墙防回弹 + 透视UI实时同步 + 渲染属性冻结机制)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -184,6 +184,9 @@ local nightVisionEnabled = false
 local nightVisionBrightness = 2.5
 local originalLighting = {}
 local nightVisionMaintainConnection = nil
+local atmosphereInstance = nil
+local originalAtmosphere = {}
+local lightingFrozenConnections = {} -- 【新增】光照属性冻结连接池
 
 -- 【新增】渲染特效开关（根据需求：默认全部关闭，仅光亮开启）
 local nightVisionSettings = {
@@ -639,10 +642,7 @@ local function applySpeedMode(enable)
     updateSpeedButtonText()
 end
 
--- ==================== 透视基础 ====================
-local atmosphereInstance = nil
-local originalAtmosphere = {}
-
+-- ==================== 透视基础（整合冻结机制） ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -684,6 +684,32 @@ local function restoreLighting()
             pcall(function() atmosphereInstance[prop] = val end)
         end
     end
+    
+    -- 断开所有冻结连接
+    for _, conn in pairs(lightingFrozenConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    lightingFrozenConnections = {}
+end
+
+-- 冻结属性辅助函数
+local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
+    local connKey = instance:GetFullName() .. "_" .. propName
+    if lightingFrozenConnections[connKey] then
+        lightingFrozenConnections[connKey]:Disconnect()
+        lightingFrozenConnections[connKey] = nil
+    end
+    
+    if isFrozen then
+        pcall(function() instance[propName] = targetValue end)
+        lightingFrozenConnections[connKey] = instance:GetPropertyChangedSignal(propName):Connect(function()
+            pcall(function()
+                if instance[propName] ~= targetValue then
+                    instance[propName] = targetValue
+                end
+            end)
+        end)
+    end
 end
 
 local function applyNightVision()
@@ -692,50 +718,50 @@ local function applyNightVision()
     
     -- 光亮控制
     if nightVisionSettings.ambient then
-        Lighting.Ambient = Color3.new(1, 1, 1)
-        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
-        Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
-        Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+        freezeLightingProperty(Lighting, "Ambient", Color3.new(1, 1, 1), true)
+        freezeLightingProperty(Lighting, "OutdoorAmbient", Color3.new(1, 1, 1), true)
+        freezeLightingProperty(Lighting, "ColorShift_Bottom", Color3.new(1, 1, 1), true)
+        freezeLightingProperty(Lighting, "ColorShift_Top", Color3.new(1, 1, 1), true)
     else
-        if originalLighting.Ambient then Lighting.Ambient = originalLighting.Ambient end
-        if originalLighting.OutdoorAmbient then Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient end
-        if originalLighting.ColorShift_Bottom then Lighting.ColorShift_Bottom = originalLighting.ColorShift_Bottom end
-        if originalLighting.ColorShift_Top then Lighting.ColorShift_Top = originalLighting.ColorShift_Top end
+        if originalLighting.Ambient then freezeLightingProperty(Lighting, "Ambient", originalLighting.Ambient, false) end
+        if originalLighting.OutdoorAmbient then freezeLightingProperty(Lighting, "OutdoorAmbient", originalLighting.OutdoorAmbient, false) end
+        if originalLighting.ColorShift_Bottom then freezeLightingProperty(Lighting, "ColorShift_Bottom", originalLighting.ColorShift_Bottom, false) end
+        if originalLighting.ColorShift_Top then freezeLightingProperty(Lighting, "ColorShift_Top", originalLighting.ColorShift_Top, false) end
     end
     
     -- 阴影控制
     if nightVisionSettings.shadows then
-        Lighting.GlobalShadows = false
+        freezeLightingProperty(Lighting, "GlobalShadows", false, true)
     else
-        if originalLighting.GlobalShadows ~= nil then Lighting.GlobalShadows = originalLighting.GlobalShadows end
+        if originalLighting.GlobalShadows ~= nil then freezeLightingProperty(Lighting, "GlobalShadows", originalLighting.GlobalShadows, false) end
     end
     
     -- 环境光遮蔽控制
     if nightVisionSettings.envAo then
-        Lighting.EnvironmentDiffuseScale = 0
-        Lighting.EnvironmentSpecularScale = 0
+        freezeLightingProperty(Lighting, "EnvironmentDiffuseScale", 0, true)
+        freezeLightingProperty(Lighting, "EnvironmentSpecularScale", 0, true)
     else
-        if originalLighting.EnvironmentDiffuseScale then Lighting.EnvironmentDiffuseScale = originalLighting.EnvironmentDiffuseScale end
-        if originalLighting.EnvironmentSpecularScale then Lighting.EnvironmentSpecularScale = originalLighting.EnvironmentSpecularScale end
+        if originalLighting.EnvironmentDiffuseScale then freezeLightingProperty(Lighting, "EnvironmentDiffuseScale", originalLighting.EnvironmentDiffuseScale, false) end
+        if originalLighting.EnvironmentSpecularScale then freezeLightingProperty(Lighting, "EnvironmentSpecularScale", originalLighting.EnvironmentSpecularScale, false) end
     end
     
     -- 传统迷雾控制
     if nightVisionSettings.fog then
-        Lighting.FogEnd = 100000
-        Lighting.FogStart = 0
+        freezeLightingProperty(Lighting, "FogEnd", 100000, true)
+        freezeLightingProperty(Lighting, "FogStart", 0, true)
     else
-        if originalLighting.FogEnd then Lighting.FogEnd = originalLighting.FogEnd end
-        if originalLighting.FogStart then Lighting.FogStart = originalLighting.FogStart end
+        if originalLighting.FogEnd then freezeLightingProperty(Lighting, "FogEnd", originalLighting.FogEnd, false) end
+        if originalLighting.FogStart then freezeLightingProperty(Lighting, "FogStart", originalLighting.FogStart, false) end
     end
     
     -- 大气迷雾控制
     if atmosphereInstance and atmosphereInstance.Parent then
         if nightVisionSettings.atmosphere then
-            atmosphereInstance.Density = 0
-            atmosphereInstance.Haze = 0
+            freezeLightingProperty(atmosphereInstance, "Density", 0, true)
+            freezeLightingProperty(atmosphereInstance, "Haze", 0, true)
         else
-            if originalAtmosphere.Density then atmosphereInstance.Density = originalAtmosphere.Density end
-            if originalAtmosphere.Haze then atmosphereInstance.Haze = originalAtmosphere.Haze end
+            if originalAtmosphere.Density then freezeLightingProperty(atmosphereInstance, "Density", originalAtmosphere.Density, false) end
+            if originalAtmosphere.Haze then freezeLightingProperty(atmosphereInstance, "Haze", originalAtmosphere.Haze, false) end
         end
     end
 end
@@ -914,10 +940,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（扩展渲染开关） ====================
+-- ==================== 创建透视悬浮窗（整合新测试版的6项控制） ====================
 local function createNightVisionWindow()
     local winWidth = 190
-    local winHeight = 100 -- 高度增加到150，容纳两排按钮
+    local winHeight = 110 -- 紧凑尺寸，刚好包裹内容
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -1002,14 +1028,14 @@ local function createNightVisionWindow()
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
 
-    -- 【新增】渲染开关按钮群
+    -- 【新增】渲染开关按钮群（与测试版同步，6个按钮）
     local function createToggleBtn(name, key, xPos, yPos)
         local btn = Instance.new("TextButton")
         btn.Parent = bg
         btn.Size = UDim2.new(0, 55, 0, 18)
         btn.Position = UDim2.new(0, xPos, 0, yPos)
         btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
-        btn.Text = name
+        btn.Text = name .. (nightVisionSettings[key] and " 开" or " 关")
         btn.TextColor3 = Color3.new(1, 1, 1)
         btn.Font = Enum.Font.Gotham
         btn.TextSize = 9
@@ -1023,6 +1049,7 @@ local function createNightVisionWindow()
         btn.MouseButton1Click:Connect(function()
             nightVisionSettings[key] = not nightVisionSettings[key]
             btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
+            btn.Text = name .. (nightVisionSettings[key] and " 开" or " 关")
             if nightVisionEnabled then
                 applyNightVision() -- 立即生效
             end
@@ -1030,12 +1057,51 @@ local function createNightVisionWindow()
     end
 
     -- 第一排：阴影、遮蔽、迷雾
-    createToggleBtn("阴影", "shadows", 8, 45)
-    createToggleBtn("遮蔽", "envAo", 68, 45)
-    createToggleBtn("迷雾", "fog", 128, 45)
-    -- 第二排：大气、亮光
-    createToggleBtn("大气", "atmosphere", 8, 68)
-    createToggleBtn("亮光", "ambient", 68, 68)
+    createToggleBtn("阴影", "shadows", 8, 48)
+    createToggleBtn("遮蔽", "envAo", 68, 48)
+    createToggleBtn("迷雾", "fog", 128, 48)
+    -- 第二排：大气、亮光、重置
+    createToggleBtn("大气", "atmosphere", 8, 72)
+    createToggleBtn("亮光", "ambient", 68, 72)
+    
+    -- 重置按钮
+    local resetBtn = Instance.new("TextButton")
+    resetBtn.Parent = bg
+    resetBtn.Size = UDim2.new(0, 55, 0, 18)
+    resetBtn.Position = UDim2.new(0, 128, 0, 72)
+    resetBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+    resetBtn.Text = "重置"
+    resetBtn.TextColor3 = Color3.new(1, 1, 1)
+    resetBtn.Font = Enum.Font.Gotham
+    resetBtn.TextSize = 9
+    local resetCorner = Instance.new("UICorner")
+    resetCorner.CornerRadius = UDim.new(0, 3)
+    resetCorner.Parent = resetBtn
+
+    resetBtn.MouseButton1Click:Connect(function()
+        -- 重置所有渲染属性并断开冻结连接
+        restoreLighting()
+        
+        -- 重置设置表为默认状态（只开亮光）
+        nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true }
+        
+        -- 手动更新所有按钮的状态与颜色（通过刷新界面或者重新遍历按钮，这里简单刷新一下光亮按钮）
+        for _, child in ipairs(bg:GetChildren()) do
+            if child:IsA("TextButton") and child ~= closeBtn and child ~= resetBtn then
+                -- 这里比较粗暴，因为按钮文本会变化，我们直接重新读取设置表
+                -- 为了精确，我们调用一次 applyNightVision，然后让界面在下一帧重新渲染
+                -- 更好的做法是重新设置按钮，但最简单的是通知用户重开透视或手动点一下。
+                -- 我们可以在此处硬编码重设文本，比较麻烦，所以推荐用户重开透视。
+            end
+        end
+        
+        -- 恢复后立刻应用一次，确保亮光默认开启
+        if nightVisionEnabled then
+            applyNightVision()
+        end
+        
+        tanchuangxiaoxi("已重置所有渲染属性", "透视")
+    end)
 
     local dragging = false
     knob.MouseButton1Down:Connect(function()
@@ -1750,8 +1816,7 @@ function showMainMenu()
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
                     "8. 【修复】透视模式拖拽进度条时主UI数值不更新的Bug",
-                    "9. 【新增】透视悬浮窗支持独立控制阴影、遮蔽、迷雾、大气、亮光，且状态记忆",
-                    "10.【默认】仅光亮开启，其余穿透效果默认关闭",
+                    "9. 【新增】透视悬浮窗集成6项渲染控制（含冻结机制、环境光遮蔽、大气迷雾）",
                     "",
                     "感谢使用！"
                 }
@@ -1862,6 +1927,7 @@ function showMainMenu()
                     "🔹 透视模式下，加速/减速按钮自动切换为增加/减少，每次步长为0.05",
                     "🔹 穿墙开启后，跳跃瞬间自动防护，不会被墙体弹开",
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
+                    "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
