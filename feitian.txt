@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终优化版 - 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复)
+-- Version: 7.7.5 (最终修复版 - 死亡瞬间生效 + 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -373,12 +373,15 @@ local function disableBuildingRemoval()
     buildingRemovalEnabled = false
     local count = 0
     
+    -- 【加固修复】：用pcall包裹，防止某个建筑部件被销毁或锁定导致整个恢复过程中断
     for part, data in pairs(modifiedBuildingParts) do
-        if part and part.Parent then
-            part.CanCollide = data.CanCollide
-            part.Transparency = data.Transparency
-            count = count + 1
-        end
+        pcall(function()
+            if part and part.Parent then
+                part.CanCollide = data.CanCollide
+                part.Transparency = data.Transparency
+                count = count + 1
+            end
+        end)
     end
     modifiedBuildingParts = {}
     
@@ -1053,16 +1056,17 @@ local function restoreFeatureStates()
     end)
 end
 
--- ==================== 角色重生处理 ====================
+-- ==================== 角色重生处理（修复死亡模式1不生效Bug） ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
     if char:FindFirstChild("Animate") then
         char.Animate.Disabled = false
     end
 
-    if deathMode == 1 then
-        disableAffectedFeatures()
-    elseif deathMode == 2 then
+    -- 【修复】：移除了这里原本针对死亡模式1的 disableAffectedFeatures()
+    -- 因为死亡模式1的关闭逻辑已经提前到 CharacterRemoving 中处理，防止因延迟导致复活后才关闭
+
+    if deathMode == 2 then
         restoreFeatureStates()
     elseif deathMode == 3 then
         disableAffectedFeatures()
@@ -1079,6 +1083,7 @@ local function onCharacterAdded(char)
     updateSpeedButtonText()
     updateMainButtonText()
 
+    -- 绑定死亡事件（作为双重保险）
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.Died:Connect(function()
@@ -1096,6 +1101,18 @@ local function onCharacterAdded(char)
         end)
     end
 end
+
+-- 【核心修复】：新增玩家角色移除事件，确保死亡瞬间一定能关闭
+player.CharacterRemoving:Connect(function(character)
+    if deathMode == 1 then
+        -- 模式1：死亡瞬间，立刻关闭所有，不等待重生
+        disableAffectedFeatures()
+    elseif deathMode == 2 then
+        -- 模式2：死亡瞬间，保存状态并关闭，方便重生后恢复
+        saveFeatureStates()
+        disableAffectedFeatures()
+    end
+end)
 
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
@@ -1629,6 +1646,7 @@ function showMainMenu()
                     "4. 加入5项死亡与重生状态管理逻辑 (透视独立)",
                     "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
+                    "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
                     "",
                     "感谢使用！"
                 }
