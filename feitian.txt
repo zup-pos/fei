@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (完整版 - 动态穿墙+跳跃防挤出+透视模式支持增减按钮微调亮度 0.05 步长)
+-- Version: 7.7.5 (完整版 - 动态穿墙+跳跃防挤出+防掉落保护+透视模式支持增减按钮微调亮度 0.05 步长)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -166,7 +166,7 @@ local originalSpeed = 16
 local deathMode = 2 
 local savedFeatureStates = { fly = false, speed = false, noclip = false, building = false }
 
--- ==================== 穿墙相关变量（新逻辑） ====================
+-- ==================== 穿墙相关变量（新动态逻辑） ====================
 local noclipEnabled = false
 local noclipMaintainConnection = nil
 local noclipStateConnection = nil
@@ -665,7 +665,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（新逻辑） ====================
+-- ==================== 穿墙核心函数（新逻辑 - 彻底替换） ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -749,7 +749,7 @@ local function doNoclip()
     restoreNoclipParts()
 end
 
--- 关闭穿墙（完全重写，注意提前声明顺序）
+-- 关闭穿墙（完全重写）
 local function disableNoclip()
     if not noclipEnabled then return end
     noclipEnabled = false
@@ -1696,6 +1696,7 @@ function showMainMenu()
                     "3. 增加循环模式扩充，共5个状态",
                     "4. 加入5项死亡与重生状态管理逻辑 (透视独立)",
                     "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
+                    "6. 【重构】穿墙逻辑改为动态穿透墙体，支持跳跃防挤出",
                     "",
                     "感谢使用！"
                 }
@@ -1804,6 +1805,7 @@ function showMainMenu()
                     "🔹 删除模式下单点速度标签直接输入透明度",
                     "🔹 穿透与夜视依然是独立的，且重生后完美继承",
                     "🔹 透视模式下，加速/减速按钮自动切换为增加/减少，每次步长为0.05",
+                    "🔹 穿墙模式：动态检测墙体，原地站立稳定，跳跃自动防挤出",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
