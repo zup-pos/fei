@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (完整版 - 动态穿墙+跳跃防挤出+防掉落保护+透视模式支持增减按钮微调亮度 0.05 步长)
+-- Version: 7.7.5 (最终优化版 - 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -166,13 +166,10 @@ local originalSpeed = 16
 local deathMode = 2 
 local savedFeatureStates = { fly = false, speed = false, noclip = false, building = false }
 
--- ==================== 穿墙相关变量（新动态逻辑） ====================
+-- ==================== 穿墙相关变量（优化版） ====================
 local noclipEnabled = false
-local noclipMaintainConnection = nil
+local noclipConnection = nil
 local noclipStateConnection = nil
-local noclipModifiedParts = {} -- 记录被修改的墙体
-local lastBoxCheck = 0         -- 控制包围盒检测频率
-local NOCLIP_RESTORE_DELAY = 0.5 -- 离开墙体后0.5秒恢复碰撞
 
 -- ==================== 建筑移除相关变量 ====================
 local buildingRemovalEnabled = false
@@ -271,7 +268,6 @@ local function updateMainButtonText()
     end
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 
-    -- 根据模式切换加减速按钮文本
     if modeIndex == 4 then
         plus.Text = "增加"
         mine.Text = "减少"
@@ -665,7 +661,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（新逻辑 - 彻底替换） ====================
+-- ==================== 穿墙核心函数（最终优化版） ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -675,106 +671,47 @@ local function getCharacterParts()
     return char, hrp, hum
 end
 
--- 恢复离开范围的墙体碰撞
-local function restoreNoclipParts()
-    local now = tick()
-    for part, data in pairs(noclipModifiedParts) do
-        if part and part.Parent then
-            if now - data.lastTouchTime > NOCLIP_RESTORE_DELAY then
-                part.CanCollide = data.originalCanCollide
-                noclipModifiedParts[part] = nil
-            end
-        else
-            noclipModifiedParts[part] = nil -- 部件销毁，清理记录
-        end
-    end
-end
-
--- 动态穿透核心逻辑
-local function doNoclip()
-    local char, hrp, hum = getCharacterParts()
-    if not char or not hrp or not hum then return end
-
-    local now = tick()
-    -- 射线参数，排除自己
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {char}
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-
-    -- 1. 向前射线（提前检测前方5格，防止速度过快撞墙）
-    local rayDirection = hrp.CFrame.LookVector * 5
-    local rayResult = workspace:Raycast(hrp.Position, rayDirection, raycastParams)
-    
-    if rayResult and rayResult.Instance and rayResult.Instance:IsA("BasePart") then
-        local part = rayResult.Instance
-        -- 排除地板
-        local isFloor = part.CFrame.UpVector.Y > 0.7
-        local nameLower = string.lower(part.Name)
-        local isIgnored = string.find(nameLower, "floor") or string.find(nameLower, "baseplate") or string.find(nameLower, "ground")
-        
-        if not isFloor and not isIgnored then
-            if not noclipModifiedParts[part] then
-                noclipModifiedParts[part] = { originalCanCollide = part.CanCollide, lastTouchTime = now }
-            end
+-- 关闭自身碰撞
+local function applyNoclip()
+    local char = player.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
             part.CanCollide = false
-            noclipModifiedParts[part].lastTouchTime = now
         end
     end
-
-    -- 2. 身体周围包围盒检测（降频至每0.1秒一次，极大减轻移动端压力）
-    if now - lastBoxCheck > 0.1 then
-        lastBoxCheck = now
-        local boxSize = hrp.Size + Vector3.new(4, 4, 4) -- 扩大检测范围，防跳跃挤压
-        local partsInBox = workspace:GetPartBoundsInBox(hrp.CFrame, boxSize, raycastParams)
-        
-        for _, part in ipairs(partsInBox) do
-            if part:IsA("BasePart") and not part:IsA("Terrain") then
-                -- 关键：排除地板，防止掉出地图
-                local isFloor = part.CFrame.UpVector.Y > 0.7
-                local nameLower = string.lower(part.Name)
-                local isIgnored = string.find(nameLower, "floor") or string.find(nameLower, "baseplate") or string.find(nameLower, "ground")
-                
-                if not isFloor and not isIgnored then
-                    if not noclipModifiedParts[part] then
-                        noclipModifiedParts[part] = { originalCanCollide = part.CanCollide, lastTouchTime = now }
-                    end
-                    part.CanCollide = false
-                    noclipModifiedParts[part].lastTouchTime = now
-                end
-            end
-        end
-    end
-
-    -- 3. 恢复离开的墙体
-    restoreNoclipParts()
 end
 
--- 关闭穿墙（完全重写）
+-- 恢复自身碰撞
+local function restoreNoclip()
+    local char = player.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = true
+        end
+    end
+end
+
+-- 关闭穿墙
 local function disableNoclip()
     if not noclipEnabled then return end
     noclipEnabled = false
 
-    if noclipWindow then
-        noclipWindow:Destroy()
-        noclipWindow = nil
-    end
-    if noclipMaintainConnection then
-        noclipMaintainConnection:Disconnect()
-        noclipMaintainConnection = nil
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
     end
     if noclipStateConnection then
         noclipStateConnection:Disconnect()
         noclipStateConnection = nil
     end
-
-    -- 恢复所有被修改的墙体
-    for part, data in pairs(noclipModifiedParts) do
-        if part and part.Parent then
-            part.CanCollide = data.originalCanCollide
-        end
+    if noclipWindow then
+        noclipWindow:Destroy()
+        noclipWindow = nil
     end
-    noclipModifiedParts = {}
-    
+
+    restoreNoclip()
     updateMainButtonText()
     updateSpeedButtonText()
 end
@@ -994,7 +931,8 @@ local function createNightVisionWindow()
     knob.MouseButton1Down:Connect(function()
         dragging = true
     end)
-    UserInputService.InputEnded:Connect(function(input)
+    -- 【修复】保存 InputEnded 连接引用，防止内存泄漏
+    local inputEndConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
@@ -1017,7 +955,6 @@ local function createNightVisionWindow()
                 applyNightVision()
             end
         else
-            -- 实时同步由外部按键修改的亮度变化
             local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
             knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
             valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
@@ -1026,45 +963,40 @@ local function createNightVisionWindow()
 
     sg.Destroying:Connect(function()
         if conn then conn:Disconnect() end
+        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】显式断开
     end)
 
     return sg
 end
 
--- ==================== 开启穿墙（完全重写） ====================
+-- ==================== 开启穿墙（最终优化版） ====================
 local function enableNoclip()
     if not player.Character then return end
     if noclipEnabled then return end
 
     noclipEnabled = true
-    
-    -- 清空旧记录（如果有残留）
-    for part, data in pairs(noclipModifiedParts) do
-        if part and part.Parent then part.CanCollide = data.originalCanCollide end
-    end
-    noclipModifiedParts = {}
+    applyNoclip()
 
-    -- 跳跃/下落状态监听（最关键的防挤出保护）
+    -- 1. 跳跃状态监听：跳跃瞬间强制清除碰撞，防止被物理引擎挤出去
     local char, hrp, hum = getCharacterParts()
     if hum then
         if noclipStateConnection then noclipStateConnection:Disconnect() end
         noclipStateConnection = hum.StateChanged:Connect(function(oldState, newState)
             if not noclipEnabled then return end
-            -- 一旦进入跳跃或下落，立刻强制穿透周围
             if newState == Enum.HumanoidStateType.Jumping or 
                newState == Enum.HumanoidStateType.Freefall or 
                newState == Enum.HumanoidStateType.FallingDown or
                newState == Enum.HumanoidStateType.Landed then
-                doNoclip()
+                applyNoclip() -- 瞬间穿透
             end
         end)
     end
 
-    -- 启动 RenderStepped 主循环
-    if noclipMaintainConnection then noclipMaintainConnection:Disconnect() end
-    noclipMaintainConnection = RunService.RenderStepped:Connect(function()
+    -- 2. 使用 Stepped 而非 Heartbeat，在物理计算前关掉碰撞，彻底防回弹
+    if noclipConnection then noclipConnection:Disconnect() end
+    noclipConnection = RunService.Stepped:Connect(function()
         if noclipEnabled then
-            doNoclip()
+            applyNoclip()
         end
     end)
 
@@ -1696,7 +1628,7 @@ function showMainMenu()
                     "3. 增加循环模式扩充，共5个状态",
                     "4. 加入5项死亡与重生状态管理逻辑 (透视独立)",
                     "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
-                    "6. 【重构】穿墙逻辑改为动态穿透墙体，支持跳跃防挤出",
+                    "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "",
                     "感谢使用！"
                 }
@@ -1805,7 +1737,7 @@ function showMainMenu()
                     "🔹 删除模式下单点速度标签直接输入透明度",
                     "🔹 穿透与夜视依然是独立的，且重生后完美继承",
                     "🔹 透视模式下，加速/减速按钮自动切换为增加/减少，每次步长为0.05",
-                    "🔹 穿墙模式：动态检测墙体，原地站立稳定，跳跃自动防挤出",
+                    "🔹 穿墙开启后，跳跃瞬间自动防护，不会被墙体弹开",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2801,7 +2733,8 @@ function showBrightnessDialog()
     knob.MouseButton1Down:Connect(function()
         dragging = true
     end)
-    UserInputService.InputEnded:Connect(function(input)
+    -- 【修复】保存 InputEnded 连接引用，防止内存泄漏
+    local inputEndConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
@@ -2868,7 +2801,8 @@ function showBrightnessDialog()
     confirmCorner.Parent = confirmBtn
 
     cancelBtn.MouseButton1Click:Connect(function()
-        conn:Disconnect()
+        if conn then conn:Disconnect() end
+        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】
          dialog:Destroy()
     end)
 
@@ -2883,22 +2817,18 @@ function showBrightnessDialog()
             end
             tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
         end
-        conn:Disconnect()
+        if conn then conn:Disconnect() end
+        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】
         dialog:Destroy()
     end)
 end
-
--- ==================== 实时更新速度显示 ====================
-RunService.Heartbeat:Connect(function()
-    updateSpeedButtonText()
-end)
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
     if speedModeConnection then speedModeConnection:Disconnect() end
     removeFly()
     disableNoclip()
-    disableBuildingRemoval() -- 退出时还原建筑
+    disableBuildingRemoval()
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
     if nightVisionEnabled then restoreLighting() end
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
