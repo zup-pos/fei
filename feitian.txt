@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终修复版 - 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复 + 透视数值动态同步)
+-- Version: 7.7.5 (最终完美版 - 动态防回弹穿墙 + 透视UI实时同步)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -664,7 +664,7 @@ local function applyNightVision()
     Lighting.GlobalShadows = false
 end
 
--- ==================== 穿墙核心函数（最终优化版） ====================
+-- ==================== 穿墙核心函数 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -674,7 +674,6 @@ local function getCharacterParts()
     return char, hrp, hum
 end
 
--- 关闭自身碰撞
 local function applyNoclip()
     local char = player.Character
     if not char then return end
@@ -685,7 +684,6 @@ local function applyNoclip()
     end
 end
 
--- 恢复自身碰撞
 local function restoreNoclip()
     local char = player.Character
     if not char then return end
@@ -696,7 +694,6 @@ local function restoreNoclip()
     end
 end
 
--- 关闭穿墙
 local function disableNoclip()
     if not noclipEnabled then return end
     noclipEnabled = false
@@ -719,7 +716,6 @@ local function disableNoclip()
     updateSpeedButtonText()
 end
 
--- 关闭透视
 local function disableNightVision()
     if nightVisionEnabled then
         if nightVisionWindow then
@@ -956,10 +952,15 @@ local function createNightVisionWindow()
             end
         end
         
-        -- 【修复核心】：无论是否正在拖动，每帧强制根据最新数值刷新进度条和文本
+        -- 【核心修复1】：强制刷新悬浮窗的进度条和文本
         local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
         valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
+        
+        -- 【核心修复2】：强制同步主UI上的 speed 文本（这才是你要的同步！）
+        if modeIndex == 4 then
+            updateSpeedButtonText()
+        end
     end)
 
     sg.Destroying:Connect(function()
@@ -970,7 +971,7 @@ local function createNightVisionWindow()
     return sg
 end
 
--- ==================== 开启穿墙（最终优化版） ====================
+-- ==================== 开启穿墙 ====================
 local function enableNoclip()
     if not player.Character then return end
     if noclipEnabled then return end
@@ -978,7 +979,6 @@ local function enableNoclip()
     noclipEnabled = true
     applyNoclip()
 
-    -- 1. 跳跃状态监听：跳跃瞬间强制清除碰撞，防止被物理引擎挤出去
     local char, hrp, hum = getCharacterParts()
     if hum then
         if noclipStateConnection then noclipStateConnection:Disconnect() end
@@ -988,12 +988,11 @@ local function enableNoclip()
                newState == Enum.HumanoidStateType.Freefall or 
                newState == Enum.HumanoidStateType.FallingDown or
                newState == Enum.HumanoidStateType.Landed then
-                applyNoclip() -- 瞬间穿透
+                applyNoclip()
             end
         end)
     end
 
-    -- 2. 使用 Stepped 而非 Heartbeat，在物理计算前关掉碰撞，彻底防回弹
     if noclipConnection then noclipConnection:Disconnect() end
     noclipConnection = RunService.Stepped:Connect(function()
         if noclipEnabled then
@@ -1030,7 +1029,7 @@ local function enableNightVision()
     updateSpeedButtonText()
 end
 
--- ==================== 新版：死亡与重生控制核心函数 ====================
+-- ==================== 死亡与重生控制核心函数 ====================
 local function saveFeatureStates()
     savedFeatureStates.fly = isFlying
     savedFeatureStates.speed = speedModeEnabled
@@ -1054,7 +1053,7 @@ local function restoreFeatureStates()
     end)
 end
 
--- ==================== 角色重生处理（修复死亡模式1不生效Bug） ====================
+-- ==================== 角色重生处理 ====================
 local function onCharacterAdded(char)
     task.wait(0.7)
     if char:FindFirstChild("Animate") then
@@ -1096,7 +1095,6 @@ local function onCharacterAdded(char)
     end
 end
 
--- 【核心修复】：新增玩家角色移除事件，确保死亡瞬间一定能关闭
 player.CharacterRemoving:Connect(function(character)
     if deathMode == 1 then
         disableAffectedFeatures()
@@ -1639,7 +1637,7 @@ function showMainMenu()
                     "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
-                    "8. 【修复】透视模式拖拽进度条时数值动态更新Bug",
+                    "8. 【修复】透视模式拖拽进度条时主UI数值不更新的Bug",
                     "",
                     "感谢使用！"
                 }
@@ -2667,7 +2665,7 @@ do
      end)
 end
 
--- ==================== 补全亮度对话框函数（修复UI同步） ====================
+-- ==================== 补全亮度对话框函数 ====================
 function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -2766,11 +2764,16 @@ function showBrightnessDialog()
             nightVisionBrightness = newBrightness
         end
         
-        -- 【修复核心】：每帧强制同步进度条位置和输入框文字
+        -- 同步进度条和输入框
         local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(syncPercent, -10, 0, -8)
         if not textBox:IsFocused() then
             textBox.Text = string.format("%.2f", nightVisionBrightness)
+        end
+        
+        -- 【核心修复3】：弹窗拖动时也同步主UI的文本
+        if modeIndex == 4 then
+            updateSpeedButtonText()
         end
     end)
 
@@ -2780,7 +2783,7 @@ function showBrightnessDialog()
             num = clamp(num, minBright, maxBright)
             num = math.floor(num * 100) / 100
             textBox.Text = string.format("%.2f", num)
-            nightVisionBrightness = num -- 确保全局变量实时更新
+            nightVisionBrightness = num
             if nightVisionEnabled then applyNightVision() end
         else
             textBox.Text = string.format("%.2f", nightVisionBrightness)
