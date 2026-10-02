@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终修复版 - 死亡瞬间生效 + 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复)
+-- Version: 7.7.5 (最终修复版 - 动态穿墙防回弹 + 事件驱动UI + 内存泄漏修复 + 透视数值动态同步)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -842,7 +842,7 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗 ====================
+-- ==================== 创建透视悬浮窗（修复UI同步） ====================
 local function createNightVisionWindow()
     local winWidth = 180
     local winHeight = 58
@@ -934,7 +934,6 @@ local function createNightVisionWindow()
     knob.MouseButton1Down:Connect(function()
         dragging = true
     end)
-    -- 【修复】保存 InputEnded 连接引用，防止内存泄漏
     local inputEndConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
@@ -949,24 +948,23 @@ local function createNightVisionWindow()
             local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local currentPercent = relX / absSize
-            knob.Position = UDim2.new(currentPercent, -6, 0, -4.5)
             local newBrightness = minBright + currentPercent * (maxBright - minBright)
             newBrightness = math.floor(newBrightness * 100) / 100
             nightVisionBrightness = newBrightness
-            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
             if nightVisionEnabled then
                 applyNightVision()
             end
-        else
-            local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-            knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
-            valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
         end
+        
+        -- 【修复核心】：无论是否正在拖动，每帧强制根据最新数值刷新进度条和文本
+        local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+        knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
+        valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
     end)
 
     sg.Destroying:Connect(function()
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】显式断开
+        if inputEndConn then inputEndConn:Disconnect() end
     end)
 
     return sg
@@ -1063,9 +1061,6 @@ local function onCharacterAdded(char)
         char.Animate.Disabled = false
     end
 
-    -- 【修复】：移除了这里原本针对死亡模式1的 disableAffectedFeatures()
-    -- 因为死亡模式1的关闭逻辑已经提前到 CharacterRemoving 中处理，防止因延迟导致复活后才关闭
-
     if deathMode == 2 then
         restoreFeatureStates()
     elseif deathMode == 3 then
@@ -1083,7 +1078,6 @@ local function onCharacterAdded(char)
     updateSpeedButtonText()
     updateMainButtonText()
 
-    -- 绑定死亡事件（作为双重保险）
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.Died:Connect(function()
@@ -1105,10 +1099,8 @@ end
 -- 【核心修复】：新增玩家角色移除事件，确保死亡瞬间一定能关闭
 player.CharacterRemoving:Connect(function(character)
     if deathMode == 1 then
-        -- 模式1：死亡瞬间，立刻关闭所有，不等待重生
         disableAffectedFeatures()
     elseif deathMode == 2 then
-        -- 模式2：死亡瞬间，保存状态并关闭，方便重生后恢复
         saveFeatureStates()
         disableAffectedFeatures()
     end
@@ -1647,6 +1639,7 @@ function showMainMenu()
                     "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
+                    "8. 【修复】透视模式拖拽进度条时数值动态更新Bug",
                     "",
                     "感谢使用！"
                 }
@@ -2162,6 +2155,7 @@ do
                 nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
                 nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
                 if nightVisionEnabled then applyNightVision() end
+                updateSpeedButtonText()
             end
             task.wait(interval)
             interval = math.max(0.001, interval * 0.9)
@@ -2183,6 +2177,7 @@ do
             nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
             nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
             if nightVisionEnabled then applyNightVision() end
+            updateSpeedButtonText()
         end
         longPressTask = task.delay(0.3, function()
             if holding then
@@ -2251,6 +2246,7 @@ do
         nightVisionBrightness = clamp(nightVisionBrightness - 0.05, 0.01, 100)
         nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
         if nightVisionEnabled then applyNightVision() end
+        updateSpeedButtonText()
         return true
     end
 
@@ -2671,7 +2667,7 @@ do
      end)
 end
 
--- ==================== 补全亮度对话框函数 ====================
+-- ==================== 补全亮度对话框函数（修复UI同步） ====================
 function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -2751,7 +2747,6 @@ function showBrightnessDialog()
     knob.MouseButton1Down:Connect(function()
         dragging = true
     end)
-    -- 【修复】保存 InputEnded 连接引用，防止内存泄漏
     local inputEndConn = UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
@@ -2766,10 +2761,16 @@ function showBrightnessDialog()
              local absSize = sliderBg.AbsoluteSize.X
             local relX = clamp(mousePos.X - absPos.X, 0, absSize)
             local currentPercent = relX / absSize
-            knob.Position = UDim2.new(currentPercent, -10, 0, -8)
             local newBrightness = minBright + currentPercent * (maxBright - minBright)
             newBrightness = math.floor(newBrightness * 100) / 100
-            textBox.Text = string.format("%.2f", newBrightness)
+            nightVisionBrightness = newBrightness
+        end
+        
+        -- 【修复核心】：每帧强制同步进度条位置和输入框文字
+        local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
+        knob.Position = UDim2.new(syncPercent, -10, 0, -8)
+        if not textBox:IsFocused() then
+            textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
     end)
 
@@ -2779,8 +2780,8 @@ function showBrightnessDialog()
             num = clamp(num, minBright, maxBright)
             num = math.floor(num * 100) / 100
             textBox.Text = string.format("%.2f", num)
-            local newPercent = (num - minBright) / (maxBright - minBright)
-            knob.Position = UDim2.new(newPercent, -10, 0, -8)
+            nightVisionBrightness = num -- 确保全局变量实时更新
+            if nightVisionEnabled then applyNightVision() end
         else
             textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
@@ -2820,7 +2821,7 @@ function showBrightnessDialog()
 
     cancelBtn.MouseButton1Click:Connect(function()
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】
+        if inputEndConn then inputEndConn:Disconnect() end
          dialog:Destroy()
     end)
 
@@ -2836,7 +2837,7 @@ function showBrightnessDialog()
             tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
         end
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end -- 【修复】
+        if inputEndConn then inputEndConn:Disconnect() end
         dialog:Destroy()
     end)
 end
