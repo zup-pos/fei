@@ -917,7 +917,7 @@ end
 -- ==================== 创建透视悬浮窗（扩展渲染开关） ====================
 local function createNightVisionWindow()
     local winWidth = 190
-    local winHeight = 150 -- 高度增加到150，容纳两排按钮
+    local winHeight = 100 -- 高度增加到150，容纳两排按钮
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
