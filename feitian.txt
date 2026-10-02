@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终完美版 - 动态防回弹穿墙 + 透视UI实时同步)
+-- Version: 7.7.5 (最终完美版 - 动态防回弹穿墙 + 透视UI实时同步 + 渲染开关扩展)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -184,6 +184,13 @@ local nightVisionEnabled = false
 local nightVisionBrightness = 2.5
 local originalLighting = {}
 local nightVisionMaintainConnection = nil
+
+-- 【新增】渲染特效开关（默认全开，即穿透效果默认生效）
+local nightVisionSettings = {
+    shadows = true,  -- 是否穿透阴影
+    fog = true,      -- 是否穿透迷雾
+    ambient = true   -- 是否强制环境光全亮
+}
 
 -- ==================== 有效Humanoid状态 ====================
 local VALID_HUMANOD_STATES = {
@@ -655,13 +662,35 @@ end
 local function applyNightVision()
     local Lighting = game:GetService("Lighting")
     Lighting.Brightness = nightVisionBrightness
-    Lighting.Ambient = Color3.new(1, 1, 1)
-    Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
-    Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
-    Lighting.ColorShift_Top = Color3.new(1, 1, 1)
-    Lighting.FogEnd = 100000
-    Lighting.FogStart = 0
-    Lighting.GlobalShadows = false
+    
+    -- 环境光控制
+    if nightVisionSettings.ambient then
+        Lighting.Ambient = Color3.new(1, 1, 1)
+        Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
+        Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+        Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+    else
+        if originalLighting.Ambient then Lighting.Ambient = originalLighting.Ambient end
+        if originalLighting.OutdoorAmbient then Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient end
+        if originalLighting.ColorShift_Bottom then Lighting.ColorShift_Bottom = originalLighting.ColorShift_Bottom end
+        if originalLighting.ColorShift_Top then Lighting.ColorShift_Top = originalLighting.ColorShift_Top end
+    end
+    
+    -- 迷雾控制
+    if nightVisionSettings.fog then
+        Lighting.FogEnd = 100000
+        Lighting.FogStart = 0
+    else
+        if originalLighting.FogEnd then Lighting.FogEnd = originalLighting.FogEnd end
+        if originalLighting.FogStart then Lighting.FogStart = originalLighting.FogStart end
+    end
+    
+    -- 阴影控制
+    if nightVisionSettings.shadows then
+        Lighting.GlobalShadows = false
+    else
+        if originalLighting.GlobalShadows ~= nil then Lighting.GlobalShadows = originalLighting.GlobalShadows end
+    end
 end
 
 -- ==================== 穿墙核心函数 ====================
@@ -838,10 +867,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（修复UI同步） ====================
+-- ==================== 创建透视悬浮窗（修复UI同步 + 渲染开关） ====================
 local function createNightVisionWindow()
     local winWidth = 180
-    local winHeight = 58
+    local winHeight = 100 -- 高度增加到100，容纳新按钮
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -926,6 +955,36 @@ local function createNightVisionWindow()
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
 
+    -- 【新增】阴影、迷雾、环境光开关按钮
+    local function createToggleBtn(name, key, xPos)
+        local btn = Instance.new("TextButton")
+        btn.Parent = bg
+        btn.Size = UDim2.new(0, 50, 0, 18)
+        btn.Position = UDim2.new(0, xPos, 0, 45)
+        btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
+        btn.Text = name .. (nightVisionSettings[key] and "开" or "关")
+        btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 9
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 3)
+        btnCorner.Parent = btn
+
+        btn.MouseButton1Click:Connect(function()
+            nightVisionSettings[key] = not nightVisionSettings[key]
+            btn.BackgroundColor3 = nightVisionSettings[key] and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
+            btn.Text = name .. (nightVisionSettings[key] and "开" or "关")
+            if nightVisionEnabled then
+                applyNightVision() -- 立即生效
+            end
+        end)
+    end
+
+    -- 排列三个按钮
+    createToggleBtn("阴影", "shadows", 8)
+    createToggleBtn("迷雾", "fog", 65)
+    createToggleBtn("亮光", "ambient", 122)
+
     local dragging = false
     knob.MouseButton1Down:Connect(function()
         dragging = true
@@ -952,12 +1011,12 @@ local function createNightVisionWindow()
             end
         end
         
-        -- 【核心修复1】：强制刷新悬浮窗的进度条和文本
+        -- 同步进度条和文本
         local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
         valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
         
-        -- 【核心修复2】：强制同步主UI上的 speed 文本（这才是你要的同步！）
+        -- 同步主UI的文本
         if modeIndex == 4 then
             updateSpeedButtonText()
         end
@@ -1638,6 +1697,7 @@ function showMainMenu()
                     "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
                     "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
                     "8. 【修复】透视模式拖拽进度条时主UI数值不更新的Bug",
+                    "9. 【新增】透视悬浮窗支持独立控制阴影、迷雾、环境光，且状态记忆",
                     "",
                     "感谢使用！"
                 }
@@ -1747,6 +1807,7 @@ function showMainMenu()
                     "🔹 穿透与夜视依然是独立的，且重生后完美继承",
                     "🔹 透视模式下，加速/减速按钮自动切换为增加/减少，每次步长为0.05",
                     "🔹 穿墙开启后，跳跃瞬间自动防护，不会被墙体弹开",
+                    "🔹 透视悬浮窗支持独立开关阴影、迷雾、环境光，且自动记忆",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2771,7 +2832,7 @@ function showBrightnessDialog()
             textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
         
-        -- 【核心修复3】：弹窗拖动时也同步主UI的文本
+        -- 弹窗拖动时也同步主UI的文本
         if modeIndex == 4 then
             updateSpeedButtonText()
         end
