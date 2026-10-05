@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终稳定版 - 顶部/底部安全区限制 + 迷你UI防误触 + 飞天双模式 + 移速动态刷新)
+-- Version: 7.7.5 (最终稳定版 - 修复移速记忆Bug + 顶部/底部双安全区 + 迷你UI防误触 + 飞天双模式)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -18,6 +18,7 @@ main.Name = "main"
 main.Parent = game.CoreGui
 main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 main.ResetOnSpawn = false
+main.IgnoreGuiInset = true -- 【修正】强制使用物理屏幕坐标，确保绝对定位准确
 
 Frame.Parent = main
 Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
@@ -146,6 +147,9 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
+-- 【新增】移速记忆变量
+local savedSpeed = nil
+
 -- 主窗口拖拽变量
 local frameDragging = false
 local dragStartInput = nil
@@ -244,15 +248,11 @@ local function clamp(val, min, max)
 end
 
 local function getScreenSize()
-    if customWidth and customHeight then
-        return Vector2.new(customWidth, customHeight)
+    local screenSize = main.AbsoluteSize
+    if screenSize.X == 0 or screenSize.Y == 0 then
+        screenSize = workspace.CurrentCamera.ViewportSize
     end
-    local camera = workspace.CurrentCamera
-    if camera and camera.ViewportSize then
-        return camera.ViewportSize
-    else
-        return Vector2.new(1920, 1080)
-    end
+    return screenSize
 end
 
 -- ==================== 主窗口拖拽与边界限制（顶部+底部双安全区版） ====================
@@ -270,17 +270,18 @@ UserInputService.InputChanged:Connect(function(input)
         local newX = dragStartFramePos.X + delta.X
         local newY = dragStartFramePos.Y + delta.Y
         
-        local camera = workspace.CurrentCamera
-        if not camera then return end
-        local vp = camera.ViewportSize
+        local vp = getScreenSize()
         local frameSize = Frame.AbsoluteSize
         
-        -- 【核心修复】顶部预留 40 像素，底部预留 35 像素安全区
+        -- 顶部预留 40 像素，底部预留 40 像素安全区
         local safeTopPadding = 40
-        local safeBottomPadding = 35
+        local safeBottomPadding = 40
         
-        newX = clamp(newX, 0, vp.X - frameSize.X)
-        newY = clamp(newY, safeTopPadding, vp.Y - frameSize.Y - safeBottomPadding)
+        local maxX = math.max(0, vp.X - frameSize.X)
+        local maxY = math.max(safeTopPadding, vp.Y - frameSize.Y - safeBottomPadding)
+        
+        newX = clamp(newX, 0, maxX)
+        newY = clamp(newY, safeTopPadding, maxY)
         
         Frame.Position = UDim2.fromOffset(newX, newY)
     end
@@ -671,7 +672,7 @@ local function toggleFly(enable)
     updateSpeedDisplayLoop()
 end
 
--- ==================== 移速模式 ====================
+-- ==================== 移速模式（修复记忆Bug版） ====================
 local function applySpeedMode(enable)
     if enable then
         local flyWasClosed = forceDisableFly()
@@ -688,7 +689,13 @@ local function applySpeedMode(enable)
         end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        lockedSpeed = originalSpeed
+        -- 【核心修复】优先使用用户保存的速度，否则使用原速
+        if savedSpeed and savedSpeed > 0 then
+            lockedSpeed = savedSpeed
+        else
+            lockedSpeed = originalSpeed
+            savedSpeed = lockedSpeed
+        end
 
         if speedModeConnection then
             speedModeConnection:Disconnect()
@@ -1897,7 +1904,8 @@ function showMainMenu()
                     "13.【优化】死亡处理模式默认值改为模式1",
                     "14.【优化】主UI与迷你UI增加屏幕边界限制，防止拖出屏幕",
                     "15.【修复】迷你UI在滑动经过时被误触展开的Bug",
-                    "16.【优化】顶部预留40像素，底部预留35像素安全区，防止被手机系统UI遮挡",
+                    "16.【优化】顶部/底部物理安全区预留，彻底防止被手机系统UI遮挡",
+                    "17.【修复】移速模式现在会记住用户调整过的速度，重新开启不再重置",
                     "",
                     "感谢使用！"
                 }
@@ -2010,10 +2018,11 @@ function showMainMenu()
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
                     "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "🔹 移速模式下，未锁定速度时，界面会实时刷新角色真实速度",
+                    "🔹 移速模式下，锁定后调整的速度会被自动记忆，重新开启不会重置",
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
-                    "🔹 主界面与迷你界面拖拽时均带屏幕边缘限制，不会跑出屏幕外",
+                    "🔹 主界面与迷你界面拖拽时均带屏幕物理边缘限制，不会跑出屏幕外",
                     "🔹 迷你窗口滑动经过时带有防误触判定，需点击才能展开",
-                    "🔹 顶部/底部带安全区限制，防止被手机系统UI遮挡",
+                    "🔹 顶部/底部带物理安全区限制，防止被手机系统UI遮挡",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2161,6 +2170,17 @@ function showMainMenu()
                                 customWidth = nil
                                 customHeight = nil
                                 tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
+                            end
+                        },
+                        {
+                            text = "🔄 重置移速为默认值 (16)",
+                            callback = function(subMenu)
+                                savedSpeed = 16
+                                if speedModeEnabled then
+                                    lockedSpeed = 16
+                                    updateSpeedButtonText()
+                                end
+                                tanchuangxiaoxi("移速已重置为默认值 16", "移速设置")
                             end
                         },
                         {
@@ -2420,6 +2440,8 @@ do
                 speed.Text = tostring(speeds)
             elseif modeIndex == 1 and speedModeEnabled then
                 lockedSpeed = lockedSpeed + incStep
+                savedSpeed = lockedSpeed -- 记录用户调整
+                updateSpeedButtonText()
             elseif modeIndex == 4 then
                 nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
                 nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
@@ -2442,6 +2464,8 @@ do
             speed.Text = tostring(speeds)
         elseif modeIndex == 1 then
             lockedSpeed = lockedSpeed + incStep
+            savedSpeed = lockedSpeed -- 记录用户调整
+            updateSpeedButtonText()
         elseif modeIndex == 4 then
             nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
             nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
@@ -2528,6 +2552,10 @@ do
                 success = decreaseFlySpeed()
             elseif modeIndex == 1 and speedModeEnabled then
                 success = decreaseLockedSpeed()
+                if success then
+                    savedSpeed = lockedSpeed -- 记录用户调整
+                    updateSpeedButtonText()
+                end
             elseif modeIndex == 4 then
                 success = decreaseNightVision()
             end
@@ -2547,6 +2575,8 @@ do
             decreaseFlySpeed()
         elseif modeIndex == 1 then
             decreaseLockedSpeed()
+            savedSpeed = lockedSpeed -- 记录用户调整
+            updateSpeedButtonText()
         elseif modeIndex == 4 then
             decreaseNightVision()
         end
@@ -2721,6 +2751,8 @@ do
                         local num = tonumber(input)
                         if num and num > 0 then
                              lockedSpeed = num
+                             savedSpeed = lockedSpeed -- 记录用户调整
+                             updateSpeedButtonText()
                             tanchuangxiaoxi("锁定速度已设为 " .. tostring(num), "速度设置")
                         else
                             tanchuangxiaoxi("请输入大于0的数字", "错误")
@@ -2901,9 +2933,8 @@ do
                                 local viewport = camera.ViewportSize
                                 local miniSize = mini.AbsoluteSize
                                 
-                                -- 【核心修复】迷你窗口也预留顶部/底部安全区
                                 local safeTopPadding = 40
-                                local safeBottomPadding = 35
+                                local safeBottomPadding = 40
                                 
                                 newAbsX = clamp(newAbsX, 0, viewport.X - miniSize.X)
                                 newAbsY = clamp(newAbsY, safeTopPadding, viewport.Y - miniSize.Y - safeBottomPadding)
@@ -2932,9 +2963,8 @@ do
                             local newX = miniPos.X - (frameWidth - miniWidth) / 2
                             local newY = miniPos.Y - (frameHeight - miniHeight) / 2
                             
-                            -- 展开主窗口时也应用顶部/底部安全区
                             local safeTopPadding = 40
-                            local safeBottomPadding = 35
+                            local safeBottomPadding = 40
                             
                             newX = clamp(newX, 0, screenSize.X - frameWidth)
                             newY = clamp(newY, safeTopPadding, screenSize.Y - frameHeight - safeBottomPadding)
