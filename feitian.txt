@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终稳定版 - 移速动态刷新 + 冻结机制 + 渲染开关修复)
+-- Version: 7.7.5 (最终稳定版 - 移速动态刷新 + 冻结机制 + 渲染开关修复 + 泳姿/自由双模式 + 拖拽边界限制 + 迷你UI滑动防误触)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -25,7 +25,7 @@ Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.new(0.100320168, 0, 0.379746825, 0)
 Frame.Size = UDim2.new(0, 190, 0, 56)
 Frame.Active = true
-Frame.Draggable = true
+Frame.Draggable = false -- 禁用原生拖拽，改用自定义边界限制
 
 up.Name = "up"
 up.Parent = Frame
@@ -144,7 +144,11 @@ local customHeight = nil
 local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"
-local flyMode = "屏幕"
+local flyMode = "泳姿"
+
+-- 拖拽边界限制变量
+local frameDragging = false
+local frameDragStartOffset = nil
 
 -- 悬浮窗变量
 local noclipWindow = nil
@@ -162,11 +166,11 @@ local speedModeConnection = nil
 local lockedSpeed = 16
 local originalSpeed = 16
 
--- 【新增】移速动态刷新循环连接
+-- 移速动态刷新循环连接
 local speedUpdateConnection = nil
 
 -- ==================== 死亡重生管理变量 ====================
-local deathMode = 2 
+local deathMode = 1
 local savedFeatureStates = { fly = false, speed = false, noclip = false, building = false }
 
 -- ==================== 穿墙相关变量 ====================
@@ -189,15 +193,15 @@ local originalLighting = {}
 local nightVisionMaintainConnection = nil
 local atmosphereInstance = nil
 local originalAtmosphere = {}
-local lightingFrozenConnections = {} -- 光照属性冻结连接池
+local lightingFrozenConnections = {}
 
--- 渲染特效开关（默认全部关闭，仅光亮开启）
+-- 渲染特效开关
 local nightVisionSettings = {
-    shadows = false,     -- 是否关闭全局阴影
-    envAo = false,       -- 是否关闭环境光遮蔽
-    fog = false,         -- 是否关闭传统迷雾
-    atmosphere = false,  -- 是否关闭大气迷雾
-    ambient = true       -- 是否强制环境光全亮，默认开启
+    shadows = false,
+    envAo = false,
+    fog = false,
+    atmosphere = false,
+    ambient = true
 }
 
 -- ==================== 有效Humanoid状态 ====================
@@ -225,7 +229,7 @@ local MOVE_MODES = {
     "水平上下", "水平前后(屏幕)", "水平左右(屏幕)"
 }
 
-local FLY_MODES = { "屏幕", "悬空", "绝对锁高" }
+local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
 -- ==================== 提前声明 ====================
 local tanchuangxiaoxi
@@ -250,6 +254,41 @@ local function getScreenSize()
     end
 end
 
+-- ==================== 主窗口拖拽与边界限制 ====================
+Frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        frameDragging = true
+        local inputPos = Vector2.new(input.Position.X, input.Position.Y)
+        frameDragStartOffset = inputPos - Frame.AbsolutePosition
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if frameDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local currentInputPos = Vector2.new(input.Position.X, input.Position.Y)
+        local newAbsX = currentInputPos.X - frameDragStartOffset.X
+        local newAbsY = currentInputPos.Y - frameDragStartOffset.Y
+        
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local viewport = camera.ViewportSize
+        local frameSize = Frame.AbsoluteSize
+        
+        newAbsX = clamp(newAbsX, 0, viewport.X - frameSize.X)
+        newAbsY = clamp(newAbsY, 0, viewport.Y - frameSize.Y)
+        
+        Frame.Position = UDim2.fromOffset(newAbsX, newAbsY)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        frameDragging = false
+        frameDragStartOffset = nil
+    end
+end)
+
+-- ==================== 辅助函数（续） ====================
 local function updateButtonText()
     if moveMode == "角色上下" or moveMode == "屏幕上下" or moveMode == "水平上下" then
         up.Text = "上升"
@@ -266,7 +305,6 @@ local function updateButtonText()
     end
 end
 
--- 更新主按钮文字
 local function updateMainButtonText()
     local modeName = modeDisplayNames[modeIndex + 1]
     local state = false
@@ -292,7 +330,6 @@ local function updateMainButtonText()
     end
 end
 
--- 更新速度标签文字
 local function updateSpeedButtonText()
     if modeIndex == 0 then
         speed.Text = tostring(speeds)
@@ -327,21 +364,17 @@ local function updateSpeedButtonText()
     end
 end
 
--- 【核心修复】移速动态刷新循环控制
 local function updateSpeedDisplayLoop()
-    -- 先断开旧连接
     if speedUpdateConnection then
         speedUpdateConnection:Disconnect()
         speedUpdateConnection = nil
     end
     
-    -- 仅在“移速模式”且“未锁定速度”时开启低频循环（每0.1秒刷新一次）
     if modeIndex == 1 and not speedModeEnabled then
         speedUpdateConnection = RunService.Heartbeat:Connect(function()
             if modeIndex == 1 and not speedModeEnabled then
                 updateSpeedButtonText()
             else
-                -- 条件不满足立刻断开，节省性能
                 speedUpdateConnection:Disconnect()
                 speedUpdateConnection = nil
             end
@@ -449,7 +482,7 @@ local function startTpwalking()
     end)
 end
 
--- ==================== 飞天辅助函数 ====================
+-- ==================== 飞天辅助函数（支持泳姿+自由双模式） ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -472,7 +505,15 @@ local function applyFly()
     for _, state in ipairs(VALID_HUMANOD_STATES) do
         pcall(function() hum:SetStateEnabled(state, false) end)
     end
-    pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
+
+    local isFreeMode = (flyMode == "自由")
+
+    if isFreeMode then
+        hum.PlatformStand = true
+        hum.AutoRotate = false
+    else
+        pcall(function() hum:ChangeState(Enum.HumanoidStateType.Swimming); hum.PlatformStand = true end)
+    end
 
     local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
     if not torso then return false end
@@ -500,22 +541,42 @@ local function applyFly()
                 local moveDir = hum.MoveDirection
                 local maxspeed = 50 * speeds
 
-                if flyMode == "屏幕" then
+                if isFreeMode then
+                    local camLook = camera.CFrame.LookVector
+                    local camRight = camera.CFrame.RightVector
+                    
+                    local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
+                    local flatRight = Vector3.new(camRight.X, 0, camRight.Z)
+                    if flatLook.Magnitude > 0.001 then flatLook = flatLook.Unit end
+                    if flatRight.Magnitude > 0.001 then flatRight = flatRight.Unit end
+                    
+                    local forwardInput = moveDir:Dot(flatLook)
+                    local rightInput = moveDir:Dot(flatRight)
+                    
+                    local combined = camLook * forwardInput + camRight * rightInput
+                    if combined.Magnitude > 1 then combined = combined.Unit end
+                    
                     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
-                    bg.CFrame = camera.CFrame
-                elseif flyMode == "悬空" then
-                    bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
-                    bg.CFrame = camera.CFrame
-                elseif flyMode == "绝对锁高" then
-                    bv.MaxForce = Vector3.new(9e9, 0, 9e9)
-                    moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                    bv.Velocity = (moveDir.Magnitude > 0) and (moveDir.Unit * maxspeed) or Vector3.new(0,0,0)
-                    bg.CFrame = camera.CFrame
-                    local pos = torso.Position
-                    torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
+                    bv.Velocity = combined * maxspeed
+                    bg.CFrame = CFrame.new(torso.Position) * camera.CFrame.Rotation
+                else
+                    if flyMode == "悬空" then
+                        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                        local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                        bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                        bg.CFrame = camera.CFrame
+                    elseif flyMode == "绝对锁高" then
+                        bv.MaxForce = Vector3.new(9e9, 0, 9e9)
+                        local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+                        bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                        bg.CFrame = camera.CFrame
+                        local pos = torso.Position
+                        torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
+                    else
+                        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+                        bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
+                        bg.CFrame = camera.CFrame
+                    end
                 end
             end
         end
@@ -524,7 +585,6 @@ local function applyFly()
     return true
 end
 
--- ==================== 统一飞天关闭后重置角色 ====================
 local function resetHumanoidAfterFly()
     local char = player.Character
     if not char then return end
@@ -546,7 +606,6 @@ local function resetHumanoidAfterFly()
     end
 end
 
--- ==================== 强制关闭移速 ====================
 local function forceDisableSpeedMode()
     if speedModeEnabled then
         if speedModeConnection then
@@ -568,7 +627,6 @@ local function forceDisableSpeedMode()
     return false
 end
 
--- ==================== 强制关闭飞天 ====================
 local function forceDisableFly()
     if isFlying then
         removeFly()
@@ -581,7 +639,6 @@ local function forceDisableFly()
     return false
 end
 
--- ==================== 飞天开关 ====================
 local function toggleFly(enable)
     if enable then
         local speedWasClosed = forceDisableSpeedMode()
@@ -592,7 +649,7 @@ local function toggleFly(enable)
         if speedWasClosed then
             tanchuangxiaoxi("飞天已开启，移速已关闭", "飞天模式")
         else
-            tanchuangxiaoxi("已开启飞天", "飞天")
+            tanchuangxiaoxi("已开启飞天 (" .. flyMode .. ")", "飞天")
         end
         applyFly()
     else
@@ -605,7 +662,7 @@ local function toggleFly(enable)
         resetHumanoidAfterFly()
     end
     updateSpeedButtonText()
-    updateSpeedDisplayLoop() -- 联动刷新循环
+    updateSpeedDisplayLoop()
 end
 
 -- ==================== 移速模式 ====================
@@ -665,10 +722,10 @@ local function applySpeedMode(enable)
     end
     updateMainButtonText()
     updateSpeedButtonText()
-    updateSpeedDisplayLoop() -- 联动刷新循环
+    updateSpeedDisplayLoop()
 end
 
--- ==================== 透视基础（整合冻结机制与修复） ====================
+-- ==================== 透视基础 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -709,7 +766,6 @@ local function restoreLighting()
         end
     end
     
-    -- 断开所有冻结连接，并解除状态
     for _, conn in pairs(lightingFrozenConnections) do
         pcall(function() conn:Disconnect() end)
     end
@@ -723,11 +779,9 @@ local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
         lightingFrozenConnections[connKey] = nil
     end
     
-    -- 无论是开启还是关闭，都要立刻应用目标值
     pcall(function() instance[propName] = targetValue end)
     
     if isFrozen then
-        -- 监听变化，强行改回
         lightingFrozenConnections[connKey] = instance:GetPropertyChangedSignal(propName):Connect(function()
             pcall(function()
                 if instance[propName] ~= targetValue then
@@ -742,7 +796,6 @@ local function applyNightVision()
     local Lighting = game:GetService("Lighting")
     Lighting.Brightness = nightVisionBrightness
     
-    -- 光亮控制
     if nightVisionSettings.ambient then
         freezeLightingProperty(Lighting, "Ambient", Color3.new(1, 1, 1), true)
         freezeLightingProperty(Lighting, "OutdoorAmbient", Color3.new(1, 1, 1), true)
@@ -755,14 +808,12 @@ local function applyNightVision()
         if originalLighting.ColorShift_Top then freezeLightingProperty(Lighting, "ColorShift_Top", originalLighting.ColorShift_Top, false) end
     end
     
-    -- 阴影控制
     if nightVisionSettings.shadows then
         freezeLightingProperty(Lighting, "GlobalShadows", false, true)
     else
         if originalLighting.GlobalShadows ~= nil then freezeLightingProperty(Lighting, "GlobalShadows", originalLighting.GlobalShadows, false) end
     end
     
-    -- 环境光遮蔽控制
     if nightVisionSettings.envAo then
         freezeLightingProperty(Lighting, "EnvironmentDiffuseScale", 0, true)
         freezeLightingProperty(Lighting, "EnvironmentSpecularScale", 0, true)
@@ -771,7 +822,6 @@ local function applyNightVision()
         if originalLighting.EnvironmentSpecularScale then freezeLightingProperty(Lighting, "EnvironmentSpecularScale", originalLighting.EnvironmentSpecularScale, false) end
     end
     
-    -- 传统迷雾控制
     if nightVisionSettings.fog then
         freezeLightingProperty(Lighting, "FogEnd", 100000, true)
         freezeLightingProperty(Lighting, "FogStart", 0, true)
@@ -780,7 +830,6 @@ local function applyNightVision()
         if originalLighting.FogStart then freezeLightingProperty(Lighting, "FogStart", originalLighting.FogStart, false) end
     end
     
-    -- 大气迷雾控制
     if atmosphereInstance and atmosphereInstance.Parent then
         if nightVisionSettings.atmosphere then
             freezeLightingProperty(atmosphereInstance, "Density", 0, true)
@@ -966,10 +1015,10 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 创建透视悬浮窗（整合新测试版的6项控制 + UI刷新修复） ====================
+-- ==================== 创建透视悬浮窗 ====================
 local function createNightVisionWindow()
     local winWidth = 190
-    local winHeight = 110 -- 紧凑尺寸
+    local winHeight = 110
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"
@@ -1054,7 +1103,6 @@ local function createNightVisionWindow()
     knobCorner.CornerRadius = UDim.new(1, 0)
     knobCorner.Parent = knob
 
-    -- 记录所有按钮及状态刷新函数，便于重置时同步UI
     local windowButtons = {}
 
     local function createToggleBtn(name, key, xPos, yPos)
@@ -1071,14 +1119,13 @@ local function createNightVisionWindow()
         btnCorner.CornerRadius = UDim.new(0, 3)
         btnCorner.Parent = btn
 
-        -- 定义UI更新函数
         local function updateBtnUI()
             local isOn = nightVisionSettings[key]
             btn.BackgroundColor3 = isOn and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
             btn.Text = name .. (isOn and " 开" or " 关")
         end
         
-        updateBtnUI() -- 初始化UI
+        updateBtnUI()
 
         btn.MouseButton1Click:Connect(function()
             nightVisionSettings[key] = not nightVisionSettings[key]
@@ -1092,15 +1139,12 @@ local function createNightVisionWindow()
         return btn
     end
 
-    -- 第一排：阴影、遮蔽、迷雾
     createToggleBtn("阴影", "shadows", 8, 48)
     createToggleBtn("遮蔽", "envAo", 68, 48)
     createToggleBtn("迷雾", "fog", 128, 48)
-    -- 第二排：大气、亮光、重置
     createToggleBtn("大气", "atmosphere", 8, 72)
     createToggleBtn("亮光", "ambient", 68, 72)
     
-    -- 重置按钮
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = bg
     resetBtn.Size = UDim2.new(0, 55, 0, 18)
@@ -1115,18 +1159,13 @@ local function createNightVisionWindow()
     resetCorner.Parent = resetBtn
 
     resetBtn.MouseButton1Click:Connect(function()
-        -- 1. 恢复原始渲染属性并断开冻结
         restoreLighting()
-        
-        -- 2. 重置设置表为默认状态（只开亮光）
         nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true }
         
-        -- 3. 刷新所有按钮的UI状态，确保视觉与逻辑同步
         for _, item in ipairs(windowButtons) do
             item.updateUI()
         end
         
-        -- 4. 立即应用一次新的状态（亮光开启，其他关闭）
         if nightVisionEnabled then
             applyNightVision()
         end
@@ -1160,12 +1199,10 @@ local function createNightVisionWindow()
             end
         end
         
-        -- 同步进度条和文本
         local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
         valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
         
-        -- 同步主UI的文本
         if modeIndex == 4 then
             updateSpeedButtonText()
         end
@@ -1223,7 +1260,6 @@ local function enableNightVision()
     if nightVisionMaintainConnection then
         nightVisionMaintainConnection:Disconnect()
     end
-    -- 心跳每秒执行多次，起到“冻结”作用，覆盖地图脚本的动态修改
     nightVisionMaintainConnection = RunService.Heartbeat:Connect(function()
         if nightVisionEnabled then
             applyNightVision()
@@ -1285,7 +1321,7 @@ local function onCharacterAdded(char)
     stopTpwalking()
     updateSpeedButtonText()
     updateMainButtonText()
-    updateSpeedDisplayLoop() -- 重生后重新绑定动态刷新循环
+    updateSpeedDisplayLoop()
 
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
@@ -1851,6 +1887,10 @@ function showMainMenu()
                     "9. 【新增】透视悬浮窗集成6项渲染控制（含冻结机制）",
                     "10.【修复】渲染开关恢复逻辑与重置UI不同步问题",
                     "11.【修复】移速模式下，界面实时更新角色当前速度",
+                    "12.【新增】飞天模式增加泳姿(旧版)与自由(新版)，默认泳姿",
+                    "13.【优化】死亡处理模式默认值改为模式1",
+                    "14.【优化】主UI与迷你UI增加屏幕边界限制，防止拖出屏幕",
+                    "15.【修复】迷你UI在滑动经过时被误触展开的Bug",
                     "",
                     "感谢使用！"
                 }
@@ -1963,6 +2003,9 @@ function showMainMenu()
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
                     "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "🔹 移速模式下，未锁定速度时，界面会实时刷新角色真实速度",
+                    "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
+                    "🔹 主界面与迷你界面拖拽时均带屏幕边缘限制，不会跑出屏幕外",
+                    "🔹 迷你窗口滑动经过时带有防误触判定，需点击才能展开",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2733,7 +2776,7 @@ do
                 modeIndex = (modeIndex + 1) % 5
                 updateMainButtonText()
                 updateSpeedButtonText()
-                updateSpeedDisplayLoop() -- 联动刷新循环
+                updateSpeedDisplayLoop()
                  tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
                 holding = false
                 longPressTask = nil
@@ -2824,51 +2867,89 @@ do
                 miniBtn.Font = Enum.Font.SourceSans
                 miniBtn.Active = true
 
-                local dragStart, winStart, dragging = nil, nil, false
-                local pressId = nil
-                local MOVE_THRESHOLD = 10
+                -- 迷你窗口拖拽逻辑（带边界限制 + 滑动防误触）
+                local miniDragging = false
+                local miniDragStartOffset = nil
+                local miniInputChangedConn = nil
+                local miniPressStartPos = nil -- 【新增】记录手指按下的绝对坐标
 
                 miniBtn.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        dragStart = Vector2.new(input.Position.X, input.Position.Y)
-                         winStart = mini.AbsolutePosition
-                        dragging = false
-                        pressId = input.KeyCode or input.UserInputType
-                    end
-                 end)
-
-                miniBtn.InputChanged:Connect(function(input)
-                    if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and dragStart then
-                        local current = Vector2.new(input.Position.X, input.Position.Y)
-                         local delta = current - dragStart
-                        if not dragging and delta.Magnitude > MOVE_THRESHOLD then
-                            dragging = true
-                        end
-                         if dragging then
-                            local newPos = winStart + delta
-                            mini.Position = UDim2.fromOffset(newPos.X, newPos.Y)
-                         end
+                        -- 【新增】记录手指绝对坐标
+                        miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
+                        
+                        miniDragging = true
+                        local inputPos = Vector2.new(input.Position.X, input.Position.Y)
+                        miniDragStartOffset = inputPos - mini.AbsolutePosition
+                        
+                        if miniInputChangedConn then miniInputChangedConn:Disconnect() end
+                        miniInputChangedConn = UserInputService.InputChanged:Connect(function(inputChanged)
+                            if miniDragging and (inputChanged.UserInputType == Enum.UserInputType.MouseMovement or inputChanged.UserInputType == Enum.UserInputType.Touch) then
+                                local currentInputPos = Vector2.new(inputChanged.Position.X, inputChanged.Position.Y)
+                                local newAbsX = currentInputPos.X - miniDragStartOffset.X
+                                local newAbsY = currentInputPos.Y - miniDragStartOffset.Y
+                                
+                                local camera = workspace.CurrentCamera
+                                if not camera then return end
+                                local viewport = camera.ViewportSize
+                                local miniSize = mini.AbsoluteSize
+                                
+                                newAbsX = clamp(newAbsX, 0, viewport.X - miniSize.X)
+                                newAbsY = clamp(newAbsY, 0, viewport.Y - miniSize.Y)
+                                
+                                mini.Position = UDim2.fromOffset(newAbsX, newAbsY)
+                            end
+                        end)
                     end
                 end)
 
                 miniBtn.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                         if pressId and not dragging then
+                        -- 【核心修复】用绝对坐标差值计算手指位移
+                        local currentInputPos = Vector2.new(input.Position.X, input.Position.Y)
+                        local totalDelta = (currentInputPos - miniPressStartPos).Magnitude
+                        
+                        local screenSize = getScreenSize()
+                        -- 【核心修复】动态阈值，至少15像素，或屏幕宽度的2%
+                        local moveThreshold = math.max(15, screenSize.X * 0.02)
+                        
+                        if totalDelta < moveThreshold then 
+                            -- 位移极小，视为点击，执行展开主窗口逻辑
                             local miniPos = mini.AbsolutePosition
-                            local screenSize = getScreenSize()
-                             local newX = miniPos.X - 132
-                            local newY = miniPos.Y
-                            newX = clamp(newX, 0, screenSize.X - 190)
-                             newY = clamp(newY, 0, screenSize.Y - 56)
+                            local frameWidth = Frame.AbsoluteSize.X
+                            local frameHeight = Frame.AbsoluteSize.Y
+                            local miniWidth = mini.AbsoluteSize.X
+                            local miniHeight = mini.AbsoluteSize.Y
+                            
+                            local newX = miniPos.X - (frameWidth - miniWidth) / 2
+                            local newY = miniPos.Y - (frameHeight - miniHeight) / 2
+                            
+                            newX = clamp(newX, 0, screenSize.X - frameWidth)
+                            newY = clamp(newY, 0, screenSize.Y - frameHeight)
+                            
                             Frame.Position = UDim2.fromOffset(newX, newY)
                             Frame.Visible = true
-                             mini:Destroy()
+                            mini:Destroy()
                             miniWindow = nil
                         end
-                        dragStart = nil
-                         winStart = nil
-                        dragging = false
-                        pressId = nil
+                        
+                        miniDragging = false
+                        miniDragStartOffset = nil
+                        miniPressStartPos = nil
+                        
+                        -- 断开全局输入监听，防止内存泄漏
+                        if miniInputChangedConn then 
+                            miniInputChangedConn:Disconnect() 
+                            miniInputChangedConn = nil 
+                        end
+                    end
+                end)
+
+                -- 【新增】兜底清理，防止外部强制销毁UI时内存泄漏
+                mini.Destroying:Connect(function()
+                    if miniInputChangedConn then
+                        miniInputChangedConn:Disconnect()
+                        miniInputChangedConn = nil
                     end
                 end)
 
@@ -2985,14 +3066,12 @@ function showBrightnessDialog()
             nightVisionBrightness = newBrightness
         end
         
-        -- 同步进度条和输入框
         local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(syncPercent, -10, 0, -8)
         if not textBox:IsFocused() then
             textBox.Text = string.format("%.2f", nightVisionBrightness)
         end
         
-        -- 弹窗拖动时也同步主UI的文本
         if modeIndex == 4 then
             updateSpeedButtonText()
         end
