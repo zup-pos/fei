@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 7.8.0 (移速记忆重写 + 三种物理加速方案 + 待处理后50%)
+-- Version 7.9.0 (新增自由相机模块)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -152,16 +152,23 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
--- 【本次改动】移速记忆：不再使用 savedSpeed；每次开启读当前 WalkSpeed
--- 移速子模式：修改 / 持续力(VectorForce) / 物理速度(BodyVelocity) / 强制位移(CFrame)
+-- 移速子模式
 local speedSubMode = "修改"
 
--- 物理加速相关（三种方案共用变量）
-local accelObj = nil             -- VectorForce 或 BodyVelocity 实例
-local accelAttach = nil          -- Attachment
-local accelConn = nil            -- Heartbeat / RenderStepped 连接
-local accelForceScale = 100      -- VectorForce 的力放大系数
-local accelLastMethod = nil      -- 记录当前使用的方法名，便于日志
+-- 物理加速相关
+local accelObj = nil
+local accelAttach = nil
+local accelConn = nil
+local accelForceScale = 100
+local accelLastMethod = nil
+
+-- ==================== 【新增】自由相机相关变量 ====================
+local camSnapshot = nil              -- 相机原始快照
+local camFreezeEnabled = false        -- 冻结解锁状态
+local camNoClipEnabled = false        -- 相机穿墙状态
+local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
+local camFreezeBound = false          -- RenderStep 是否已绑定
+local camPersistConn = nil            -- 属性监听连接引用（可选）
 
 -- 【核心】主窗口独立坐标变量
 local frameX = initX
@@ -179,7 +186,7 @@ local modeDisplayNames = { "飞天", "移速", "穿墙", "删除", "透视" }
 local speedModeEnabled = false
 local speedModeConnection = nil
 local lockedSpeed = 16
-local originalWalkSpeed = 16      -- 【本次】本次开启前的实际 WalkSpeed
+local originalWalkSpeed = 16
 local speedUpdateConnection = nil
 
 -- ==================== 死亡重生管理变量 ====================
@@ -243,7 +250,6 @@ local MOVE_MODES = {
 
 local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
--- 【本次改动】移速子模式：修改 + 三种物理加速
 local SPEED_SUB_MODES = { "修改", "持续力", "物理速度", "强制位移" }
 local SPEED_SUB_DESC = {
     ["修改"] = "直接锁定 WalkSpeed（脚踩地，最稳）",
@@ -368,12 +374,10 @@ local function updateSpeedButtonText()
     if modeIndex == 0 then
         speed.Text = tostring(speeds)
     elseif modeIndex == 1 then
-        -- 【本次改动】根据子模式显示
         if speedModeEnabled then
             if speedSubMode == "修改" then
                 speed.Text = string.format("%.1f", lockedSpeed)
             else
-                -- 三种物理方案统一显示为 "速<数字>"，避免过长
                 speed.Text = string.format("%.0f", lockedSpeed)
             end
         else
@@ -603,8 +607,7 @@ local function resetHumanoidAfterFly()
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
--- ==================== 【本次改动】物理加速核心函数（三种方案） ====================
--- 清除所有物理加速相关实例
+-- ==================== 物理加速核心函数 ====================
 local function stopPhysAccel()
     if accelConn then
         accelConn:Disconnect()
@@ -621,12 +624,10 @@ local function stopPhysAccel()
     accelLastMethod = nil
 end
 
--- 判断子模式是否为物理方案
 local function isPhysMode()
     return speedSubMode == "持续力" or speedSubMode == "物理速度" or speedSubMode == "强制位移"
 end
 
--- 方案一：VectorForce（持续施加力）
 local function startVectorForce()
     local char = player.Character
     if not char then return false end
@@ -663,7 +664,6 @@ local function startVectorForce()
     return true
 end
 
--- 方案二：BodyVelocity（旧版速度约束）
 local function startBodyVelocity()
     local char = player.Character
     if not char then return false end
@@ -671,7 +671,7 @@ local function startBodyVelocity()
     if not hrp then return false end
 
     local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e6, 0, 1e6)   -- Y=0，不干涉重力
+    bv.MaxForce = Vector3.new(1e6, 0, 1e6)
     bv.P = 1250
     bv.Velocity = Vector3.new(0, 0, 0)
     bv.Parent = hrp
@@ -694,7 +694,6 @@ local function startBodyVelocity()
     return true
 end
 
--- 方案三：CFrame 强制位移
 local function startCFramePush()
     local char = player.Character
     if not char then return false end
@@ -719,7 +718,6 @@ local function startCFramePush()
     return true
 end
 
--- 根据当前子模式启动物理加速
 local function startPhysAccel()
     stopPhysAccel()
     if speedSubMode == "持续力" then
@@ -735,22 +733,18 @@ end
 -- ==================== 关闭辅助函数 ====================
 local function forceDisableSpeedMode()
     if speedModeEnabled then
-        -- 停止物理加速
         if isPhysMode() then
             stopPhysAccel()
         end
-        -- 断开 WalkSpeed 锁定
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
-        -- 恢复 WalkSpeed
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
         end
-        -- 【本次改动】关闭时清除记录，不保留任何数值
         lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
         task.wait()
@@ -794,12 +788,176 @@ local function toggleFly(enable)
     updateSpeedDisplayLoop()
 end
 
--- ==================== 【本次改动】移速模式（重写记忆逻辑） ====================
+-- ==================== 【新增】自由相机核心函数 ====================
+
+-- 【核心】单帧强制修正相机状态
+local function enforceCameraOnce()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+
+    if cam.CameraType ~= Enum.CameraType.Custom then
+        pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+    end
+    if player.CameraMode ~= Enum.CameraMode.Classic then
+        pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+    end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and cam.CameraSubject ~= hum then
+            pcall(function() cam.CameraSubject = hum end)
+        end
+    end
+end
+
+-- 【核心】拍摄原始快照
+local function takeCamSnapshot()
+    local cam = workspace.CurrentCamera
+    if not cam then return false end
+    camSnapshot = {
+        CameraMode             = player.CameraMode,
+        CameraMinZoomDistance  = player.CameraMinZoomDistance,
+        CameraMaxZoomDistance  = player.CameraMaxZoomDistance,
+        DevEnableMouseLock     = player.DevEnableMouseLock,
+        DevCameraOcclusionMode = player.DevCameraOcclusionMode,
+        CameraType             = cam.CameraType,
+        CameraSubject          = cam.CameraSubject,
+        FieldOfView            = cam.FieldOfView,
+        takenAt                = os.time(),
+    }
+    return true
+end
+
+-- 【核心】自动快照：仅在还没拍过时执行
+-- 用于冻结/单次解锁"忘记手动拍快照"的兜底
+local function ensureCamSnapshot()
+    if not camSnapshot then
+        takeCamSnapshot()
+        tanchuangxiaoxi("已自动记录相机快照", "自由相机")
+    end
+end
+
+-- 启动冻结解锁（autoSnap=true 时，会自动拍一次快照）
+local function startCamFreeze(autoSnap)
+    if autoSnap then ensureCamSnapshot() end
+    if camFreezeEnabled then return end
+    camFreezeEnabled = true
+    enforceCameraOnce()
+
+    -- RenderStep 最高优先级
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    RunService:BindToRenderStep(camFreezeConnName, Enum.RenderPriority.Last.Value, function()
+        if not camFreezeEnabled then return end
+        enforceCameraOnce()
+    end)
+    camFreezeBound = true
+
+    -- 属性变化监听
+    local cam = workspace.CurrentCamera
+    if cam then
+        cam:GetPropertyChangedSignal("CameraType"):Connect(function()
+            if camFreezeEnabled and cam.CameraType ~= Enum.CameraType.Custom then
+                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+            end
+        end)
+        cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
+            if not camFreezeEnabled then return end
+            local c = player.Character
+            local h = c and c:FindFirstChildOfClass("Humanoid")
+            if h and cam.CameraSubject ~= h then
+                pcall(function() cam.CameraSubject = h end)
+            end
+        end)
+    end
+    player:GetPropertyChangedSignal("CameraMode"):Connect(function()
+        if camFreezeEnabled and player.CameraMode ~= Enum.CameraMode.Classic then
+            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+        end
+    end)
+
+    tanchuangxiaoxi("冻结解锁已开启", "自由相机")
+end
+
+local function stopCamFreeze()
+    if not camFreezeEnabled and not camFreezeBound then return end
+    camFreezeEnabled = false
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    camFreezeBound = false
+    tanchuangxiaoxi("冻结解锁已关闭", "自由相机")
+end
+
+-- 单次解锁（autoSnap=true 时，会自动拍一次快照）
+local function doCamSingleUnlock(autoSnap)
+    if autoSnap then ensureCamSnapshot() end
+    enforceCameraOnce()
+    tanchuangxiaoxi("已单次解锁视角", "自由相机")
+end
+
+-- 相机穿墙
+local function enableCamNoClip()
+    if camNoClipEnabled then return end
+    camNoClipEnabled = true
+    pcall(function()
+        player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+    end)
+    tanchuangxiaoxi("相机穿墙已开启", "自由相机")
+end
+
+local function disableCamNoClip()
+    if not camNoClipEnabled then return end
+    camNoClipEnabled = false
+    -- 优先用快照恢复，没有则用默认 Zoom
+    if camSnapshot and camSnapshot.DevCameraOcclusionMode then
+        pcall(function()
+            player.DevCameraOcclusionMode = camSnapshot.DevCameraOcclusionMode
+        end)
+    else
+        pcall(function()
+            player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+        end)
+    end
+    tanchuangxiaoxi("相机穿墙已关闭", "自由相机")
+end
+
+-- 恢复到快照
+local function restoreFromCamSnapshot()
+    if not camSnapshot then
+        tanchuangxiaoxi("尚无快照，先点『重新拍摄快照』", "自由相机")
+        return
+    end
+    stopCamFreeze()
+    camNoClipEnabled = false
+
+    pcall(function() player.CameraMode = camSnapshot.CameraMode end)
+    pcall(function() player.CameraMinZoomDistance = camSnapshot.CameraMinZoomDistance end)
+    pcall(function() player.CameraMaxZoomDistance = camSnapshot.CameraMaxZoomDistance end)
+    pcall(function() player.DevEnableMouseLock = camSnapshot.DevEnableMouseLock end)
+    pcall(function() player.DevCameraOcclusionMode = camSnapshot.DevCameraOcclusionMode end)
+
+    local cam = workspace.CurrentCamera
+    if cam then
+        pcall(function() cam.CameraType = camSnapshot.CameraType end)
+        pcall(function() cam.FieldOfView = camSnapshot.FieldOfView end)
+        if camSnapshot.CameraSubject and camSnapshot.CameraSubject.Parent then
+            pcall(function() cam.CameraSubject = camSnapshot.CameraSubject end)
+        end
+    end
+    tanchuangxiaoxi("已恢复到快照值", "自由相机")
+end
+
+-- 手动重新拍摄快照
+local function manualResnap()
+    if takeCamSnapshot() then
+        tanchuangxiaoxi("已重新拍摄快照", "自由相机")
+    else
+        tanchuangxiaoxi("快照失败：相机未就绪", "自由相机")
+    end
+end
+
+-- ==================== 移速模式 ====================
 local function applySpeedMode(enable)
     if enable then
         local flyWasClosed = forceDisableFly()
-
-        -- 【本次核心】开启时读取角色当前的 WalkSpeed 作为基准
         local char = player.Character
         local currentWS = 16
         if char then
@@ -808,13 +966,12 @@ local function applySpeedMode(enable)
         end
         if currentWS <= 0 then currentWS = 16 end
 
-        originalWalkSpeed = currentWS   -- 本次开启前的真实值
-        lockedSpeed = currentWS         -- 起点 = 当前 WalkSpeed（不读旧记忆）
+        originalWalkSpeed = currentWS
+        lockedSpeed = currentWS
 
         speedModeEnabled = true
 
         if speedSubMode == "修改" then
-            -- 方案：锁定 WalkSpeed
             if speedModeConnection then speedModeConnection:Disconnect() end
             speedModeConnection = RunService.Heartbeat:Connect(function()
                 if not speedModeEnabled then return end
@@ -826,7 +983,6 @@ local function applySpeedMode(enable)
                 end
             end)
         else
-            -- 物理方案：启动物理推力
             local ok = startPhysAccel()
             if not ok then
                 speedModeEnabled = false
@@ -844,28 +1000,22 @@ local function applySpeedMode(enable)
             tanchuangxiaoxi("已开启" .. label .. "，基准 " .. string.format("%.1f", originalWalkSpeed), "移速模式")
         end
     else
-        -- ===== 关闭 =====
-        -- 断开 WalkSpeed 锁定
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
         end
-        -- 停止物理加速
         if isPhysMode() then
             stopPhysAccel()
         end
 
-        -- 恢复 WalkSpeed 到本次开启前的值
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
         end
 
-        -- 【本次改动】关闭时清除记录
         lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
-
         tanchuangxiaoxi("已关闭移速模式（记录已清除）", "移速模式")
     end
     updateMainButtonText()
@@ -1818,7 +1968,6 @@ local function showMoveModeSelection(currentMode, callback)
     createMenu("选择移动模式", buttons, nil)
 end
 
--- 【本次改动】移速子模式选择菜单（4 种方案）
 local function showSpeedSubModeSelection(currentMode, callback)
     local buttons = {}
     for _, mode in ipairs(SPEED_SUB_MODES) do
@@ -1831,6 +1980,85 @@ local function showSpeedSubModeSelection(currentMode, callback)
         })
     end
     createMenu("选择移速子模式", buttons, nil)
+end
+
+-- ==================== 【新增】自由相机子菜单 ====================
+local function showCameraMenu(parentMenu)
+    local function buildCamMenu()
+        -- 动态文字：反映当前状态
+        local freezeText
+        if camFreezeEnabled then
+            freezeText = "🧊 冻结解锁: 开启中 (点击关闭)"
+        else
+            freezeText = "🧊 冻结解锁: 关闭"
+        end
+        local noClipText
+        if camNoClipEnabled then
+            noClipText = "👻 相机穿墙: 开启 (点击关闭)"
+        else
+            noClipText = "👻 相机穿墙: 关闭"
+        end
+        local snapText = camSnapshot
+            and ("📸 重新拍摄快照 (上次 " .. os.date("%H:%M:%S", camSnapshot.takenAt) .. ")")
+            or  "📸 重新拍摄快照 (尚未记录)"
+        local restoreText = camSnapshot
+            and "↩️ 恢复到快照"
+            or  "↩️ 恢复到快照 (无快照)"
+
+        createMenu("🎥 自由相机", {
+            {
+                text = freezeText,
+                callback = function(subMenu)
+                    if camFreezeEnabled then
+                        stopCamFreeze()
+                    else
+                        -- 【自动快照】开启冻结前，如果没有快照则自动拍一次
+                        startCamFreeze(true)
+                    end
+                    subMenu:Destroy()
+                    buildCamMenu()
+                end
+            },
+            {
+                text = "🔓 单次解锁 (仅改一次)",
+                callback = function(subMenu)
+                    -- 【自动快照】点击单次解锁前，如果没有快照则自动拍一次
+                    doCamSingleUnlock(true)
+                    subMenu:Destroy()
+                    buildCamMenu()
+                end
+            },
+            {
+                text = noClipText,
+                callback = function(subMenu)
+                    if camNoClipEnabled then
+                        disableCamNoClip()
+                    else
+                        enableCamNoClip()
+                    end
+                    subMenu:Destroy()
+                    buildCamMenu()
+                end
+            },
+            {
+                text = snapText,
+                callback = function(subMenu)
+                    manualResnap()
+                    subMenu:Destroy()
+                    buildCamMenu()
+                end
+            },
+            {
+                text = restoreText,
+                callback = function(subMenu)
+                    restoreFromCamSnapshot()
+                    subMenu:Destroy()
+                    buildCamMenu()
+                end
+            },
+        }, parentMenu)
+    end
+    buildCamMenu()
 end
 
 -- ==================== 主菜单显示函数 ====================
@@ -1884,7 +2112,7 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 7.8.0 更新内容：",
+                    "版本 7.9.0 更新内容：",
                     "",
                     "1. 完美整合建筑移除功能，不摧毁地图",
                     "2. 建筑贴图透明度完全支持0~1手动调节",
@@ -1904,9 +2132,15 @@ function showMainMenu()
                     "16. 多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
                     "17. 迷你窗口展开时位置跟随小UI当前位置",
                     "18. 快速拖动被误判为点击问题已修复（双指标判定）",
-                    "19. 【本次】移速记忆逻辑重写：开启读当前值，关闭即清空",
-                    "20. 【本次】移速新增3种物理加速方案：持续力/物理速度/强制位移",
-                    "21. 【本次】加速模式与 WalkSpeed 修改模式共存，可随时切换",
+                    "19. 移速记忆逻辑重写：开启读当前值，关闭即清空",
+                    "20. 移速新增3种物理加速方案：持续力/物理速度/强制位移",
+                    "21. 加速模式与 WalkSpeed 修改模式共存，可随时切换",
+                    "22. 【本次】设置里新增『自由相机』模块",
+                    "23. 【本次】冻结解锁：用RenderStep最高优先级持续对抗游戏锁相机",
+                    "24. 【本次】单次解锁：只改一次，适合只锁一次的游戏",
+                    "25. 【本次】相机穿墙：使用官方 Invisicam 模式",
+                    "26. 【本次】自动快照：开启冻结/单次解锁前若无快照会自动拍一次",
+                    "27. 【本次】完整快照：包含CameraMode/Type/Subject/缩放/遮挡等",
                     "",
                     "感谢使用！"
                 }
@@ -2011,12 +2245,16 @@ function showMainMenu()
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
                     "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "🔹 移速模式下，未锁定速度时，界面会实时刷新角色真实速度",
-                    "🔹 【本次】移速记忆逻辑：开启时以当前真实速度为准，关闭时清空",
-                    "🔹 【本次】移速子模式『修改』：直接改 WalkSpeed，脚踩地面最稳",
-                    "🔹 【本次】移速子模式『持续力』：VectorForce 持续施力，物理碰撞完整",
-                    "🔹 【本次】移速子模式『物理速度』：BodyVelocity 恒定速度，老牌稳定",
-                    "🔹 【本次】移速子模式『强制位移』：CFrame 强制位移，可能穿模慎用",
-                    "🔹 【本次】关闭状态下点速度按钮仍会弹出对话框，但不能修改",
+                    "🔹 移速记忆逻辑：开启时以当前真实速度为准，关闭时清空",
+                    "🔹 移速子模式『修改』：直接改 WalkSpeed，脚踩地面最稳",
+                    "🔹 移速子模式『持续力』：VectorForce 持续施力，物理碰撞完整",
+                    "🔹 移速子模式『物理速度』：BodyVelocity 恒定速度，老牌稳定",
+                    "🔹 移速子模式『强制位移』：CFrame 强制位移，可能穿模慎用",
+                    "🔹 【本次】设置 - 自由相机：解决部分游戏强制第一人称问题",
+                    "🔹 【本次】冻结解锁：每帧对抗，游戏抢不走你的视角",
+                    "🔹 【本次】单次解锁：只改一次，适合只锁一次的游戏",
+                    "🔹 【本次】相机穿墙：使用官方 Invisicam 模式，防被墙挤",
+                    "🔹 【本次】开启冻结/单次解锁前若无快照会自动拍一次",
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
                     "🔹 主界面与迷你界面拖拽使用独立变量追踪坐标，零漂移零延迟",
                     "🔹 多点触控防冲突，左手摇杆 + 右手拖拽UI互不干扰",
@@ -2120,7 +2358,6 @@ function showMainMenu()
                                 end)
                             end
                         },
-                        -- 【本次移除】重置移速记忆、重置加速记忆（不再需要）
                         {
                             text = "💪 加速力度系数 (当前: " .. accelForceScale .. ")",
                             callback = function(subMenu)
@@ -2132,6 +2369,14 @@ function showMainMenu()
                                         createSettingMenu()
                                     else tanchuangxiaoxi("请输入大于0的数字", "错误") end
                                 end)
+                            end
+                        },
+                        -- 【本次新增】自由相机入口
+                        {
+                            text = "🎥 自由相机",
+                            callback = function(subMenu)
+                                subMenu:Destroy()
+                                showCameraMenu(createSettingMenu)
                             end
                         },
                         {
@@ -2183,6 +2428,9 @@ function showMainMenu()
                             disableNoclip()
                             disableBuildingRemoval()
                             disableNightVision()
+                            -- 【本次】清理相机相关
+                            stopCamFreeze()
+                            disableCamNoClip()
                             if main and main.Parent then main:Destroy() end
                             if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
                             for _, notif in ipairs(notifs) do
@@ -2341,7 +2589,7 @@ do
     end)
 end
 
--- 加速 / 增加 按钮（【本次改动】物理方案也实时生效）
+-- 加速 / 增加 按钮
 do
     local holding = false
     local longPressTask = nil
@@ -2496,7 +2744,7 @@ do
     end)
 end
 
--- ==================== 速度标签（移速模式适配 4 种方案） ====================
+-- ==================== 速度标签 ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2616,7 +2864,6 @@ do
                     }
                 )
             elseif modeIndex == 1 then
-                -- 【本次改动】移速模式：不论开关状态都可点击，关闭时提示不可改
                 local subLabel = (speedSubMode == "修改") and "锁定速度" or "目标速度"
                 showInputDialog(
                     "设置" .. subLabel .. "（" .. speedSubMode .. "）",
@@ -2736,7 +2983,7 @@ do
     end)
 end
 
--- ==================== 隐藏按钮（迷你窗口 - 双修复版） ====================
+-- ==================== 隐藏按钮（迷你窗口） ====================
 do
     local holding = false
     local longPressTask = nil
@@ -3060,6 +3307,9 @@ main.Destroying:Connect(function()
     disableBuildingRemoval()
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
     if nightVisionEnabled then restoreLighting() end
+    -- 【本次】清理相机相关
+    stopCamFreeze()
+    disableCamNoClip()
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
@@ -3069,3 +3319,9 @@ end)
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
+
+-- 【本次】初始化时记录一次相机快照（供后续"恢复"使用）
+task.spawn(function()
+    task.wait(1)
+    takeCamSnapshot()
+end)
