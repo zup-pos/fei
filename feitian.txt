@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 7.7.7 (物理加速子系统 + 移速子模式 + 待处理后50%)
+-- Version 7.8.0 (移速记忆重写 + 三种物理加速方案 + 待处理后50%)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -147,27 +147,21 @@ local popupTransparency = 0.65
 local uiVisible = true
 local volumeKeyEnabled = false
 local volumeKeyConnection = nil
-local customWidth = nil
-local customHeight = nil
 local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
--- 【移速记忆】仅在"关闭移速"时写入，开启时读取
-local savedSpeed = nil
-
--- 【新增】移速子模式："修改"=改WalkSpeed，"加速"=物理LinearVelocity加速
+-- 【本次改动】移速记忆：不再使用 savedSpeed；每次开启读当前 WalkSpeed
+-- 移速子模式：修改 / 持续力(VectorForce) / 物理速度(BodyVelocity) / 强制位移(CFrame)
 local speedSubMode = "修改"
 
--- 【新增】物理加速变量
-local accelEnabled = false
-local accelSpeed = 200            -- 默认目标速度（第一次使用）
-local savedAccelSpeed = nil       -- 【加速记忆】仅在"关闭加速"时写入
-local accelMaxForce = 100000
-local accelLinearVelocity = nil
-local accelAttachment = nil
-local accelConnection = nil
+-- 物理加速相关（三种方案共用变量）
+local accelObj = nil             -- VectorForce 或 BodyVelocity 实例
+local accelAttach = nil          -- Attachment
+local accelConn = nil            -- Heartbeat / RenderStepped 连接
+local accelForceScale = 100      -- VectorForce 的力放大系数
+local accelLastMethod = nil      -- 记录当前使用的方法名，便于日志
 
 -- 【核心】主窗口独立坐标变量
 local frameX = initX
@@ -185,7 +179,7 @@ local modeDisplayNames = { "飞天", "移速", "穿墙", "删除", "透视" }
 local speedModeEnabled = false
 local speedModeConnection = nil
 local lockedSpeed = 16
-local originalSpeed = 16
+local originalWalkSpeed = 16      -- 【本次】本次开启前的实际 WalkSpeed
 local speedUpdateConnection = nil
 
 -- ==================== 死亡重生管理变量 ====================
@@ -249,8 +243,14 @@ local MOVE_MODES = {
 
 local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
--- 【新增】移速子模式选项
-local SPEED_SUB_MODES = { "修改", "加速" }
+-- 【本次改动】移速子模式：修改 + 三种物理加速
+local SPEED_SUB_MODES = { "修改", "持续力", "物理速度", "强制位移" }
+local SPEED_SUB_DESC = {
+    ["修改"] = "直接锁定 WalkSpeed（脚踩地，最稳）",
+    ["持续力"] = "VectorForce 持续施加力（物理碰撞完整）",
+    ["物理速度"] = "BodyVelocity 恒定速度（老牌稳定）",
+    ["强制位移"] = "CFrame 强制位移（可能穿模，慎用高速）",
+}
 
 -- ==================== 提前声明 ====================
 local tanchuangxiaoxi
@@ -368,12 +368,13 @@ local function updateSpeedButtonText()
     if modeIndex == 0 then
         speed.Text = tostring(speeds)
     elseif modeIndex == 1 then
-        -- 【修改】根据子模式显示不同内容
+        -- 【本次改动】根据子模式显示
         if speedModeEnabled then
-            if speedSubMode == "加速" then
-                speed.Text = string.format("加%.0f", lockedSpeed)
-            else
+            if speedSubMode == "修改" then
                 speed.Text = string.format("%.1f", lockedSpeed)
+            else
+                -- 三种物理方案统一显示为 "速<数字>"，避免过长
+                speed.Text = string.format("%.0f", lockedSpeed)
             end
         else
             local char = player.Character
@@ -602,108 +603,155 @@ local function resetHumanoidAfterFly()
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
--- ==================== 【新增】物理加速核心函数 ====================
-local function removePhysAcceleration()
-    if accelConnection then
-        accelConnection:Disconnect()
-        accelConnection = nil
+-- ==================== 【本次改动】物理加速核心函数（三种方案） ====================
+-- 清除所有物理加速相关实例
+local function stopPhysAccel()
+    if accelConn then
+        accelConn:Disconnect()
+        accelConn = nil
     end
-    if accelLinearVelocity then
-        pcall(function() accelLinearVelocity:Destroy() end)
-        accelLinearVelocity = nil
+    if accelObj then
+        pcall(function() accelObj:Destroy() end)
+        accelObj = nil
     end
-    if accelAttachment then
-        pcall(function() accelAttachment:Destroy() end)
-        accelAttachment = nil
+    if accelAttach then
+        pcall(function() accelAttach:Destroy() end)
+        accelAttach = nil
     end
-    accelEnabled = false
+    accelLastMethod = nil
 end
 
-local function startPhysAcceleration(targetSpeed)
+-- 判断子模式是否为物理方案
+local function isPhysMode()
+    return speedSubMode == "持续力" or speedSubMode == "物理速度" or speedSubMode == "强制位移"
+end
+
+-- 方案一：VectorForce（持续施加力）
+local function startVectorForce()
     local char = player.Character
     if not char then return false end
-
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildWhichIsA("Humanoid")
-    if not hrp or not hum then return false end
-
-    removePhysAcceleration()
+    if not hrp then return false end
 
     local attach = Instance.new("Attachment")
-    attach.Name = "AccelAttachment"
     attach.Parent = hrp
-    accelAttachment = attach
+    accelAttach = attach
 
-    -- Plane 模式：只约束水平面，Y 轴交给重力
-    local lv = Instance.new("LinearVelocity")
-    lv.Name = "AccelLinearVelocity"
-    lv.Attachment0 = attach
-    lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
-    lv.PrimaryAxis = Vector3.new(0, 1, 0)
-    lv.PlaneVelocity = Vector2.new(0, 0)
-    lv.MaxForce = accelMaxForce
-    lv.RelativeTo = Enum.ActuatorRelativeTo.World
-    lv.Parent = hrp
+    local vf = Instance.new("VectorForce")
+    vf.Attachment0 = attach
+    vf.RelativeTo = Enum.ActuatorRelativeTo.World
+    vf.ApplyAtCenterOfMass = true
+    vf.Force = Vector3.new(0, 0, 0)
+    vf.Parent = hrp
+    accelObj = vf
+    accelLastMethod = "VectorForce"
 
-    accelLinearVelocity = lv
-    accelEnabled = true
-
-    accelConnection = RunService.Heartbeat:Connect(function()
-        if not accelEnabled then return end
-        if not lv or not lv.Parent then
-            if accelConnection then accelConnection:Disconnect() accelConnection = nil end
-            accelEnabled = false
-            return
-        end
-        local c = player.Character
-        if not c then return end
-        local h = c:FindFirstChildWhichIsA("Humanoid")
+    accelConn = RunService.Heartbeat:Connect(function()
+        if not speedModeEnabled then return end
+        if not vf or not vf.Parent then return end
+        local h = player.Character and player.Character:FindFirstChildWhichIsA("Humanoid")
         if not h then return end
-
-        local moveDir = h.MoveDirection
-        -- 每帧读取最新的 lockedSpeed，用户调整后立即生效
-        local spd = lockedSpeed
-
-        if moveDir.Magnitude > 0.1 then
-            local dirXZ = Vector3.new(moveDir.X, 0, moveDir.Z)
-            if dirXZ.Magnitude > 0.001 then
-                dirXZ = dirXZ.Unit
-                lv.PlaneVelocity = Vector2.new(dirXZ.X * spd, dirXZ.Z * spd)
-            end
+        local dir = h.MoveDirection
+        if dir.Magnitude > 0.1 then
+            local dxz = Vector3.new(dir.X, 0, dir.Z).Unit
+            local mag = lockedSpeed * accelForceScale
+            vf.Force = Vector3.new(dxz.X * mag, 0, dxz.Z * mag)
         else
-            lv.PlaneVelocity = Vector2.new(0, 0)
+            vf.Force = Vector3.new(0, 0, 0)
         end
     end)
-
     return true
+end
+
+-- 方案二：BodyVelocity（旧版速度约束）
+local function startBodyVelocity()
+    local char = player.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(1e6, 0, 1e6)   -- Y=0，不干涉重力
+    bv.P = 1250
+    bv.Velocity = Vector3.new(0, 0, 0)
+    bv.Parent = hrp
+    accelObj = bv
+    accelLastMethod = "BodyVelocity"
+
+    accelConn = RunService.Heartbeat:Connect(function()
+        if not speedModeEnabled then return end
+        if not bv or not bv.Parent then return end
+        local h = player.Character and player.Character:FindFirstChildWhichIsA("Humanoid")
+        if not h then return end
+        local dir = h.MoveDirection
+        if dir.Magnitude > 0.1 then
+            local dxz = Vector3.new(dir.X, 0, dir.Z).Unit
+            bv.Velocity = Vector3.new(dxz.X * lockedSpeed, 0, dxz.Z * lockedSpeed)
+        else
+            bv.Velocity = Vector3.new(0, 0, 0)
+        end
+    end)
+    return true
+end
+
+-- 方案三：CFrame 强制位移
+local function startCFramePush()
+    local char = player.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    accelLastMethod = "CFrame"
+
+    accelConn = RunService.RenderStepped:Connect(function(dt)
+        if not speedModeEnabled then return end
+        local c = player.Character
+        if not c then return end
+        local root = c:FindFirstChild("HumanoidRootPart")
+        local h = c:FindFirstChildWhichIsA("Humanoid")
+        if not root or not h then return end
+        local dir = h.MoveDirection
+        if dir.Magnitude > 0.1 then
+            local dxz = Vector3.new(dir.X, 0, dir.Z).Unit
+            root.CFrame = root.CFrame + dxz * lockedSpeed * dt
+        end
+    end)
+    return true
+end
+
+-- 根据当前子模式启动物理加速
+local function startPhysAccel()
+    stopPhysAccel()
+    if speedSubMode == "持续力" then
+        return startVectorForce()
+    elseif speedSubMode == "物理速度" then
+        return startBodyVelocity()
+    elseif speedSubMode == "强制位移" then
+        return startCFramePush()
+    end
+    return false
 end
 
 -- ==================== 关闭辅助函数 ====================
 local function forceDisableSpeedMode()
     if speedModeEnabled then
-        -- 若是加速子模式，先清理物理
-        if speedSubMode == "加速" and accelEnabled then
-            removePhysAcceleration()
+        -- 停止物理加速
+        if isPhysMode() then
+            stopPhysAccel()
         end
-
-        if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
-
+        -- 断开 WalkSpeed 锁定
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        -- 恢复 WalkSpeed
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then pcall(function() hum.WalkSpeed = originalSpeed end) end
+            if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
         end
-
-        -- 【加速记忆】关闭时快照
-        if lockedSpeed and lockedSpeed > 0 then
-            if speedSubMode == "加速" then
-                savedAccelSpeed = lockedSpeed
-            else
-                savedSpeed = lockedSpeed
-            end
-        end
-
-        lockedSpeed = originalSpeed
+        -- 【本次改动】关闭时清除记录，不保留任何数值
+        lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
         task.wait()
         return true
@@ -746,46 +794,27 @@ local function toggleFly(enable)
     updateSpeedDisplayLoop()
 end
 
--- ==================== 移速模式（含加速子模式） ====================
+-- ==================== 【本次改动】移速模式（重写记忆逻辑） ====================
 local function applySpeedMode(enable)
     if enable then
         local flyWasClosed = forceDisableFly()
+
+        -- 【本次核心】开启时读取角色当前的 WalkSpeed 作为基准
         local char = player.Character
+        local currentWS = 16
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then originalSpeed = hum.WalkSpeed else originalSpeed = 16 end
-        else originalSpeed = 16 end
-        if originalSpeed <= 0 then originalSpeed = 16 end
-
-        -- 【记忆机制】根据子模式读取对应的记忆值
-        if speedSubMode == "加速" then
-            if savedAccelSpeed and savedAccelSpeed > 0 then
-                lockedSpeed = savedAccelSpeed
-            else
-                lockedSpeed = accelSpeed  -- 首次使用默认值
-            end
-        else
-            if savedSpeed and savedSpeed > 0 then
-                lockedSpeed = savedSpeed
-            else
-                lockedSpeed = originalSpeed
-            end
+            if hum then currentWS = hum.WalkSpeed end
         end
+        if currentWS <= 0 then currentWS = 16 end
+
+        originalWalkSpeed = currentWS   -- 本次开启前的真实值
+        lockedSpeed = currentWS         -- 起点 = 当前 WalkSpeed（不读旧记忆）
 
         speedModeEnabled = true
 
-        if speedSubMode == "加速" then
-            -- 加速子模式：启动物理推力
-            local ok = startPhysAcceleration(lockedSpeed)
-            if not ok then
-                speedModeEnabled = false
-                tanchuangxiaoxi("角色未就绪，无法启动加速", "移速模式")
-                updateMainButtonText()
-                updateSpeedButtonText()
-                return
-            end
-        else
-            -- 修改子模式：锁定 WalkSpeed
+        if speedSubMode == "修改" then
+            -- 方案：锁定 WalkSpeed
             if speedModeConnection then speedModeConnection:Disconnect() end
             speedModeConnection = RunService.Heartbeat:Connect(function()
                 if not speedModeEnabled then return end
@@ -796,37 +825,48 @@ local function applySpeedMode(enable)
                     if h then pcall(function() h.WalkSpeed = lockedSpeed end) end
                 end
             end)
-        end
-
-        local label = (speedSubMode == "加速") and "加速" or "移速"
-        if flyWasClosed then
-            tanchuangxiaoxi(label .. "已开启，飞天已关闭", "移速模式")
         else
-            tanchuangxiaoxi("已开启" .. label .. "模式，目标: " .. string.format("%.1f", lockedSpeed), "移速模式")
-        end
-    else
-        -- 关闭
-        if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
-        if accelEnabled then removePhysAcceleration() end
-
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then pcall(function() hum.WalkSpeed = originalSpeed end) end
-        end
-
-        -- 【记忆机制】关闭时按子模式分别快照
-        if lockedSpeed and lockedSpeed > 0 then
-            if speedSubMode == "加速" then
-                savedAccelSpeed = lockedSpeed
-            else
-                savedSpeed = lockedSpeed
+            -- 物理方案：启动物理推力
+            local ok = startPhysAccel()
+            if not ok then
+                speedModeEnabled = false
+                tanchuangxiaoxi("角色未就绪，无法启动" .. speedSubMode, "移速模式")
+                updateMainButtonText()
+                updateSpeedButtonText()
+                return
             end
         end
 
-        lockedSpeed = originalSpeed
+        local label = speedSubMode
+        if flyWasClosed then
+            tanchuangxiaoxi(label .. "已开启，飞天已关闭", "移速模式")
+        else
+            tanchuangxiaoxi("已开启" .. label .. "，基准 " .. string.format("%.1f", originalWalkSpeed), "移速模式")
+        end
+    else
+        -- ===== 关闭 =====
+        -- 断开 WalkSpeed 锁定
+        if speedModeConnection then
+            speedModeConnection:Disconnect()
+            speedModeConnection = nil
+        end
+        -- 停止物理加速
+        if isPhysMode() then
+            stopPhysAccel()
+        end
+
+        -- 恢复 WalkSpeed 到本次开启前的值
+        local char = player.Character
+        if char then
+            local hum = char:FindFirstChildWhichIsA("Humanoid")
+            if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
+        end
+
+        -- 【本次改动】关闭时清除记录
+        lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
-        tanchuangxiaoxi("已关闭移速模式", "移速模式")
+
+        tanchuangxiaoxi("已关闭移速模式（记录已清除）", "移速模式")
     end
     updateMainButtonText()
     updateSpeedButtonText()
@@ -1778,19 +1818,19 @@ local function showMoveModeSelection(currentMode, callback)
     createMenu("选择移动模式", buttons, nil)
 end
 
--- 【新增】移速子模式选择菜单（修改 / 加速）
+-- 【本次改动】移速子模式选择菜单（4 种方案）
 local function showSpeedSubModeSelection(currentMode, callback)
     local buttons = {}
     for _, mode in ipairs(SPEED_SUB_MODES) do
         table.insert(buttons, {
-            text = mode .. (mode == currentMode and " ✓" or ""),
+            text = mode .. " - " .. (SPEED_SUB_DESC[mode] or "") .. (mode == currentMode and " ✓" or ""),
             callback = function(menu)
                 menu:Destroy()
                 callback(mode)
             end
         })
     end
-    createMenu("选择移速子模式\n(修改=锁定WalkSpeed / 加速=物理推力)", buttons, nil)
+    createMenu("选择移速子模式", buttons, nil)
 end
 
 -- ==================== 主菜单显示函数 ====================
@@ -1844,7 +1884,7 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 7.7.7 更新内容：",
+                    "版本 7.8.0 更新内容：",
                     "",
                     "1. 完美整合建筑移除功能，不摧毁地图",
                     "2. 建筑贴图透明度完全支持0~1手动调节",
@@ -1864,12 +1904,9 @@ function showMainMenu()
                     "16. 多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
                     "17. 迷你窗口展开时位置跟随小UI当前位置",
                     "18. 快速拖动被误判为点击问题已修复（双指标判定）",
-                    "19. 移速记忆改为：以关闭瞬间的速度为基准",
-                    "20. 移除设置中无用的屏幕宽度/高度/重置项",
-                    "21. 【本次】移速模式新增子模式：修改 / 加速",
-                    "22. 【本次】加速模式使用 Plane 物理推力，不悬空",
-                    "23. 【本次】加速与修改分别独立记忆，互不干扰",
-                    "24. 【本次】移速关闭状态下也可点速度按钮（提示不能修改）",
+                    "19. 【本次】移速记忆逻辑重写：开启读当前值，关闭即清空",
+                    "20. 【本次】移速新增3种物理加速方案：持续力/物理速度/强制位移",
+                    "21. 【本次】加速模式与 WalkSpeed 修改模式共存，可随时切换",
                     "",
                     "感谢使用！"
                 }
@@ -1974,11 +2011,12 @@ function showMainMenu()
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
                     "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "🔹 移速模式下，未锁定速度时，界面会实时刷新角色真实速度",
-                    "🔹 移速记忆规则：以你『关闭移速那一刻的速度』为下次开启的基准",
-                    "🔹 【本次】移速子模式『修改』：直接改角色 WalkSpeed，脚踩地面",
-                    "🔹 【本次】移速子模式『加速』：物理推力，松开摇杆自然停，不悬空",
-                    "🔹 【本次】两种子模式独立记忆，切换不影响各自数值",
-                    "🔹 【本次】移速关闭时点速度按钮会弹出对话框，但不能修改",
+                    "🔹 【本次】移速记忆逻辑：开启时以当前真实速度为准，关闭时清空",
+                    "🔹 【本次】移速子模式『修改』：直接改 WalkSpeed，脚踩地面最稳",
+                    "🔹 【本次】移速子模式『持续力』：VectorForce 持续施力，物理碰撞完整",
+                    "🔹 【本次】移速子模式『物理速度』：BodyVelocity 恒定速度，老牌稳定",
+                    "🔹 【本次】移速子模式『强制位移』：CFrame 强制位移，可能穿模慎用",
+                    "🔹 【本次】关闭状态下点速度按钮仍会弹出对话框，但不能修改",
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
                     "🔹 主界面与迷你界面拖拽使用独立变量追踪坐标，零漂移零延迟",
                     "🔹 多点触控防冲突，左手摇杆 + 右手拖拽UI互不干扰",
@@ -2082,26 +2120,18 @@ function showMainMenu()
                                 end)
                             end
                         },
+                        -- 【本次移除】重置移速记忆、重置加速记忆（不再需要）
                         {
-                            text = "🔄 重置移速记忆 (清除为16)",
+                            text = "💪 加速力度系数 (当前: " .. accelForceScale .. ")",
                             callback = function(subMenu)
-                                savedSpeed = 16
-                                if speedModeEnabled and speedSubMode == "修改" then
-                                    lockedSpeed = 16
-                                    updateSpeedButtonText()
-                                end
-                                tanchuangxiaoxi("移速记忆已清除，下次开启为 16", "移速设置")
-                            end
-                        },
-                        {
-                            text = "🔄 重置加速记忆 (清除为200)",
-                            callback = function(subMenu)
-                                savedAccelSpeed = 200
-                                if speedModeEnabled and speedSubMode == "加速" then
-                                    lockedSpeed = 200
-                                    updateSpeedButtonText()
-                                end
-                                tanchuangxiaoxi("加速记忆已清除，下次开启为 200", "加速设置")
+                                showInputDialog("输入加速力度系数（越大越猛）", tostring(accelForceScale), function(val)
+                                    if val and val > 0 then
+                                        accelForceScale = val
+                                        tanchuangxiaoxi("加速力度系数已设为 " .. val, "加速设置")
+                                        subMenu:Destroy()
+                                        createSettingMenu()
+                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
+                                end)
                             end
                         },
                         {
@@ -2149,7 +2179,7 @@ function showMainMenu()
                             if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
                             if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
                             removeFly()
-                            removePhysAcceleration()
+                            stopPhysAccel()
                             disableNoclip()
                             disableBuildingRemoval()
                             disableNightVision()
@@ -2311,7 +2341,7 @@ do
     end)
 end
 
--- 加速 / 增加 按钮（【本次】同时适配修改/加速子模式）
+-- 加速 / 增加 按钮（【本次改动】物理方案也实时生效）
 do
     local holding = false
     local longPressTask = nil
@@ -2373,16 +2403,16 @@ do
     end)
 end
 
--- 减速 / 减少 按钮（【本次】同时适配修改/加速子模式）
+-- 减速 / 减少 按钮
 do
     local holding = false
     local longPressTask = nil
     local MIN_SPEED = 0.1
     local MIN_LOCKED = 0.1
-    local MIN_ACCEL = 10    -- 加速模式最小目标速度
+    local MIN_PHYS = 10
 
     local function getMinLocked()
-        return (speedSubMode == "加速") and MIN_ACCEL or MIN_LOCKED
+        return isPhysMode() and MIN_PHYS or MIN_LOCKED
     end
 
     local function decreaseFlySpeed()
@@ -2466,7 +2496,7 @@ do
     end)
 end
 
--- ==================== 速度标签（解除关闭状态点击限制） ====================
+-- ==================== 速度标签（移速模式适配 4 种方案） ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2586,10 +2616,10 @@ do
                     }
                 )
             elseif modeIndex == 1 then
-                -- 【本次修改】不论开关状态都可点击；关闭时只提示不能修改
-                local subLabel = (speedSubMode == "加速") and "加速目标速度" or "锁定速度"
+                -- 【本次改动】移速模式：不论开关状态都可点击，关闭时提示不可改
+                local subLabel = (speedSubMode == "修改") and "锁定速度" or "目标速度"
                 showInputDialog(
-                    "设置" .. subLabel,
+                    "设置" .. subLabel .. "（" .. speedSubMode .. "）",
                     string.format("%.1f", lockedSpeed),
                     function(input)
                         if not speedModeEnabled then
@@ -2610,7 +2640,6 @@ do
                         callback = function(btn)
                             showSpeedSubModeSelection(speedSubMode, function(newMode)
                                 if newMode == speedSubMode then return end
-                                -- 切换子模式：若当前已开启，需要先关闭旧的再开启新的
                                 local wasEnabled = speedModeEnabled
                                 if wasEnabled then
                                     applySpeedMode(false)
@@ -2620,6 +2649,7 @@ do
                                 if wasEnabled then
                                     applySpeedMode(true)
                                 end
+                                updateSpeedButtonText()
                                 tanchuangxiaoxi("移速子模式已切换至: " .. speedSubMode, "移速模式")
                             end)
                         end
@@ -3025,7 +3055,7 @@ main.Destroying:Connect(function()
     if speedModeConnection then speedModeConnection:Disconnect() end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
     removeFly()
-    removePhysAcceleration()
+    stopPhysAccel()
     disableNoclip()
     disableBuildingRemoval()
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
