@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 7.7.5 (最终修复版 - 独立变量追踪 + 屏幕居中 + 多点触控防冲突 + 移速记忆)
+-- Version 7.7.5 (最终修复版 - 独立变量追踪 + 屏幕居中 + 迷你窗口位置同步 + 拖动/点击双指标判定)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -18,7 +18,7 @@ main.Name = "main"
 main.Parent = game.CoreGui
 main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 main.ResetOnSpawn = false
-main.IgnoreGuiInset = true -- 强制使用物理屏幕坐标
+main.IgnoreGuiInset = true
 
 -- 【新增】计算屏幕居中坐标
 local initCamera = workspace.CurrentCamera
@@ -34,7 +34,7 @@ Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY) -- 【修改】屏幕居中
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
 Frame.Active = true
-Frame.Draggable = false -- 禁用原生拖拽
+Frame.Draggable = false
 
 up.Name = "up"
 up.Parent = Frame
@@ -256,7 +256,7 @@ local function getScreenSize()
     return screenSize
 end
 
--- 【核心】统一的坐标设置函数（同时更新变量和UI）
+-- 【核心】统一设置主窗口坐标（同时更新变量和UI）
 local function setFramePos(x, y)
     frameX = x
     frameY = y
@@ -295,12 +295,9 @@ end)
 
 RunService.RenderStepped:Connect(function()
     if not isDragging or not lastTouchPos or not latestTouchPos then return end
-    
-    -- 只算差分，不受坐标系差异影响
     local delta = latestTouchPos - lastTouchPos
     lastTouchPos = latestTouchPos
     
-    -- 直接累加到独立变量
     local newX = frameX + delta.X
     local newY = frameY + delta.Y
     
@@ -1694,6 +1691,8 @@ function showMainMenu()
                     "15.【优化】默认生成在屏幕正中央",
                     "16.【优化】移速模式记忆用户调整的速度",
                     "17.【修复】多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
+                    "18.【修复】迷你窗口展开时位置跟随小UI当前位置",
+                    "19.【修复】快速拖动被误判为点击（双指标判定）",
                     "",
                     "感谢使用！"
                 }
@@ -1802,6 +1801,8 @@ function showMainMenu()
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
                     "🔹 主界面与迷你界面拖拽使用独立变量追踪坐标，零漂移零延迟",
                     "🔹 多点触控防冲突，左手摇杆 + 右手拖拽UI互不干扰",
+                    "🔹 迷你窗口展开时会自动跟随小UI当前位置（居中定位）",
+                    "🔹 拖动/点击采用直线距离+累计位移双指标判定，快速拖动不会误触",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2520,7 +2521,7 @@ do
     end)
 end
 
--- 隐藏按钮（迷你窗口替换为独立变量追踪版）
+-- ==================== 隐藏按钮（迷你窗口 - 已应用双修复） ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2545,17 +2546,13 @@ do
         if holding then
             if longPressTask then task.cancel(longPressTask) longPressTask = nil end
             if not isLongPress then
-                -- 保存主窗口当前坐标
-                local savedX = frameX
-                local savedY = frameY
+                -- 保存主窗口当前坐标（仅在拖动位置时有用，展开时会重新计算）
                 Frame.Visible = false
 
-                -- 迷你窗口位置（hide 相对 Frame 偏移 132, 0）
-                local miniX = savedX + 132
-                local miniY = savedY
+                -- 迷你窗口初始位置（hide 相对 Frame 偏移 132, 0）
                 local vp = getScreenSize()
-                miniX = clamp(miniX, 0, vp.X - 58)
-                miniY = clamp(miniY, 0, vp.Y - 28)
+                local miniX = clamp(frameX + 132, 0, vp.X - 58)
+                local miniY = clamp(frameY, 0, vp.Y - 28)
 
                 local mini = Instance.new("Frame")
                 mini.Name = "MiniUI"
@@ -2587,6 +2584,7 @@ do
                 local miniLastTouchPos = nil
                 local miniLatestTouchPos = nil
                 local miniTotalDelta = 0
+                local miniPressStartPos = nil  -- 【修复1新增】记录按下起点
 
                 miniBtn.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.Touch then
@@ -2595,6 +2593,7 @@ do
                         miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
                         miniLatestTouchPos = miniLastTouchPos
                         miniTotalDelta = 0
+                        miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)  -- 【修复1】
                     end
                 end)
 
@@ -2608,13 +2607,25 @@ do
 
                 UserInputService.InputEnded:Connect(function(input)
                     if input == miniDragTouch then
-                        if miniTotalDelta < 10 then
-                            -- 点击展开：精确还原保存的位置
+                        -- 【修复2】双指标判定：直线距离 + 累计位移
+                        local endPos = Vector2.new(input.Position.X, input.Position.Y)
+                        local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
+
+                        if straightDist < 10 and miniTotalDelta < 15 then
+                            -- 认定为点击展开：位置跟随小 UI 的当前位置（居中于小UI）
                             local vp2 = getScreenSize()
                             local frameW = Frame.Size.X.Offset
                             local frameH = Frame.Size.Y.Offset
-                            local newX = clamp(savedX, 0, vp2.X - frameW)
-                            local newY = clamp(savedY, 0, vp2.Y - frameH)
+                            local miniW = mini.Size.X.Offset
+                            local miniH = mini.Size.Y.Offset
+
+                            -- 【修复1】用小UI当前坐标计算主窗口位置，使其居中于小UI
+                            local newX = miniX_var - (frameW - miniW) / 2
+                            local newY = miniY_var - (frameH - miniH) / 2
+
+                            newX = clamp(newX, 0, vp2.X - frameW)
+                            newY = clamp(newY, 0, vp2.Y - frameH)
+
                             setFramePos(newX, newY)
                             Frame.Visible = true
                             mini:Destroy()
@@ -2624,6 +2635,7 @@ do
                         miniDragTouch = nil
                         miniLastTouchPos = nil
                         miniLatestTouchPos = nil
+                        miniPressStartPos = nil  -- 【修复1】清理
                     end
                 end)
 
