@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 7.7.5 (最终修复版 - 独立变量追踪 + 屏幕居中 + 迷你窗口位置同步 + 拖动/点击双指标判定)
+-- Version 7.7.7 (物理加速子系统 + 移速子模式 + 待处理后50%)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -20,7 +20,6 @@ main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 main.ResetOnSpawn = false
 main.IgnoreGuiInset = true
 
--- 【新增】计算屏幕居中坐标
 local initCamera = workspace.CurrentCamera
 local initVp = initCamera and initCamera.ViewportSize or Vector2.new(1920, 1080)
 local UI_W = 190
@@ -31,7 +30,7 @@ local initY = (initVp.Y - UI_H) / 2
 Frame.Parent = main
 Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
 Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
-Frame.Position = UDim2.fromOffset(initX, initY) -- 【修改】屏幕居中
+Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
 Frame.Active = true
 Frame.Draggable = false
@@ -155,7 +154,20 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
+-- 【移速记忆】仅在"关闭移速"时写入，开启时读取
 local savedSpeed = nil
+
+-- 【新增】移速子模式："修改"=改WalkSpeed，"加速"=物理LinearVelocity加速
+local speedSubMode = "修改"
+
+-- 【新增】物理加速变量
+local accelEnabled = false
+local accelSpeed = 200            -- 默认目标速度（第一次使用）
+local savedAccelSpeed = nil       -- 【加速记忆】仅在"关闭加速"时写入
+local accelMaxForce = 100000
+local accelLinearVelocity = nil
+local accelAttachment = nil
+local accelConnection = nil
 
 -- 【核心】主窗口独立坐标变量
 local frameX = initX
@@ -237,6 +249,9 @@ local MOVE_MODES = {
 
 local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
+-- 【新增】移速子模式选项
+local SPEED_SUB_MODES = { "修改", "加速" }
+
 -- ==================== 提前声明 ====================
 local tanchuangxiaoxi
 local createMenu
@@ -256,14 +271,13 @@ local function getScreenSize()
     return screenSize
 end
 
--- 【核心】统一设置主窗口坐标（同时更新变量和UI）
 local function setFramePos(x, y)
     frameX = x
     frameY = y
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 主窗口拖拽逻辑（独立变量追踪，零漂移） ====================
+-- ==================== 主窗口拖拽逻辑 ====================
 local isDragging = false
 local dragTouch = nil
 local lastTouchPos = nil
@@ -297,19 +311,19 @@ RunService.RenderStepped:Connect(function()
     if not isDragging or not lastTouchPos or not latestTouchPos then return end
     local delta = latestTouchPos - lastTouchPos
     lastTouchPos = latestTouchPos
-    
+
     local newX = frameX + delta.X
     local newY = frameY + delta.Y
-    
+
     local camera = workspace.CurrentCamera
     if not camera then return end
     local vp = camera.ViewportSize
     local frameW = Frame.Size.X.Offset
     local frameH = Frame.Size.Y.Offset
-    
+
     newX = clamp(newX, 0, vp.X - frameW)
     newY = clamp(newY, 0, vp.Y - frameH)
-    
+
     setFramePos(newX, newY)
 end)
 
@@ -354,8 +368,13 @@ local function updateSpeedButtonText()
     if modeIndex == 0 then
         speed.Text = tostring(speeds)
     elseif modeIndex == 1 then
+        -- 【修改】根据子模式显示不同内容
         if speedModeEnabled then
-            speed.Text = string.format("%.1f", lockedSpeed)
+            if speedSubMode == "加速" then
+                speed.Text = string.format("加%.0f", lockedSpeed)
+            else
+                speed.Text = string.format("%.1f", lockedSpeed)
+            end
         else
             local char = player.Character
             if char then
@@ -471,7 +490,7 @@ local function startTpwalking()
     end)
 end
 
--- ==================== 飞天辅助函数（双模式） ====================
+-- ==================== 飞天辅助函数 ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -583,14 +602,107 @@ local function resetHumanoidAfterFly()
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
+-- ==================== 【新增】物理加速核心函数 ====================
+local function removePhysAcceleration()
+    if accelConnection then
+        accelConnection:Disconnect()
+        accelConnection = nil
+    end
+    if accelLinearVelocity then
+        pcall(function() accelLinearVelocity:Destroy() end)
+        accelLinearVelocity = nil
+    end
+    if accelAttachment then
+        pcall(function() accelAttachment:Destroy() end)
+        accelAttachment = nil
+    end
+    accelEnabled = false
+end
+
+local function startPhysAcceleration(targetSpeed)
+    local char = player.Character
+    if not char then return false end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hrp or not hum then return false end
+
+    removePhysAcceleration()
+
+    local attach = Instance.new("Attachment")
+    attach.Name = "AccelAttachment"
+    attach.Parent = hrp
+    accelAttachment = attach
+
+    -- Plane 模式：只约束水平面，Y 轴交给重力
+    local lv = Instance.new("LinearVelocity")
+    lv.Name = "AccelLinearVelocity"
+    lv.Attachment0 = attach
+    lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Plane
+    lv.PrimaryAxis = Vector3.new(0, 1, 0)
+    lv.PlaneVelocity = Vector2.new(0, 0)
+    lv.MaxForce = accelMaxForce
+    lv.RelativeTo = Enum.ActuatorRelativeTo.World
+    lv.Parent = hrp
+
+    accelLinearVelocity = lv
+    accelEnabled = true
+
+    accelConnection = RunService.Heartbeat:Connect(function()
+        if not accelEnabled then return end
+        if not lv or not lv.Parent then
+            if accelConnection then accelConnection:Disconnect() accelConnection = nil end
+            accelEnabled = false
+            return
+        end
+        local c = player.Character
+        if not c then return end
+        local h = c:FindFirstChildWhichIsA("Humanoid")
+        if not h then return end
+
+        local moveDir = h.MoveDirection
+        -- 每帧读取最新的 lockedSpeed，用户调整后立即生效
+        local spd = lockedSpeed
+
+        if moveDir.Magnitude > 0.1 then
+            local dirXZ = Vector3.new(moveDir.X, 0, moveDir.Z)
+            if dirXZ.Magnitude > 0.001 then
+                dirXZ = dirXZ.Unit
+                lv.PlaneVelocity = Vector2.new(dirXZ.X * spd, dirXZ.Z * spd)
+            end
+        else
+            lv.PlaneVelocity = Vector2.new(0, 0)
+        end
+    end)
+
+    return true
+end
+
+-- ==================== 关闭辅助函数 ====================
 local function forceDisableSpeedMode()
     if speedModeEnabled then
+        -- 若是加速子模式，先清理物理
+        if speedSubMode == "加速" and accelEnabled then
+            removePhysAcceleration()
+        end
+
         if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
+
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then pcall(function() hum.WalkSpeed = originalSpeed end) end
         end
+
+        -- 【加速记忆】关闭时快照
+        if lockedSpeed and lockedSpeed > 0 then
+            if speedSubMode == "加速" then
+                savedAccelSpeed = lockedSpeed
+            else
+                savedSpeed = lockedSpeed
+            end
+        end
+
         lockedSpeed = originalSpeed
         speedModeEnabled = false
         task.wait()
@@ -634,7 +746,7 @@ local function toggleFly(enable)
     updateSpeedDisplayLoop()
 end
 
--- ==================== 移速模式 ====================
+-- ==================== 移速模式（含加速子模式） ====================
 local function applySpeedMode(enable)
     if enable then
         local flyWasClosed = forceDisableFly()
@@ -645,28 +757,73 @@ local function applySpeedMode(enable)
         else originalSpeed = 16 end
         if originalSpeed <= 0 then originalSpeed = 16 end
 
-        if savedSpeed and savedSpeed > 0 then lockedSpeed = savedSpeed
-        else lockedSpeed = originalSpeed savedSpeed = lockedSpeed end
-
-        if speedModeConnection then speedModeConnection:Disconnect() end
-        speedModeConnection = RunService.Heartbeat:Connect(function()
-            if not speedModeEnabled then return end
-            local char = player.Character
-            if char then
-                local hum = char:FindFirstChildWhichIsA("Humanoid")
-                if hum then pcall(function() hum.WalkSpeed = lockedSpeed end) end
+        -- 【记忆机制】根据子模式读取对应的记忆值
+        if speedSubMode == "加速" then
+            if savedAccelSpeed and savedAccelSpeed > 0 then
+                lockedSpeed = savedAccelSpeed
+            else
+                lockedSpeed = accelSpeed  -- 首次使用默认值
             end
-        end)
+        else
+            if savedSpeed and savedSpeed > 0 then
+                lockedSpeed = savedSpeed
+            else
+                lockedSpeed = originalSpeed
+            end
+        end
+
         speedModeEnabled = true
-        if flyWasClosed then tanchuangxiaoxi("移速已开启，飞天已关闭", "移速模式")
-        else tanchuangxiaoxi("已开启移速模式，当前速度: " .. string.format("%.1f", lockedSpeed), "移速模式") end
+
+        if speedSubMode == "加速" then
+            -- 加速子模式：启动物理推力
+            local ok = startPhysAcceleration(lockedSpeed)
+            if not ok then
+                speedModeEnabled = false
+                tanchuangxiaoxi("角色未就绪，无法启动加速", "移速模式")
+                updateMainButtonText()
+                updateSpeedButtonText()
+                return
+            end
+        else
+            -- 修改子模式：锁定 WalkSpeed
+            if speedModeConnection then speedModeConnection:Disconnect() end
+            speedModeConnection = RunService.Heartbeat:Connect(function()
+                if not speedModeEnabled then return end
+                if speedSubMode ~= "修改" then return end
+                local c = player.Character
+                if c then
+                    local h = c:FindFirstChildWhichIsA("Humanoid")
+                    if h then pcall(function() h.WalkSpeed = lockedSpeed end) end
+                end
+            end)
+        end
+
+        local label = (speedSubMode == "加速") and "加速" or "移速"
+        if flyWasClosed then
+            tanchuangxiaoxi(label .. "已开启，飞天已关闭", "移速模式")
+        else
+            tanchuangxiaoxi("已开启" .. label .. "模式，目标: " .. string.format("%.1f", lockedSpeed), "移速模式")
+        end
     else
+        -- 关闭
         if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
+        if accelEnabled then removePhysAcceleration() end
+
         local char = player.Character
         if char then
             local hum = char:FindFirstChildWhichIsA("Humanoid")
             if hum then pcall(function() hum.WalkSpeed = originalSpeed end) end
         end
+
+        -- 【记忆机制】关闭时按子模式分别快照
+        if lockedSpeed and lockedSpeed > 0 then
+            if speedSubMode == "加速" then
+                savedAccelSpeed = lockedSpeed
+            else
+                savedSpeed = lockedSpeed
+            end
+        end
+
         lockedSpeed = originalSpeed
         speedModeEnabled = false
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
@@ -1621,6 +1778,21 @@ local function showMoveModeSelection(currentMode, callback)
     createMenu("选择移动模式", buttons, nil)
 end
 
+-- 【新增】移速子模式选择菜单（修改 / 加速）
+local function showSpeedSubModeSelection(currentMode, callback)
+    local buttons = {}
+    for _, mode in ipairs(SPEED_SUB_MODES) do
+        table.insert(buttons, {
+            text = mode .. (mode == currentMode and " ✓" or ""),
+            callback = function(menu)
+                menu:Destroy()
+                callback(mode)
+            end
+        })
+    end
+    createMenu("选择移速子模式\n(修改=锁定WalkSpeed / 加速=物理推力)", buttons, nil)
+end
+
 -- ==================== 主菜单显示函数 ====================
 function showMainMenu()
     createMenu("UI菜单", {
@@ -1672,27 +1844,32 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 7.7.5 更新内容：",
+                    "版本 7.7.7 更新内容：",
                     "",
                     "1. 完美整合建筑移除功能，不摧毁地图",
                     "2. 建筑贴图透明度完全支持0~1手动调节",
                     "3. 增加循环模式扩充，共5个状态",
                     "4. 加入5项死亡与重生状态管理逻辑 (透视独立)",
-                    "5. 【新增】透视模式下，支持使用增加/减少按钮微调亮度",
-                    "6. 【优化】穿墙逻辑改为动态防回弹，支持跳跃保护",
-                    "7. 【修复】死亡模式1死亡瞬间关闭失效Bug",
-                    "8. 【修复】透视模式拖拽进度条时主UI数值不更新的Bug",
-                    "9. 【新增】透视悬浮窗集成6项渲染控制（含冻结机制）",
-                    "10.【修复】渲染开关恢复逻辑与重置UI不同步问题",
-                    "11.【修复】移速模式下，界面实时更新角色当前速度",
-                    "12.【新增】飞天模式增加泳姿(旧版)与自由(新版)，默认泳姿",
-                    "13.【优化】死亡处理模式默认值改为模式1",
-                    "14.【优化】主UI与迷你UI使用独立变量追踪坐标，零漂移零延迟",
-                    "15.【优化】默认生成在屏幕正中央",
-                    "16.【优化】移速模式记忆用户调整的速度",
-                    "17.【修复】多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
-                    "18.【修复】迷你窗口展开时位置跟随小UI当前位置",
-                    "19.【修复】快速拖动被误判为点击（双指标判定）",
+                    "5. 透视模式下，支持使用增加/减少按钮微调亮度",
+                    "6. 穿墙逻辑改为动态防回弹，支持跳跃保护",
+                    "7. 死亡模式1死亡瞬间关闭失效Bug已修复",
+                    "8. 透视模式拖拽进度条时主UI数值不更新Bug已修复",
+                    "9. 透视悬浮窗集成6项渲染控制（含冻结机制）",
+                    "10. 渲染开关恢复逻辑与重置UI不同步问题已修复",
+                    "11. 移速模式下，界面实时更新角色当前速度",
+                    "12. 飞天模式增加泳姿(旧版)与自由(新版)，默认泳姿",
+                    "13. 死亡处理模式默认值改为模式1",
+                    "14. 主UI与迷你UI使用独立变量追踪坐标，零漂移零延迟",
+                    "15. 默认生成在屏幕正中央",
+                    "16. 多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
+                    "17. 迷你窗口展开时位置跟随小UI当前位置",
+                    "18. 快速拖动被误判为点击问题已修复（双指标判定）",
+                    "19. 移速记忆改为：以关闭瞬间的速度为基准",
+                    "20. 移除设置中无用的屏幕宽度/高度/重置项",
+                    "21. 【本次】移速模式新增子模式：修改 / 加速",
+                    "22. 【本次】加速模式使用 Plane 物理推力，不悬空",
+                    "23. 【本次】加速与修改分别独立记忆，互不干扰",
+                    "24. 【本次】移速关闭状态下也可点速度按钮（提示不能修改）",
                     "",
                     "感谢使用！"
                 }
@@ -1797,7 +1974,11 @@ function showMainMenu()
                     "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光，且自动记忆",
                     "🔹 全新加入冻结机制，防止地图脚本强制修改你的渲染设置",
                     "🔹 移速模式下，未锁定速度时，界面会实时刷新角色真实速度",
-                    "🔹 移速模式下，锁定后调整的速度会被自动记忆，重新开启不会重置",
+                    "🔹 移速记忆规则：以你『关闭移速那一刻的速度』为下次开启的基准",
+                    "🔹 【本次】移速子模式『修改』：直接改角色 WalkSpeed，脚踩地面",
+                    "🔹 【本次】移速子模式『加速』：物理推力，松开摇杆自然停，不悬空",
+                    "🔹 【本次】两种子模式独立记忆，切换不影响各自数值",
+                    "🔹 【本次】移速关闭时点速度按钮会弹出对话框，但不能修改",
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
                     "🔹 主界面与迷你界面拖拽使用独立变量追踪坐标，零漂移零延迟",
                     "🔹 多点触控防冲突，左手摇杆 + 右手拖拽UI互不干扰",
@@ -1902,41 +2083,25 @@ function showMainMenu()
                             end
                         },
                         {
-                            text = "📏 设置屏幕宽度",
-                            callback = function(subMenu)
-                                showInputDialog("输入屏幕宽度（像素）", tostring(customWidth or getScreenSize().X), function(val)
-                                    if val and val > 0 then
-                                        customWidth = val
-                                        tanchuangxiaoxi("屏幕宽度已设为 " .. val, "自定义尺寸")
-                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
-                                end)
-                            end
-                        },
-                        {
-                            text = "📏 设置屏幕高度",
-                            callback = function(subMenu)
-                                showInputDialog("输入屏幕高度（像素）", tostring(customHeight or getScreenSize().Y), function(val)
-                                    if val and val > 0 then
-                                        customHeight = val
-                                        tanchuangxiaoxi("屏幕高度已设为 " .. val, "自定义尺寸")
-                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
-                                end)
-                            end
-                        },
-                        {
-                            text = "🔄 重置为自动检测",
-                            callback = function(subMenu)
-                                customWidth = nil
-                                customHeight = nil
-                                tanchuangxiaoxi("已恢复自动检测屏幕尺寸", "自定义尺寸")
-                            end
-                        },
-                        {
-                            text = "🔄 重置移速为默认值 (16)",
+                            text = "🔄 重置移速记忆 (清除为16)",
                             callback = function(subMenu)
                                 savedSpeed = 16
-                                if speedModeEnabled then lockedSpeed = 16 updateSpeedButtonText() end
-                                tanchuangxiaoxi("移速已重置为默认值 16", "移速设置")
+                                if speedModeEnabled and speedSubMode == "修改" then
+                                    lockedSpeed = 16
+                                    updateSpeedButtonText()
+                                end
+                                tanchuangxiaoxi("移速记忆已清除，下次开启为 16", "移速设置")
+                            end
+                        },
+                        {
+                            text = "🔄 重置加速记忆 (清除为200)",
+                            callback = function(subMenu)
+                                savedAccelSpeed = 200
+                                if speedModeEnabled and speedSubMode == "加速" then
+                                    lockedSpeed = 200
+                                    updateSpeedButtonText()
+                                end
+                                tanchuangxiaoxi("加速记忆已清除，下次开启为 200", "加速设置")
                             end
                         },
                         {
@@ -1984,6 +2149,7 @@ function showMainMenu()
                             if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
                             if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
                             removeFly()
+                            removePhysAcceleration()
                             disableNoclip()
                             disableBuildingRemoval()
                             disableNightVision()
@@ -2145,7 +2311,7 @@ do
     end)
 end
 
--- 加速 / 增加 按钮
+-- 加速 / 增加 按钮（【本次】同时适配修改/加速子模式）
 do
     local holding = false
     local longPressTask = nil
@@ -2159,7 +2325,6 @@ do
                 speed.Text = tostring(speeds)
             elseif modeIndex == 1 and speedModeEnabled then
                 lockedSpeed = lockedSpeed + incStep
-                savedSpeed = lockedSpeed
                 updateSpeedButtonText()
             elseif modeIndex == 4 then
                 nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
@@ -2181,7 +2346,6 @@ do
             speed.Text = tostring(speeds)
         elseif modeIndex == 1 then
             lockedSpeed = lockedSpeed + incStep
-            savedSpeed = lockedSpeed
             updateSpeedButtonText()
         elseif modeIndex == 4 then
             nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
@@ -2209,12 +2373,17 @@ do
     end)
 end
 
--- 减速 / 减少 按钮
+-- 减速 / 减少 按钮（【本次】同时适配修改/加速子模式）
 do
     local holding = false
     local longPressTask = nil
     local MIN_SPEED = 0.1
     local MIN_LOCKED = 0.1
+    local MIN_ACCEL = 10    -- 加速模式最小目标速度
+
+    local function getMinLocked()
+        return (speedSubMode == "加速") and MIN_ACCEL or MIN_LOCKED
+    end
 
     local function decreaseFlySpeed()
         local current = tonumber(speeds) or 0
@@ -2232,12 +2401,13 @@ do
     end
 
     local function decreaseLockedSpeed()
+        local minLock = getMinLocked()
         if lockedSpeed > incStep then lockedSpeed = lockedSpeed - incStep
-        elseif lockedSpeed > MIN_LOCKED then lockedSpeed = MIN_LOCKED
+        elseif lockedSpeed > minLock then lockedSpeed = minLock
         else
             speed.Text = "已达最小速度"
             task.wait(1)
-            speed.Text = string.format("%.1f", lockedSpeed)
+            updateSpeedButtonText()
             return false
         end
         return true
@@ -2259,7 +2429,7 @@ do
             if modeIndex == 0 then success = decreaseFlySpeed()
             elseif modeIndex == 1 and speedModeEnabled then
                 success = decreaseLockedSpeed()
-                if success then savedSpeed = lockedSpeed updateSpeedButtonText() end
+                if success then updateSpeedButtonText() end
             elseif modeIndex == 4 then success = decreaseNightVision() end
             if not success then break end
             task.wait(interval)
@@ -2274,7 +2444,6 @@ do
         if modeIndex == 0 then decreaseFlySpeed()
         elseif modeIndex == 1 then
             decreaseLockedSpeed()
-            savedSpeed = lockedSpeed
             updateSpeedButtonText()
         elseif modeIndex == 4 then decreaseNightVision() end
         longPressTask = task.delay(0.3, function()
@@ -2297,7 +2466,7 @@ do
     end)
 end
 
--- 速度标签（长按设置模式细节，单击设置速度值/透明度）
+-- ==================== 速度标签（解除关闭状态点击限制） ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2416,26 +2585,42 @@ do
                         end
                     }
                 )
-            elseif modeIndex == 1 and speedModeEnabled then
+            elseif modeIndex == 1 then
+                -- 【本次修改】不论开关状态都可点击；关闭时只提示不能修改
+                local subLabel = (speedSubMode == "加速") and "加速目标速度" or "锁定速度"
                 showInputDialog(
-                    "设置锁定速度",
+                    "设置" .. subLabel,
                     string.format("%.1f", lockedSpeed),
                     function(input)
+                        if not speedModeEnabled then
+                            tanchuangxiaoxi("关闭状态下不能修改", "移速模式")
+                            return
+                        end
                         local num = tonumber(input)
                         if num and num > 0 then
                             lockedSpeed = num
-                            savedSpeed = lockedSpeed
                             updateSpeedButtonText()
-                            tanchuangxiaoxi("锁定速度已设为 " .. tostring(num), "速度设置")
-                        else tanchuangxiaoxi("请输入大于0的数字", "错误") end
+                            tanchuangxiaoxi(subLabel .. "已设为 " .. tostring(num), "速度设置")
+                        else
+                            tanchuangxiaoxi("请输入大于0的数字", "错误")
+                        end
                     end,
                     {
-                        text = "飞行模式: " .. flyMode,
+                        text = "移速模式: " .. speedSubMode,
                         callback = function(btn)
-                            showFlyModeSelection(flyMode, function(newMode)
-                                flyMode = newMode
-                                btn.Text = "飞行模式: " .. flyMode
-                                tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
+                            showSpeedSubModeSelection(speedSubMode, function(newMode)
+                                if newMode == speedSubMode then return end
+                                -- 切换子模式：若当前已开启，需要先关闭旧的再开启新的
+                                local wasEnabled = speedModeEnabled
+                                if wasEnabled then
+                                    applySpeedMode(false)
+                                end
+                                speedSubMode = newMode
+                                btn.Text = "移速模式: " .. speedSubMode
+                                if wasEnabled then
+                                    applySpeedMode(true)
+                                end
+                                tanchuangxiaoxi("移速子模式已切换至: " .. speedSubMode, "移速模式")
                             end)
                         end
                     }
@@ -2521,7 +2706,7 @@ do
     end)
 end
 
--- ==================== 隐藏按钮（迷你窗口 - 已应用双修复） ====================
+-- ==================== 隐藏按钮（迷你窗口 - 双修复版） ====================
 do
     local holding = false
     local longPressTask = nil
@@ -2546,10 +2731,8 @@ do
         if holding then
             if longPressTask then task.cancel(longPressTask) longPressTask = nil end
             if not isLongPress then
-                -- 保存主窗口当前坐标（仅在拖动位置时有用，展开时会重新计算）
                 Frame.Visible = false
 
-                -- 迷你窗口初始位置（hide 相对 Frame 偏移 132, 0）
                 local vp = getScreenSize()
                 local miniX = clamp(frameX + 132, 0, vp.X - 58)
                 local miniY = clamp(frameY, 0, vp.Y - 28)
@@ -2574,17 +2757,15 @@ do
                 miniBtn.Font = Enum.Font.SourceSans
                 miniBtn.Active = true
 
-                -- 迷你窗口独立坐标变量
                 local miniX_var = miniX
                 local miniY_var = miniY
 
-                -- 迷你窗口拖拽（独立变量追踪）
                 local miniIsDragging = false
                 local miniDragTouch = nil
                 local miniLastTouchPos = nil
                 local miniLatestTouchPos = nil
                 local miniTotalDelta = 0
-                local miniPressStartPos = nil  -- 【修复1新增】记录按下起点
+                local miniPressStartPos = nil
 
                 miniBtn.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.Touch then
@@ -2593,7 +2774,7 @@ do
                         miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
                         miniLatestTouchPos = miniLastTouchPos
                         miniTotalDelta = 0
-                        miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)  -- 【修复1】
+                        miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
                     end
                 end)
 
@@ -2607,19 +2788,16 @@ do
 
                 UserInputService.InputEnded:Connect(function(input)
                     if input == miniDragTouch then
-                        -- 【修复2】双指标判定：直线距离 + 累计位移
                         local endPos = Vector2.new(input.Position.X, input.Position.Y)
                         local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
 
                         if straightDist < 10 and miniTotalDelta < 15 then
-                            -- 认定为点击展开：位置跟随小 UI 的当前位置（居中于小UI）
                             local vp2 = getScreenSize()
                             local frameW = Frame.Size.X.Offset
                             local frameH = Frame.Size.Y.Offset
                             local miniW = mini.Size.X.Offset
                             local miniH = mini.Size.Y.Offset
 
-                            -- 【修复1】用小UI当前坐标计算主窗口位置，使其居中于小UI
                             local newX = miniX_var - (frameW - miniW) / 2
                             local newY = miniY_var - (frameH - miniH) / 2
 
@@ -2635,11 +2813,10 @@ do
                         miniDragTouch = nil
                         miniLastTouchPos = nil
                         miniLatestTouchPos = nil
-                        miniPressStartPos = nil  -- 【修复1】清理
+                        miniPressStartPos = nil
                     end
                 end)
 
-                -- 迷你窗口每帧更新
                 local miniRenderConn
                 miniRenderConn = RunService.RenderStepped:Connect(function()
                     if not mini or not mini.Parent then
@@ -2848,6 +3025,7 @@ main.Destroying:Connect(function()
     if speedModeConnection then speedModeConnection:Disconnect() end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
     removeFly()
+    removePhysAcceleration()
     disableNoclip()
     disableBuildingRemoval()
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
