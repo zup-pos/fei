@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version: 7.7.5 (最终稳定版 - 移速动态刷新 + 冻结机制 + 渲染开关修复 + 泳姿/自由双模式 + 拖拽边界限制 + 迷你UI滑动防误触)
+-- Version: 7.7.5 (最终稳定版 - 顶部/底部安全区限制 + 迷你UI防误触 + 飞天双模式 + 移速动态刷新)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -25,7 +25,7 @@ Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.new(0.100320168, 0, 0.379746825, 0)
 Frame.Size = UDim2.new(0, 190, 0, 56)
 Frame.Active = true
-Frame.Draggable = false -- 禁用原生拖拽，改用自定义边界限制
+Frame.Draggable = false -- 禁用原生拖拽，改用自定义安全区限制
 
 up.Name = "up"
 up.Parent = Frame
@@ -146,9 +146,10 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
--- 拖拽边界限制变量
+-- 主窗口拖拽变量
 local frameDragging = false
-local frameDragStartOffset = nil
+local dragStartInput = nil
+local dragStartFramePos = nil
 
 -- 悬浮窗变量
 local noclipWindow = nil
@@ -254,37 +255,42 @@ local function getScreenSize()
     end
 end
 
--- ==================== 主窗口拖拽与边界限制 ====================
+-- ==================== 主窗口拖拽与边界限制（顶部+底部双安全区版） ====================
 Frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         frameDragging = true
-        local inputPos = Vector2.new(input.Position.X, input.Position.Y)
-        frameDragStartOffset = inputPos - Frame.AbsolutePosition
+        dragStartInput = Vector2.new(input.Position.X, input.Position.Y)
+        dragStartFramePos = Frame.AbsolutePosition
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
     if frameDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local currentInputPos = Vector2.new(input.Position.X, input.Position.Y)
-        local newAbsX = currentInputPos.X - frameDragStartOffset.X
-        local newAbsY = currentInputPos.Y - frameDragStartOffset.Y
+        local delta = Vector2.new(input.Position.X, input.Position.Y) - dragStartInput
+        local newX = dragStartFramePos.X + delta.X
+        local newY = dragStartFramePos.Y + delta.Y
         
         local camera = workspace.CurrentCamera
         if not camera then return end
-        local viewport = camera.ViewportSize
+        local vp = camera.ViewportSize
         local frameSize = Frame.AbsoluteSize
         
-        newAbsX = clamp(newAbsX, 0, viewport.X - frameSize.X)
-        newAbsY = clamp(newAbsY, 0, viewport.Y - frameSize.Y)
+        -- 【核心修复】顶部预留 40 像素，底部预留 35 像素安全区
+        local safeTopPadding = 40
+        local safeBottomPadding = 35
         
-        Frame.Position = UDim2.fromOffset(newAbsX, newAbsY)
+        newX = clamp(newX, 0, vp.X - frameSize.X)
+        newY = clamp(newY, safeTopPadding, vp.Y - frameSize.Y - safeBottomPadding)
+        
+        Frame.Position = UDim2.fromOffset(newX, newY)
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         frameDragging = false
-        frameDragStartOffset = nil
+        dragStartInput = nil
+        dragStartFramePos = nil
     end
 end)
 
@@ -1891,6 +1897,7 @@ function showMainMenu()
                     "13.【优化】死亡处理模式默认值改为模式1",
                     "14.【优化】主UI与迷你UI增加屏幕边界限制，防止拖出屏幕",
                     "15.【修复】迷你UI在滑动经过时被误触展开的Bug",
+                    "16.【优化】顶部预留40像素，底部预留35像素安全区，防止被手机系统UI遮挡",
                     "",
                     "感谢使用！"
                 }
@@ -2006,6 +2013,7 @@ function showMainMenu()
                     "🔹 飞行模式新增泳姿/自由，泳姿为旧版有水声，自由为无声音三维视角",
                     "🔹 主界面与迷你界面拖拽时均带屏幕边缘限制，不会跑出屏幕外",
                     "🔹 迷你窗口滑动经过时带有防误触判定，需点击才能展开",
+                    "🔹 顶部/底部带安全区限制，防止被手机系统UI遮挡",
                     "",
                     "⚙️ 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
@@ -2871,11 +2879,10 @@ do
                 local miniDragging = false
                 local miniDragStartOffset = nil
                 local miniInputChangedConn = nil
-                local miniPressStartPos = nil -- 【新增】记录手指按下的绝对坐标
+                local miniPressStartPos = nil
 
                 miniBtn.InputBegan:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        -- 【新增】记录手指绝对坐标
                         miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
                         
                         miniDragging = true
@@ -2894,8 +2901,12 @@ do
                                 local viewport = camera.ViewportSize
                                 local miniSize = mini.AbsoluteSize
                                 
+                                -- 【核心修复】迷你窗口也预留顶部/底部安全区
+                                local safeTopPadding = 40
+                                local safeBottomPadding = 35
+                                
                                 newAbsX = clamp(newAbsX, 0, viewport.X - miniSize.X)
-                                newAbsY = clamp(newAbsY, 0, viewport.Y - miniSize.Y)
+                                newAbsY = clamp(newAbsY, safeTopPadding, viewport.Y - miniSize.Y - safeBottomPadding)
                                 
                                 mini.Position = UDim2.fromOffset(newAbsX, newAbsY)
                             end
@@ -2905,16 +2916,13 @@ do
 
                 miniBtn.InputEnded:Connect(function(input)
                     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                        -- 【核心修复】用绝对坐标差值计算手指位移
                         local currentInputPos = Vector2.new(input.Position.X, input.Position.Y)
                         local totalDelta = (currentInputPos - miniPressStartPos).Magnitude
                         
                         local screenSize = getScreenSize()
-                        -- 【核心修复】动态阈值，至少15像素，或屏幕宽度的2%
                         local moveThreshold = math.max(15, screenSize.X * 0.02)
                         
                         if totalDelta < moveThreshold then 
-                            -- 位移极小，视为点击，执行展开主窗口逻辑
                             local miniPos = mini.AbsolutePosition
                             local frameWidth = Frame.AbsoluteSize.X
                             local frameHeight = Frame.AbsoluteSize.Y
@@ -2924,8 +2932,12 @@ do
                             local newX = miniPos.X - (frameWidth - miniWidth) / 2
                             local newY = miniPos.Y - (frameHeight - miniHeight) / 2
                             
+                            -- 展开主窗口时也应用顶部/底部安全区
+                            local safeTopPadding = 40
+                            local safeBottomPadding = 35
+                            
                             newX = clamp(newX, 0, screenSize.X - frameWidth)
-                            newY = clamp(newY, 0, screenSize.Y - frameHeight)
+                            newY = clamp(newY, safeTopPadding, screenSize.Y - frameHeight - safeBottomPadding)
                             
                             Frame.Position = UDim2.fromOffset(newX, newY)
                             Frame.Visible = true
@@ -2937,7 +2949,6 @@ do
                         miniDragStartOffset = nil
                         miniPressStartPos = nil
                         
-                        -- 断开全局输入监听，防止内存泄漏
                         if miniInputChangedConn then 
                             miniInputChangedConn:Disconnect() 
                             miniInputChangedConn = nil 
@@ -2945,7 +2956,6 @@ do
                     end
                 end)
 
-                -- 【新增】兜底清理，防止外部强制销毁UI时内存泄漏
                 mini.Destroying:Connect(function()
                     if miniInputChangedConn then
                         miniInputChangedConn:Disconnect()
