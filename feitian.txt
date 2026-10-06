@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.14（关键词保护：前缀子串 + 完整名 + 复制；修复大模型取消异常；完善清空逻辑）
+-- Version 8.3.15（修复删除Bug；管理界面新增一键复制；支持逗号批量导入）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -2421,29 +2421,56 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 保护菜单（重构 + 完善清空逻辑） ====================
+-- ==================== 保护菜单（重构 + 支持批量导入） ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
-        text = "➕ 添加保护关键词（子串匹配）",
+        text = "➕ 添加保护关键词（支持逗号批量）",
         bgColor = Color3.fromRGB(50, 130, 200),
         callback = function(menu)
             menu:Destroy()
-            showInputDialog("输入保护关键词（子串包含即保护）", "", function(val)
+            showInputDialog("输入保护关键词（可用逗号分隔批量导入）", "", function(val)
                 if not val or val == "" then return end
                 val = val:match("^%s*(.-)%s*$")
                 if val == "" then return end
-                for _, item in ipairs(userProtectKeywords) do
-                    if item.prefix and string.lower(item.prefix) == string.lower(val) then
-                        tanchuangxiaoxi("关键词已存在: " .. val, "保护")
-                        return
+                
+                -- 按逗号分割
+                local keywords = {}
+                for kw in string.gmatch(val, "([^,]+)") do
+                    local trimmed = kw:match("^%s*(.-)%s*$")
+                    if trimmed ~= "" then
+                        table.insert(keywords, trimmed)
                     end
                 end
-                table.insert(userProtectKeywords, {
-                    prefix = val,
-                    exact = nil,
-                })
-                tanchuangxiaoxi("已添加: " .. val, "保护")
+                
+                if #keywords == 0 then
+                    tanchuangxiaoxi("未检测到有效关键词", "保护")
+                    return
+                end
+                
+                local addedCount = 0
+                for _, kw in ipairs(keywords) do
+                    local isDuplicate = false
+                    for _, item in ipairs(userProtectKeywords) do
+                        if item.prefix and string.lower(item.prefix) == string.lower(kw) then
+                            isDuplicate = true
+                            break
+                        end
+                    end
+                    if not isDuplicate then
+                        table.insert(userProtectKeywords, {
+                            prefix = kw,
+                            exact = nil,
+                        })
+                        addedCount = addedCount + 1
+                    end
+                end
+                
+                if addedCount > 0 then
+                    tanchuangxiaoxi("成功导入 " .. addedCount .. " 个关键词", "保护")
+                else
+                    tanchuangxiaoxi("没有新增关键词（可能已存在）", "保护")
+                end
             end)
         end
     })
@@ -2521,7 +2548,7 @@ showProtectMenu = function()
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理（点击进入详情） ====================
+-- ==================== 关键词管理（新增复制与清空按钮） ====================
 showKeywordManageMenu = function()
     local buttons = {}
     if #userProtectKeywords == 0 then
@@ -2531,6 +2558,71 @@ showKeywordManageMenu = function()
             callback = function() end
         })
     else
+        -- 复制前缀按钮
+        table.insert(buttons, {
+            text = "📋 复制所有前缀",
+            bgColor = Color3.fromRGB(50, 130, 200),
+            callback = function(menu)
+                local result = {}
+                for _, item in ipairs(userProtectKeywords) do
+                    if item.prefix and item.prefix ~= "" then
+                        table.insert(result, item.prefix)
+                    end
+                end
+                if #result == 0 then
+                    tanchuangxiaoxi("没有可复制的前缀", "保护")
+                    return
+                end
+                local text = table.concat(result, ",")
+                if setclipboard then
+                    pcall(setclipboard, text)
+                    tanchuangxiaoxi("已复制: " .. text, "保护")
+                else
+                    tanchuangxiaoxi("剪贴板不可用", "保护")
+                end
+                menu:Destroy()
+            end
+        })
+        
+        -- 复制完整名按钮
+        table.insert(buttons, {
+            text = "📋 复制所有完整名",
+            bgColor = Color3.fromRGB(70, 140, 180),
+            callback = function(menu)
+                local result = {}
+                for _, item in ipairs(userProtectKeywords) do
+                    if item.exact and item.exact ~= "" then
+                        table.insert(result, item.exact)
+                    end
+                end
+                if #result == 0 then
+                    tanchuangxiaoxi("没有可复制的完整名", "保护")
+                    return
+                end
+                local text = table.concat(result, ",")
+                if setclipboard then
+                    pcall(setclipboard, text)
+                    tanchuangxiaoxi("已复制: " .. text, "保护")
+                else
+                    tanchuangxiaoxi("剪贴板不可用", "保护")
+                end
+                menu:Destroy()
+            end
+        })
+        
+        -- 清空所有关键词按钮
+        table.insert(buttons, {
+            text = "🗑 清空所有关键词",
+            bgColor = Color3.fromRGB(178, 34, 34),
+            callback = function(menu)
+                userProtectKeywords = {}
+                tanchuangxiaoxi("已清空所有关键词", "保护")
+                menu:Destroy()
+                if showProtectMenu then showProtectMenu() end
+            end
+        })
+        
+        -- 关键词列表
         for i, item in ipairs(userProtectKeywords) do
             local idxCopy = i
             local label = item.prefix or item.exact or "?"
@@ -2547,7 +2639,7 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
--- ==================== 关键词详情（含复制） ====================
+-- ==================== 关键词详情（含复制、修复删除Bug） ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -2654,8 +2746,15 @@ showKeywordDetailDialog = function(idx)
         end
     end)
 
+    -- 【修复】基于对象引用删除，避免索引错乱
+    local targetItem = userProtectKeywords[idx]
     mkBtn("❌ 删除", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
-        table.remove(userProtectKeywords, idx)
+        for i, item in ipairs(userProtectKeywords) do
+            if item == targetItem then
+                table.remove(userProtectKeywords, i)
+                break
+            end
+        end
         dialog:Destroy()
         tanchuangxiaoxi("已删除", "保护")
         if showKeywordManageMenu then showKeywordManageMenu() end
@@ -2841,21 +2940,21 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.14 更新内容：",
+                    "版本 8.3.15 更新内容：",
                     "",
                     "1-60. (略，历史更新)",
                     "61. 【保护系统重构】",
                     "    - 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
-                    "    - 物品类（袋子/铲子/刀等）改为用户自定义关键词",
+                    "    - 物品类改为用户自定义关键词",
                     "    - 长按保护按钮 → 管理菜单",
-                    "        + 添加保护关键词（子串包含）",
-                    "        + 从准心拾取关键词（自动去尾数）",
+                    "        + 添加保护关键词（支持逗号分隔批量导入）",
+                    "        + 从准心拾取关键词",
                     "        + 管理保护关键词（详情 / 复制 / 删除）",
-                    "        + 清空单目标保护（同时清理准星关键词）",
-                    "    - 关键词支持双字段：",
-                    "        · prefix  子串匹配（例: chest）",
-                    "        · exact   完整匹配（例: Chest_01）",
+                    "        + 管理界面支持一键复制所有前缀/完整名",
+                    "        + 管理界面支持一键清空所有关键词",
+                    "    - 关键词双字段：prefix 子串匹配 + exact 完整匹配",
                     "62. 【修复】准心添加大模型无法正常取消的问题",
+                    "63. 【修复】关键词详情页删除逻辑，避免索引错乱",
                     "",
                     "感谢使用！"
                 }
@@ -2925,10 +3024,11 @@ function showMainMenu()
                     "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
                     "🔹 【保护按钮】短按 = 切换单目标保护",
                     "🔹 【保护按钮】长按 = 保护设置菜单",
-                    "   - 添加保护关键词（前缀子串，例：bag）",
-                    "   - 从准心拾取关键词（自动去尾数，例：Chest_01→chest）",
+                    "   - 添加保护关键词（支持逗号批量导入）",
+                    "   - 从准心拾取关键词（自动去尾数）",
                     "   - 管理保护关键词：详情 / 复制 / 删除",
-                    "   - 清空单目标保护（同时清理准星拾取的关键词）",
+                    "   - 管理界面支持一键复制前缀/完整名",
+                    "   - 管理界面支持一键清空所有关键词",
                     "🔹 双字段：prefix 子串匹配 + exact 完整匹配",
                     "🔹 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
                     "🔹 透明度可用输入框或滑动条调整",
