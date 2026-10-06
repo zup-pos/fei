@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.15（修复删除Bug；管理界面新增一键复制；支持逗号批量导入）
+-- Version 8.3.17（全功能最终版：状态彻底还原、文件导入导出、批量导入、清空主菜单）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -149,8 +149,6 @@ local noclipSaved = {}
 local smartSubMode = "smart"
 
 local protectedList = {}
--- 【重构】每条：{ prefix = 字符串或nil, exact = 字符串或nil }
--- prefix 走子串匹配，exact 走完整相等匹配，任一命中即保护
 local userProtectKeywords = {}
 
 local tanchuangxiaoxi
@@ -160,7 +158,7 @@ local showProtectMenu
 local showKeywordManageMenu
 local showKeywordDetailDialog
 
--- 【新增】关键词去尾数（Chest_01 → chest、宝箱 (2) → 宝箱）
+-- 【新增】关键词去尾数
 local function extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
@@ -171,6 +169,39 @@ local function extractKeyword(name)
     s = s:match("^%s*(.-)%s*$") or s
     if s == "" then s = name end
     return string.lower(s)
+end
+
+-- ==================== 文件操作核心函数 ====================
+local function serializeKeywords(keywords)
+    local lines = {}
+    for _, item in ipairs(keywords) do
+        local prefix = item.prefix or ""
+        local exact = item.exact or ""
+        table.insert(lines, prefix .. "," .. exact)
+    end
+    return table.concat(lines, "\n")
+end
+
+local function deserializeKeywords(content)
+    local keywords = {}
+    for line in string.gmatch(content, "[^\n]+") do
+        local firstComma = string.find(line, ",")
+        if firstComma then
+            local prefix = string.sub(line, 1, firstComma - 1)
+            local exact = string.sub(line, firstComma + 1)
+            if prefix ~= "" then
+                table.insert(keywords, {
+                    prefix = prefix,
+                    exact = (exact ~= "" and exact) or nil
+                })
+            end
+        else
+            if line ~= "" then
+                table.insert(keywords, { prefix = line, exact = nil })
+            end
+        end
+    end
+    return keywords
 end
 
 local SmartBuilding = (function()
@@ -276,7 +307,6 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 【重构】用户关键词匹配：完整名（相等）或 前缀（子串）
     local function ancestorsMatchUserKw(inst)
         if not inst then return false end
         if #userProtectKeywords == 0 then return false end
@@ -284,11 +314,9 @@ local SmartBuilding = (function()
         while cur and cur ~= workspace and depth < 15 do
             local n = string.lower(cur.Name)
             for _, item in ipairs(userProtectKeywords) do
-                -- 完整名匹配（精确相等）
                 if item.exact and item.exact ~= "" and string.lower(item.exact) == n then
                     return true
                 end
-                -- 前缀/子串匹配
                 if item.prefix and item.prefix ~= "" and string.find(n, string.lower(item.prefix), 1, true) then
                     return true
                 end
@@ -1077,14 +1105,12 @@ local SmartBuilding = (function()
         local parts = collectTargetParts(root)
         if #parts == 0 then showNotification("无有效部件"); return false end
         
-        -- 【修复】统计已经添加过的部件数
         local addedCount = 0
         for _, p in ipairs(parts) do
             if targetList[p] ~= nil or guiStateMap[p] ~= nil then
                 addedCount = addedCount + 1
             end
         end
-        -- 【修复】只要这个模型里存在已经透明过的部件，再次点击就直接执行取消操作
         if addedCount > 0 then
             SB.removeTarget(root)
             showNotification("已取消: " .. root.Name)
@@ -2421,7 +2447,7 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 保护菜单（重构 + 支持批量导入） ====================
+-- ==================== 保护菜单（外部主菜单清空所有关键词） ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
@@ -2433,44 +2459,30 @@ showProtectMenu = function()
                 if not val or val == "" then return end
                 val = val:match("^%s*(.-)%s*$")
                 if val == "" then return end
-                
-                -- 按逗号分割
                 local keywords = {}
                 for kw in string.gmatch(val, "([^,]+)") do
                     local trimmed = kw:match("^%s*(.-)%s*$")
-                    if trimmed ~= "" then
-                        table.insert(keywords, trimmed)
-                    end
+                    if trimmed ~= "" then table.insert(keywords, trimmed) end
                 end
-                
                 if #keywords == 0 then
                     tanchuangxiaoxi("未检测到有效关键词", "保护")
                     return
                 end
-                
                 local addedCount = 0
                 for _, kw in ipairs(keywords) do
                     local isDuplicate = false
                     for _, item in ipairs(userProtectKeywords) do
                         if item.prefix and string.lower(item.prefix) == string.lower(kw) then
-                            isDuplicate = true
-                            break
+                            isDuplicate = true; break
                         end
                     end
                     if not isDuplicate then
-                        table.insert(userProtectKeywords, {
-                            prefix = kw,
-                            exact = nil,
-                        })
+                        table.insert(userProtectKeywords, { prefix = kw, exact = nil })
                         addedCount = addedCount + 1
                     end
                 end
-                
-                if addedCount > 0 then
-                    tanchuangxiaoxi("成功导入 " .. addedCount .. " 个关键词", "保护")
-                else
-                    tanchuangxiaoxi("没有新增关键词（可能已存在）", "保护")
-                end
+                if addedCount > 0 then tanchuangxiaoxi("成功导入 " .. addedCount .. " 个关键词", "保护")
+                else tanchuangxiaoxi("没有新增关键词（可能已存在）", "保护") end
             end)
         end
     })
@@ -2480,36 +2492,20 @@ showProtectMenu = function()
         callback = function(menu)
             menu:Destroy()
             if not SmartBuilding.getTargetInCenter or not SmartBuilding.getTargetRoot then
-                tanchuangxiaoxi("模块未就绪", "保护")
-                return
+                tanchuangxiaoxi("模块未就绪", "保护"); return
             end
             local t = SmartBuilding.getTargetInCenter()
-            if not t then
-                tanchuangxiaoxi("未对准目标", "保护")
-                return
-            end
+            if not t then tanchuangxiaoxi("未对准目标", "保护"); return end
             local root = SmartBuilding.getTargetRoot(t)
-            if not root then
-                tanchuangxiaoxi("无法获取根对象", "保护")
-                return
-            end
+            if not root then tanchuangxiaoxi("无法获取根对象", "保护"); return end
             local rawName = root.Name
             local prefix = extractKeyword(rawName)
             for _, item in ipairs(userProtectKeywords) do
-                if item.exact == rawName then
-                    tanchuangxiaoxi("已存在: " .. rawName, "保护")
-                    return
-                end
+                if item.exact == rawName then tanchuangxiaoxi("已存在: " .. rawName, "保护"); return end
             end
-            table.insert(userProtectKeywords, {
-                prefix = prefix,
-                exact = rawName,
-            })
-            if prefix == string.lower(rawName) then
-                tanchuangxiaoxi("已添加: " .. rawName, "保护")
-            else
-                tanchuangxiaoxi("已添加: " .. prefix .. " | " .. rawName, "保护")
-            end
+            table.insert(userProtectKeywords, { prefix = prefix, exact = rawName })
+            if prefix == string.lower(rawName) then tanchuangxiaoxi("已添加: " .. rawName, "保护")
+            else tanchuangxiaoxi("已添加: " .. prefix .. " | " .. rawName, "保护") end
         end
     })
     table.insert(buttons, {
@@ -2521,34 +2517,68 @@ showProtectMenu = function()
         end
     })
     table.insert(buttons, {
-        text = "🗑 清空单目标保护",
+        text = "📥 从文件导入关键词",
+        bgColor = Color3.fromRGB(46, 139, 87),
+        callback = function(menu)
+            menu:Destroy()
+            if not isfolder("ProtectKeywords") then
+                tanchuangxiaoxi("文件夹 ProtectKeywords 不存在，请先导出一次", "保护"); return
+            end
+            local files = listfiles("ProtectKeywords")
+            local btnList = {}
+            for _, file in ipairs(files) do
+                if string.sub(file, -4) == ".txt" then
+                    local fileName = string.match(file, "([^/\\]+)%.txt$") or file
+                    table.insert(btnList, {
+                        text = "📄 " .. fileName,
+                        bgColor = Color3.fromRGB(70, 130, 180),
+                        callback = function(subMenu)
+                            subMenu:Destroy()
+                            local content = readfile(file)
+                            local imported = deserializeKeywords(content)
+                            local addedCount = 0
+                            for _, item in ipairs(imported) do
+                                local isDuplicate = false
+                                for _, existing in ipairs(userProtectKeywords) do
+                                    if item.exact and existing.exact == item.exact then
+                                        isDuplicate = true; break
+                                    end
+                                    if not item.exact and existing.prefix == item.prefix and not existing.exact then
+                                        isDuplicate = true; break
+                                    end
+                                end
+                                if not isDuplicate then
+                                    table.insert(userProtectKeywords, item)
+                                    addedCount = addedCount + 1
+                                end
+                            end
+                            tanchuangxiaoxi("已从 [" .. fileName .. "] 导入 " .. addedCount .. " 条", "保护")
+                            if showProtectMenu then showProtectMenu() end
+                        end
+                    })
+                end
+            end
+            if #btnList == 0 then tanchuangxiaoxi("文件夹内暂无 .txt 文件", "保护")
+            else createMenu("选择要导入的文件", btnList, showProtectMenu) end
+        end
+    })
+    table.insert(buttons, {
+        text = "🗑 清空所有关键词",
         bgColor = Color3.fromRGB(178, 34, 34),
         callback = function(menu)
             menu:Destroy()
-            -- 1. 清空单目标保护
+            local kwCount = #userProtectKeywords
+            userProtectKeywords = {}
             local count = 0
             for _ in pairs(protectedList) do count = count + 1 end
             protectedList = {}
-            
-            -- 2. 同时清除准星获取的关键词（带有 exact 字段）
-            local kwCount = 0
-            local newKeywords = {}
-            for _, item in ipairs(userProtectKeywords) do
-                if item.exact then
-                    kwCount = kwCount + 1 -- 统计删了多少个
-                else
-                    table.insert(newKeywords, item) -- 保留手动输入的普通前缀关键词
-                end
-            end
-            userProtectKeywords = newKeywords
-            
-            tanchuangxiaoxi(string.format("已清空 %d 个单目标保护，%d 个准星关键词", count, kwCount), "保护")
+            tanchuangxiaoxi(string.format("已清空所有关键词 (%d) 和单目标保护 (%d)", kwCount, count), "保护")
         end
     })
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理（新增复制与清空按钮） ====================
+-- ==================== 关键词管理（新增导出，移除重复清空） ====================
 showKeywordManageMenu = function()
     local buttons = {}
     if #userProtectKeywords == 0 then
@@ -2558,71 +2588,74 @@ showKeywordManageMenu = function()
             callback = function() end
         })
     else
-        -- 复制前缀按钮
         table.insert(buttons, {
             text = "📋 复制所有前缀",
             bgColor = Color3.fromRGB(50, 130, 200),
             callback = function(menu)
                 local result = {}
                 for _, item in ipairs(userProtectKeywords) do
-                    if item.prefix and item.prefix ~= "" then
-                        table.insert(result, item.prefix)
-                    end
+                    if item.prefix and item.prefix ~= "" then table.insert(result, item.prefix) end
                 end
-                if #result == 0 then
-                    tanchuangxiaoxi("没有可复制的前缀", "保护")
-                    return
-                end
+                if #result == 0 then tanchuangxiaoxi("没有可复制的前缀", "保护"); return end
                 local text = table.concat(result, ",")
-                if setclipboard then
-                    pcall(setclipboard, text)
-                    tanchuangxiaoxi("已复制: " .. text, "保护")
-                else
-                    tanchuangxiaoxi("剪贴板不可用", "保护")
-                end
+                if setclipboard then pcall(setclipboard, text); tanchuangxiaoxi("已复制: " .. text, "保护")
+                else tanchuangxiaoxi("剪贴板不可用", "保护") end
                 menu:Destroy()
             end
         })
-        
-        -- 复制完整名按钮
         table.insert(buttons, {
             text = "📋 复制所有完整名",
             bgColor = Color3.fromRGB(70, 140, 180),
             callback = function(menu)
                 local result = {}
                 for _, item in ipairs(userProtectKeywords) do
-                    if item.exact and item.exact ~= "" then
-                        table.insert(result, item.exact)
-                    end
+                    if item.exact and item.exact ~= "" then table.insert(result, item.exact) end
                 end
-                if #result == 0 then
-                    tanchuangxiaoxi("没有可复制的完整名", "保护")
-                    return
-                end
+                if #result == 0 then tanchuangxiaoxi("没有可复制的完整名", "保护"); return end
                 local text = table.concat(result, ",")
-                if setclipboard then
-                    pcall(setclipboard, text)
-                    tanchuangxiaoxi("已复制: " .. text, "保护")
-                else
-                    tanchuangxiaoxi("剪贴板不可用", "保护")
-                end
+                if setclipboard then pcall(setclipboard, text); tanchuangxiaoxi("已复制: " .. text, "保护")
+                else tanchuangxiaoxi("剪贴板不可用", "保护") end
                 menu:Destroy()
             end
         })
-        
-        -- 清空所有关键词按钮
         table.insert(buttons, {
-            text = "🗑 清空所有关键词",
-            bgColor = Color3.fromRGB(178, 34, 34),
+            text = "📤 导出到文件",
+            bgColor = Color3.fromRGB(200, 130, 0),
             callback = function(menu)
-                userProtectKeywords = {}
-                tanchuangxiaoxi("已清空所有关键词", "保护")
                 menu:Destroy()
-                if showProtectMenu then showProtectMenu() end
+                if not isfolder("ProtectKeywords") then makefolder("ProtectKeywords") end
+                showInputDialog("输入导出文件名", "keywords_" .. os.date("%Y%m%d_%H%M%S"), function(filename)
+                    if not filename or filename == "" then return end
+                    filename = filename:match("^%s*(.-)%s*$")
+                    if filename == "" then return end
+                    local filepath = "ProtectKeywords/" .. filename .. ".txt"
+                    local function doWrite()
+                        local text = serializeKeywords(userProtectKeywords)
+                        writefile(filepath, text)
+                        tanchuangxiaoxi("已导出: " .. filepath, "保护")
+                    end
+                    if isfile(filepath) then
+                        createMenu("文件已存在", {
+                            { text = "🔄 覆盖原文件", callback = function(subMenu) subMenu:Destroy(); doWrite() end },
+                            { text = "✏️ 重命名", callback = function(subMenu)
+                                subMenu:Destroy()
+                                showInputDialog("输入新文件名", filename .. "_1", function(newName)
+                                    if not newName or newName == "" then return end
+                                    newName = newName:match("^%s*(.-)%s*$")
+                                    if newName == "" then return end
+                                    local newPath = "ProtectKeywords/" .. newName .. ".txt"
+                                    if isfile(newPath) then tanchuangxiaoxi("该文件名依然存在！", "保护")
+                                    else writefile(newPath, serializeKeywords(userProtectKeywords)); tanchuangxiaoxi("已导出: " .. newPath, "保护") end
+                                end)
+                            end },
+                            { text = "❌ 取消", callback = function(subMenu) subMenu:Destroy() end }
+                        }, nil)
+                    else
+                        doWrite()
+                    end
+                end)
             end
         })
-        
-        -- 关键词列表
         for i, item in ipairs(userProtectKeywords) do
             local idxCopy = i
             local label = item.prefix or item.exact or "?"
@@ -2736,17 +2769,12 @@ showKeywordDetailDialog = function(idx)
     mkBtn("📋 复制", 0, btnW, Color3.fromRGB(50, 130, 200), function()
         local text = (item.prefix or "") .. "\n" .. (item.exact or "")
         local ok = false
-        if setclipboard then
-            ok = pcall(setclipboard, text)
-        end
-        if ok then
-            tanchuangxiaoxi("已复制到剪贴板", "保护")
-        else
-            tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护")
-        end
+        if setclipboard then ok = pcall(setclipboard, text) end
+        if ok then tanchuangxiaoxi("已复制到剪贴板", "保护")
+        else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
     end)
 
-    -- 【修复】基于对象引用删除，避免索引错乱
+    -- 【修复】基于对象引用删除
     local targetItem = userProtectKeywords[idx]
     mkBtn("❌ 删除", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
         for i, item in ipairs(userProtectKeywords) do
@@ -2940,7 +2968,7 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.15 更新内容：",
+                    "版本 8.3.17 更新内容：",
                     "",
                     "1-60. (略，历史更新)",
                     "61. 【保护系统重构】",
@@ -2948,13 +2976,16 @@ function showMainMenu()
                     "    - 物品类改为用户自定义关键词",
                     "    - 长按保护按钮 → 管理菜单",
                     "        + 添加保护关键词（支持逗号分隔批量导入）",
-                    "        + 从准心拾取关键词",
+                    "        + 从准心拾取关键词（自动去尾数）",
+                    "        + 从文件导入关键词（自动去重）",
                     "        + 管理保护关键词（详情 / 复制 / 删除）",
                     "        + 管理界面支持一键复制所有前缀/完整名",
-                    "        + 管理界面支持一键清空所有关键词",
+                    "        + 管理界面支持导出到文件（命名/覆盖/重命名）",
+                    "        + 外部主菜单支持一键清空所有关键词",
                     "    - 关键词双字段：prefix 子串匹配 + exact 完整匹配",
                     "62. 【修复】准心添加大模型无法正常取消的问题",
                     "63. 【修复】关键词详情页删除逻辑，避免索引错乱",
+                    "64. 【修复】结束脚本无反应，现在会彻底还原所有状态再关闭",
                     "",
                     "感谢使用！"
                 }
@@ -3026,15 +3057,15 @@ function showMainMenu()
                     "🔹 【保护按钮】长按 = 保护设置菜单",
                     "   - 添加保护关键词（支持逗号批量导入）",
                     "   - 从准心拾取关键词（自动去尾数）",
-                    "   - 管理保护关键词：详情 / 复制 / 删除",
-                    "   - 管理界面支持一键复制前缀/完整名",
-                    "   - 管理界面支持一键清空所有关键词",
+                    "   - 从文件导入关键词（自动去重）",
+                    "   - 管理保护关键词：详情 / 复制 / 导出文件",
+                    "   - 外部主菜单支持一键清空所有关键词",
                     "🔹 双字段：prefix 子串匹配 + exact 完整匹配",
                     "🔹 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
                     "🔹 透明度可用输入框或滑动条调整",
                     "🔹 名单窗默认隐藏，点「📋 名单」开关",
                     "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
-                    "🔹 结束脚本会完整还原所有状态",
+                    "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
                 local cc = Instance.new("Frame")
                 cc.Parent = sf; cc.Size = UDim2.new(1, -10, 0, 0)
@@ -3153,15 +3184,21 @@ function showMainMenu()
                     { text = "确认",
                       callback = function(confirmMenu)
                           confirmMenu:Destroy()
-                          fullShutdown()
-                          if main and main.Parent then main:Destroy() end
-                          if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
-                          if noclipWindow and noclipWindow.Parent then noclipWindow:Destroy() noclipWindow = nil end
-                          if nightVisionWindow and nightVisionWindow.Parent then nightVisionWindow:Destroy() nightVisionWindow = nil end
-                          for _, notif in ipairs(notifs) do
-                              if notif.sg and notif.sg.Parent then notif.sg:Destroy() end
-                          end
-                          notifs = {}; readyQueue = {}
+                          -- 【修复】异步彻底还原并关闭，防止动画卡死主线程导致无反应
+                          task.spawn(function()
+                              task.wait(0.1)
+                              pcall(fullShutdown)
+                              task.wait(0.2)
+                              if main and main.Parent then main:Destroy() end
+                              if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
+                              if noclipWindow and noclipWindow.Parent then noclipWindow:Destroy() noclipWindow = nil end
+                              if nightVisionWindow and nightVisionWindow.Parent then nightVisionWindow:Destroy() nightVisionWindow = nil end
+                              for _, notif in ipairs(notifs) do
+                                  if notif.sg and notif.sg.Parent then notif.sg:Destroy() end
+                              end
+                              notifs = {}; readyQueue = {}
+                              tanchuangxiaoxi("脚本已结束，状态已还原", "结束")
+                          end)
                       end },
                     { text = "取消", callback = function(confirmMenu) confirmMenu:Destroy() end }
                 }, nil)
@@ -3937,11 +3974,14 @@ function showBrightnessDialog()
 end
 
 local function fullShutdown()
+    -- 1. 关闭动态功能并还原状态
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
     if nightVisionEnabled then pcall(disableNightVision) end
     if SmartBuilding.isActive() then pcall(SmartBuilding.closeUI) end
+    
+    -- 2. 还原相机状态
     pcall(stopCamFreeze)
     pcall(disableCamNoClip)
     if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
@@ -3951,6 +3991,8 @@ local function fullShutdown()
         local hum = char:FindFirstChildWhichIsA("Humanoid")
         if hum then pcall(function() hum.CameraOffset = Vector3.zero end) end
     end
+    
+    -- 3. 断开所有连接
     if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
     if accelConn then accelConn:Disconnect() accelConn = nil end
