@@ -1,12 +1,12 @@
 -- Gui to Lua
--- Version 8.0.1 (修复 UI 宽度 + 按钮拖动冲突)
+-- Version 8.0.2 (自由模式重写 + 朝向切换按钮)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
 local up = Instance.new("TextButton")
 local plus = Instance.new("TextButton")
-local faceBtn = Instance.new("TextButton")
+local uiLabel = Instance.new("TextLabel")
 local hide = Instance.new("TextButton")
 local down = Instance.new("TextButton")
 local mine = Instance.new("TextButton")
@@ -22,7 +22,6 @@ main.IgnoreGuiInset = true
 
 local initCamera = workspace.CurrentCamera
 local initVp = initCamera and initCamera.ViewportSize or Vector2.new(1920, 1080)
--- 【修复】改回 190，与按钮布局一致
 local UI_W = 190
 local UI_H = 56
 local initX = (initVp.X - UI_W) / 2
@@ -58,18 +57,16 @@ plus.TextColor3 = Color3.fromRGB(0, 0, 0)
 plus.TextScaled = true
 plus.TextSize = 14
 
--- 替换 uiLabel 为 faceBtn
-faceBtn.Name = "faceBtn"
-faceBtn.Parent = Frame
-faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
-faceBtn.Position = UDim2.new(0, 88, 0, 0)
-faceBtn.Size = UDim2.new(0, 44, 0, 28)
-faceBtn.Font = Enum.Font.SourceSans
-faceBtn.Text = "全局"
-faceBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-faceBtn.TextScaled = true
-faceBtn.TextSize = 12
-faceBtn.AutoButtonColor = false
+uiLabel.Name = "uiLabel"
+uiLabel.Parent = Frame
+uiLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+uiLabel.Position = UDim2.new(0, 88, 0, 0)
+uiLabel.Size = UDim2.new(0, 44, 0, 28)
+uiLabel.Font = Enum.Font.SourceSans
+uiLabel.Text = "UI"
+uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+uiLabel.TextScaled = true
+uiLabel.TextSize = 14
 
 hide.Name = "hide"
 hide.Parent = Frame
@@ -155,7 +152,8 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
--- 【朝向模式】"全局" 或 "水平"
+-- 【新增】朝向模式："全局" 或 "水平"
+-- 在自由模式下，切换到"水平"可消除低头抖动
 local flyFaceMode = "全局"
 
 -- 移速子模式
@@ -175,7 +173,7 @@ local camNoClipEnabled = false
 local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
 local camFreezeBound = false
 
--- 【相机偏移】X / Y / Z + 记录基准
+-- 相机偏移
 local camOffsetX = 0
 local camOffsetY = 0
 local camOffsetZ = 0
@@ -259,6 +257,7 @@ local MOVE_MODES = {
     "水平上下", "水平前后(屏幕)", "水平左右(屏幕)"
 }
 
+-- 【保持5项不变】朝向切换作为列表里的特殊按钮动态生成
 local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
 local SPEED_SUB_MODES = { "修改", "持续力", "物理速度", "强制位移" }
@@ -294,14 +293,13 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 【修复】主窗口拖拽逻辑 ====================
+-- ==================== 主窗口拖拽（修复按钮冲突） ====================
 local isDragging = false
 local dragTouch = nil
 local lastTouchPos = nil
 local latestTouchPos = nil
 
--- 【关键】按钮列表，用于判断触摸是否落在按钮上
-local mainButtons = { up, plus, faceBtn, hide, down, mine, speed, onof }
+local mainButtons = { up, plus, uiLabel, hide, down, mine, speed, onof }
 
 local function isPointInAnyButton(pos)
     for _, btn in ipairs(mainButtons) do
@@ -319,7 +317,6 @@ end
 
 Frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.Touch then
-        -- 【关键修复】如果触摸落在按钮上，不启动拖动，让按钮自己处理
         if isPointInAnyButton(input.Position) then
             return
         end
@@ -510,21 +507,19 @@ local function removeFly()
     end
 end
 
-local function getFlyTargetCFrame(camera, torso)
-    if flyFaceMode == "全局" then
-        return camera.CFrame
-    else
-        local look = camera.CFrame.LookVector
-        local yaw = math.atan2(-look.X, -look.Z)
-        return CFrame.new(torso.Position) * CFrame.Angles(0, yaw, 0)
-    end
-end
-
+-- ==================== 【完整替换】applyFly ====================
+-- 【关键改动】
+--   1. BodyGyro 挂在 HRP（不再用 UpperTorso / Torso）→ 消除低头抖动
+--   2. 朝向 CFrame 显式锚定 CFrame.new(hrp.Position) → 位置固定
+--   3. 自由模式根据 flyFaceMode 决定跟随"全局"或"水平"
+--   4. 其他模式不受影响，仍用相机全姿态
 local function applyFly()
     local char = player.Character
     if not char then return false end
     local hum = char:FindFirstChildWhichIsA("Humanoid")
     if not hum then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
 
     char.Animate.Disabled = true
     for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
@@ -535,6 +530,7 @@ local function applyFly()
     end
 
     local isFreeMode = (flyMode == "自由")
+
     if isFreeMode then
         hum.PlatformStand = true
         hum.AutoRotate = false
@@ -545,22 +541,21 @@ local function applyFly()
         end)
     end
 
-    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("HumanoidRootPart")
-    if not torso then return false end
-    local startY = torso.Position.Y
+    local startY = hrp.Position.Y
 
+    -- 【关键】BodyGyro 挂在 HRP
     local bg = Instance.new("BodyGyro")
     bg.P = 9e4
     bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    bg.CFrame = torso.CFrame
-    bg.Parent = torso
+    bg.CFrame = hrp.CFrame
+    bg.Parent = hrp
 
     local bv = Instance.new("BodyVelocity")
     bv.Velocity = Vector3.new(0, 0.1, 0)
     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    bv.Parent = torso
+    bv.Parent = hrp
 
-    _G._flyData = { bg = bg, bv = bv, torso = torso, startY = startY }
+    _G._flyData = { bg = bg, bv = bv, hrp = hrp, startY = startY }
 
     task.spawn(function()
         while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
@@ -569,8 +564,12 @@ local function applyFly()
             if camera then
                 local moveDir = hum.MoveDirection
                 local maxspeed = 50 * speeds
+                local curHrp = char:FindFirstChild("HumanoidRootPart")
+                if not curHrp then break end
+                local anchorPos = curHrp.Position
 
                 if isFreeMode then
+                    -- ============ 自由模式：相机方向驱动 ============
                     local camLook = camera.CFrame.LookVector
                     local camRight = camera.CFrame.RightVector
                     local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
@@ -584,24 +583,36 @@ local function applyFly()
 
                     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                     bv.Velocity = combined * maxspeed
-                    bg.CFrame = getFlyTargetCFrame(camera, torso)
+
+                    -- 【朝向】根据 flyFaceMode
+                    if flyFaceMode == "水平" then
+                        -- 水平：只跟随水平方向，消除低头抖动
+                        local look = camera.CFrame.LookVector
+                        local yaw = math.atan2(-look.X, -look.Z)
+                        bg.CFrame = CFrame.new(anchorPos) * CFrame.Angles(0, yaw, 0)
+                    else
+                        -- 全局：完全跟随相机（含俯仰）
+                        bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
+                    end
                 else
+                    -- ============ 其他模式：保持原样 ============
                     if flyMode == "悬空" then
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
                         bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
-                        bg.CFrame = getFlyTargetCFrame(camera, torso)
+                        bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
                     elseif flyMode == "绝对锁高" then
                         bv.MaxForce = Vector3.new(9e9, 0, 9e9)
                         local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
                         bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
-                        bg.CFrame = getFlyTargetCFrame(camera, torso)
-                        local pos = torso.Position
-                        torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
+                        bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
+                        local pos = curHrp.Position
+                        curHrp.CFrame = CFrame.new(pos.X, startY, pos.Z) * (curHrp.CFrame - curHrp.Position)
                     else
+                        -- 泳姿 / 屏幕
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
-                        bg.CFrame = getFlyTargetCFrame(camera, torso)
+                        bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
                     end
                 end
             end
@@ -609,22 +620,6 @@ local function applyFly()
         removeFly()
     end)
     return true
-end
-
-local function resetHumanoidAfterFly()
-    local char = player.Character
-    if not char then return end
-    local hum = char:FindFirstChildWhichIsA("Humanoid")
-    if not hum then return end
-
-    for _, state in ipairs(VALID_HUMANOD_STATES) do
-        pcall(function() hum:SetStateEnabled(state, true) end)
-    end
-    hum.PlatformStand = false
-    hum.AutoRotate = true
-    hum:ChangeState(Enum.HumanoidStateType.Freefall)
-    hum:ChangeState(Enum.HumanoidStateType.Running)
-    if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
 -- ==================== 物理加速核心函数 ====================
@@ -2085,7 +2080,7 @@ function createMenu(title, buttons, parentMenu)
         button.Parent = buttonContainer
         button.Size = UDim2.new(1, -10, 0, btnHeight)
         button.Position = UDim2.new(0, 0, 0, yPos)
-        button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        button.BackgroundColor3 = btn.bgColor or Color3.fromRGB(50, 50, 50)
         button.Text = btn.text
         button.TextColor3 = Color3.new(1, 1, 1)
         button.Font = Enum.Font.Gotham
@@ -2157,13 +2152,175 @@ local function disableVolumeKey()
     tanchuangxiaoxi("音量键控制已禁用", "设置")
 end
 
--- ==================== 快捷模式选择 ====================
+-- ==================== 【核心改动】飞行模式选择菜单 ====================
+-- 在"自由"和"屏幕"之间插入一个【朝向切换】按钮
+-- 点击切换 flyFaceMode，不关闭菜单，只更新自己的文字
 local function showFlyModeSelection(currentMode, callback)
-    local buttons = {}
-    for _, mode in ipairs(FLY_MODES) do
-        table.insert(buttons, { text = mode .. (mode == currentMode and " ✓" or ""), callback = function(menu) menu:Destroy(); callback(mode) end })
+    local screenSize = getScreenSize()
+    local menuWidth = math.min(350, screenSize.X * 0.8)
+    local btnHeight = 40
+    local spacing = 5
+    local padding = 10
+    local titleHeight = 40
+    local closeBtnHeight = 40
+    -- 按钮数 = 飞行模式数(5) + 朝向切换按钮(1) = 6
+    local totalButtons = #FLY_MODES + 1
+    local contentHeight = totalButtons * btnHeight + (totalButtons - 1) * spacing
+    local totalHeight = padding + titleHeight + contentHeight + padding + closeBtnHeight + padding
+    local maxHeight = screenSize.Y * 0.8
+    local needsScrolling = totalHeight > maxHeight
+    if needsScrolling then
+        totalHeight = maxHeight
+        local scrollableHeight = totalHeight - padding - titleHeight - padding - closeBtnHeight - padding
+        contentHeight = math.min(contentHeight, scrollableHeight)
     end
-    createMenu("选择飞行模式", buttons, nil)
+
+    local dialog = Instance.new("ScreenGui")
+    dialog.Parent = playerGui
+    dialog.IgnoreGuiInset = true
+    dialog.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = dialog
+    bg.Size = UDim2.new(0, menuWidth, 0, totalHeight)
+    bg.Position = UDim2.new(0.5, -menuWidth/2, 0.5, -totalHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Active = true
+    bg.ClipsDescendants = true
+
+    local corner = Instance.new("UICorner")
+    corner.Parent = bg
+    corner.CornerRadius = UDim.new(0, 8)
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Parent = bg
+    titleLabel.Size = UDim2.new(1, -20, 0, 30)
+    titleLabel.Position = UDim2.new(0, 10, 0, 5)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "选择飞行模式"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 18
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    local scrollingFrame = Instance.new("ScrollingFrame")
+    scrollingFrame.Parent = bg
+    scrollingFrame.Size = UDim2.new(1, -20, 0, contentHeight)
+    scrollingFrame.Position = UDim2.new(0, 10, 0, 40)
+    scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, totalButtons * (btnHeight + spacing))
+    scrollingFrame.ScrollBarThickness = 8
+    scrollingFrame.BackgroundTransparency = 1
+    scrollingFrame.BorderSizePixel = 0
+    scrollingFrame.ScrollingEnabled = needsScrolling
+    scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
+
+    local buttonContainer = Instance.new("Frame")
+    buttonContainer.Parent = scrollingFrame
+    buttonContainer.Size = UDim2.new(1, 0, 0, totalButtons * (btnHeight + spacing))
+    buttonContainer.BackgroundTransparency = 1
+
+    local yPos = 0
+
+    -- 【重要变量】朝向切换按钮引用（用于后面更新文字）
+    local faceToggleBtn = nil
+
+    -- 更新朝向按钮 UI 的函数
+    local function refreshFaceToggleBtn()
+        if not faceToggleBtn or not faceToggleBtn.Parent then return end
+        if flyFaceMode == "全局" then
+            faceToggleBtn.Text = "🔀 朝向: 全局 (点击切换)"
+            faceToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
+        else
+            faceToggleBtn.Text = "🔀 朝向: 水平 (点击切换)"
+            faceToggleBtn.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+        end
+    end
+
+    -- 遍历插入
+    for _, mode in ipairs(FLY_MODES) do
+        local isCurrent = (mode == currentMode)
+        local button = Instance.new("TextButton")
+        button.Parent = buttonContainer
+        button.Size = UDim2.new(1, -10, 0, btnHeight)
+        button.Position = UDim2.new(0, 0, 0, yPos)
+        button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        button.Text = mode .. (isCurrent and " ✓" or "")
+        button.TextColor3 = Color3.new(1, 1, 1)
+        button.Font = Enum.Font.Gotham
+        button.TextSize = 14
+        button.AutoButtonColor = true
+
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.Parent = button
+        btnCorner.CornerRadius = UDim.new(0, 4)
+
+        button.MouseButton1Click:Connect(function()
+            dialog:Destroy()
+            callback(mode)
+        end)
+
+        yPos = yPos + btnHeight + spacing
+
+        -- 【关键】在"自由"按钮之后插入朝向切换按钮
+        if mode == "自由" then
+            local ftBtn = Instance.new("TextButton")
+            ftBtn.Parent = buttonContainer
+            ftBtn.Size = UDim2.new(1, -10, 0, btnHeight)
+            ftBtn.Position = UDim2.new(0, 0, 0, yPos)
+            ftBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
+            ftBtn.Text = "🔀 朝向: 全局 (点击切换)"
+            ftBtn.TextColor3 = Color3.new(1, 1, 1)
+            ftBtn.Font = Enum.Font.GothamBold
+            ftBtn.TextSize = 14
+            ftBtn.AutoButtonColor = false
+
+            local ftCorner = Instance.new("UICorner")
+            ftCorner.Parent = ftBtn
+            ftCorner.CornerRadius = UDim.new(0, 4)
+
+            -- 【关键】点击切换，不关闭菜单
+            ftBtn.MouseButton1Click:Connect(function()
+                if flyFaceMode == "全局" then
+                    flyFaceMode = "水平"
+                else
+                    flyFaceMode = "全局"
+                end
+                refreshFaceToggleBtn()
+                if isFlying and flyMode == "自由" then
+                    tanchuangxiaoxi("朝向已切换: " .. flyFaceMode .. " (立即生效)", "飞行朝向")
+                else
+                    tanchuangxiaoxi("朝向已切换: " .. flyFaceMode .. " (自由模式下生效)", "飞行朝向")
+                end
+            end)
+
+            faceToggleBtn = ftBtn
+            refreshFaceToggleBtn()
+            yPos = yPos + btnHeight + spacing
+        end
+    end
+
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Parent = bg
+    closeBtn.Size = UDim2.new(1, -20, 0, 35)
+    closeBtn.Position = UDim2.new(0, 10, 1, -45)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    closeBtn.Text = "关闭"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.Gotham
+    closeBtn.TextSize = 14
+    closeBtn.AutoButtonColor = true
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.Parent = closeBtn
+    closeCorner.CornerRadius = UDim.new(0, 4)
+
+    closeBtn.MouseButton1Click:Connect(function()
+        dialog:Destroy()
+    end)
+
+    return dialog
 end
 
 local function showMoveModeSelection(currentMode, callback)
@@ -2298,7 +2455,7 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.0.1 更新内容：",
+                    "版本 8.0.2 更新内容：",
                     "",
                     "1. 完美整合建筑移除功能，不摧毁地图",
                     "2. 建筑贴图透明度完全支持0~1手动调节",
@@ -2321,11 +2478,13 @@ function showMainMenu()
                     "19. 移速记忆逻辑重写：开启读当前值，关闭即清空",
                     "20. 移速新增3种物理加速方案：持续力/物理速度/强制位移",
                     "21. 设置里新增『自由相机』模块",
-                    "22. 泳姿与自由统一使用 Yaw Only 修复相机抖动",
-                    "23. 设置新增『相机偏移 X/Y/Z』，可自定义俯视角度",
-                    "24. 【本次修复】UI 宽度改回190，消除右侧空白",
-                    "25. 【本次修复】拖动逻辑：触摸按钮时不再拖动整个面板",
-                    "26. 【本次修复】按钮全部失效问题（拖动/点击冲突）",
+                    "22. 设置新增『相机偏移 X/Y/Z』，可自定义俯视角度",
+                    "23. 【本次】UI标签恢复，主面板宽190，拖动不再冲突",
+                    "24. 【本次】飞行模式下新增『朝向: 全局/水平』切换按钮",
+                    "      · 位置：泳姿、自由之下，屏幕之上",
+                    "      · 点击切换，不关闭菜单",
+                    "      · 水平模式消除自由飞行的低头抖动",
+                    "25. 【本次】自由模式 BodyGyro 挂载点改为 HRP，消除抖动",
                     "",
                     "感谢使用！"
                 }
@@ -2433,13 +2592,12 @@ function showMainMenu()
                     "🔹 移速子模式『持续力/物理速度/强制位移』：3种物理加速",
                     "🔹 设置 - 自由相机：解决部分游戏强制第一人称问题",
                     "🔹 冻结解锁：每帧对抗，游戏抢不走你的视角",
-                    "🔹 单次解锁：只改一次，适合只锁一次的游戏",
                     "🔹 相机穿墙：使用官方 Invisicam 模式，防被墙挤",
-                    "🔹 主界面的『全局/水平』按钮：切换飞天时的身体朝向",
+                    "🔹 设置 - 相机偏移：可自定义相机相对于身体的位置",
+                    "🔹 【本次】长按速度标签 → 飞行模式菜单 → 在「自由」之下有朝向切换按钮",
                     "      · 全局：身体完全跟随相机（含俯仰）",
                     "      · 水平：身体只跟随水平朝向（Yaw Only，消除低头抖动）",
-                    "🔹 设置 - 相机偏移：可自定义相机相对于身体的位置",
-                    "      · 通常 Y = 2~4 抬高相机，X / Z 保持 0",
+                    "      · 点击切换，不关闭菜单，方便连续选择",
                     "🔹 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
 
@@ -2868,40 +3026,6 @@ do
     mine.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then stopPress() end
     end)
-end
-
--- ==================== faceBtn 朝向切换 ====================
-do
-    local lastFaceClick = 0
-    faceBtn.MouseButton1Down:Connect(function()
-        local now = tick()
-        if now - lastFaceClick < 0.25 then return end
-        lastFaceClick = now
-
-        if flyFaceMode == "全局" then
-            flyFaceMode = "水平"
-            faceBtn.Text = "水平"
-            faceBtn.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
-            if isFlying then
-                tanchuangxiaoxi("飞天体感: 水平模式 (消除低头抖动)", "朝向切换")
-            end
-        else
-            flyFaceMode = "全局"
-            faceBtn.Text = "全局"
-            faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
-            if isFlying then
-                tanchuangxiaoxi("飞天体感: 全局模式 (完全跟随相机)", "朝向切换")
-            end
-        end
-    end)
-
-    if flyFaceMode == "全局" then
-        faceBtn.Text = "全局"
-        faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
-    else
-        faceBtn.Text = "水平"
-        faceBtn.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
-    end
 end
 
 -- ==================== 速度标签 ====================
@@ -3336,9 +3460,6 @@ end)
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
-
-faceBtn.Text = "全局"
-faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
 
 task.spawn(function()
     task.wait(1)
