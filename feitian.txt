@@ -152,6 +152,10 @@ local protectedList = {}
 local userProtectKeywords = {}
 
 local tanchuangxiaoxi
+-- 【优化】前向声明，防止调用时未定义
+local fullShutdown
+local setUIVisible
+local enableVolumeKey, disableVolumeKey
 
 -- 前向声明
 local showProtectMenu
@@ -774,7 +778,6 @@ local SmartBuilding = (function()
             if SB.smartScan then SB.smartScan() end
         end)
         
-        -- 【新增】准心添加按钮：短按添加目标，长按开关准心
         local pickPressStart = 0
         local pickLongTriggered = false
         pickBtn.MouseButton1Down:Connect(function()
@@ -2326,48 +2329,62 @@ function showInputDialog(title, defaultText, callback, extraButton)
     textBox.Font = Enum.Font.Gotham; textBox.TextSize = 14
     textBox.ClearTextOnFocus = false
 
-    local sliderBg, sliderKnob, sliderConn
-    if isSliderMode then
-        sliderBg = Instance.new("Frame")
-        sliderBg.Size = UDim2.new(1, -40, 0, 6)
-        sliderBg.Position = UDim2.new(0, 20, 0, 105)
-        sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-        sliderBg.Parent = bg
-        local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(1, 0); sc.Parent = sliderBg
+local sliderBg, sliderKnob, sliderConn
+if isSliderMode then
+    sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -40, 0, 6)
+    sliderBg.Position = UDim2.new(0, 20, 0, 105)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    sliderBg.Parent = bg
+    local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(1, 0); sc.Parent = sliderBg
 
-        sliderKnob = Instance.new("TextButton")
-        sliderKnob.Size = UDim2.new(0, 16, 0, 16)
-        local initialVal = tonumber(defaultText) or 0.85
-        sliderKnob.Position = UDim2.new(math.clamp(initialVal, 0, 1), -8, 0, -5)
-        sliderKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-        sliderKnob.Text = ""
-        sliderKnob.Parent = sliderBg
-        local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = sliderKnob
+    sliderKnob = Instance.new("TextButton")
+    sliderKnob.Size = UDim2.new(0, 16, 0, 16)
+    local initialVal = tonumber(defaultText) or 0.85
+    sliderKnob.Position = UDim2.new(math.clamp(initialVal, 0, 1), -8, 0, -5)
+    sliderKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+    sliderKnob.Text = ""
+    sliderKnob.Parent = sliderBg
+    local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = sliderKnob
 
-        local draggingSlider = false
-        sliderKnob.MouseButton1Down:Connect(function() draggingSlider = true end)
-        local sliderInputEnd = UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                draggingSlider = false
+    local draggingSlider = false
+    sliderKnob.MouseButton1Down:Connect(function() draggingSlider = true end)
+    
+    -- 拖动结束后，才真正触发一次回调，避免频发通知
+    local function onSliderEnd()
+        if draggingSlider then
+            draggingSlider = false
+            if callback then 
+                local cp = tonumber(textBox.Text)
+                if cp then callback(cp) end
             end
-        end)
-        sliderConn = RunService.RenderStepped:Connect(function()
-            if draggingSlider then
-                local mp = UserInputService:GetMouseLocation()
-                local ap = sliderBg.AbsolutePosition
-                local as = sliderBg.AbsoluteSize.X
-                local relX = math.clamp(mp.X - ap.X, 0, as)
-                local cp = relX / as
-                textBox.Text = string.format("%.2f", cp)
-                sliderKnob.Position = UDim2.new(cp, -8, 0, -5)
-                if callback then callback(cp) end
-            end
-        end)
-        dialog.Destroying:Connect(function()
-            if sliderConn then sliderConn:Disconnect() end
-            if sliderInputEnd then sliderInputEnd:Disconnect() end
-        end)
+        end
     end
+    
+    local sliderInputEnd = UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            onSliderEnd()
+        end
+    end)
+    
+    sliderConn = RunService.RenderStepped:Connect(function()
+        if draggingSlider then
+            local mp = UserInputService:GetMouseLocation()
+            local ap = sliderBg.AbsolutePosition
+            local as = sliderBg.AbsoluteSize.X
+            local relX = math.clamp(mp.X - ap.X, 0, as)
+            local cp = relX / as
+            -- 拖动时仅更新界面数值，不调用 callback 发送通知
+            textBox.Text = string.format("%.2f", cp)
+            sliderKnob.Position = UDim2.new(cp, -8, 0, -5)
+        end
+    end)
+    
+    dialog.Destroying:Connect(function()
+        if sliderConn then sliderConn:Disconnect() end
+        if sliderInputEnd then sliderInputEnd:Disconnect() end
+    end)
+end
 
     local buttonFrame = Instance.new("Frame")
     buttonFrame.Parent = bg; buttonFrame.Size = UDim2.new(1, -20, 0, 40)
@@ -2540,7 +2557,37 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 保护菜单（外部主菜单清空所有关键词） ====================
+-- ==================== 音量键 UI 控制（补全） ====================
+function setUIVisible(visible)
+    uiVisible = visible
+    Frame.Visible = uiVisible
+    if miniWindow then miniWindow.Visible = uiVisible end
+    tanchuangxiaoxi(uiVisible and "UI已显示" or "UI已隐藏", "音量键")
+end
+
+function enableVolumeKey()
+    local hasVD = pcall(function() return Enum.KeyCode.VolumeDown end)
+    local hasVU = pcall(function() return Enum.KeyCode.VolumeUp end)
+    if not hasVD or not hasVU then
+        tanchuangxiaoxi("您的设备不支持音量键", "提示"); return
+    end
+    if volumeKeyEnabled then return end
+    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.VolumeDown then setUIVisible(false)
+        elseif input.KeyCode == Enum.KeyCode.VolumeUp then setUIVisible(true) end
+    end)
+    volumeKeyEnabled = true
+    tanchuangxiaoxi("音量键已启用", "设置")
+end
+
+function disableVolumeKey()
+    if not volumeKeyEnabled then return end
+    if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
+    volumeKeyEnabled = false
+    tanchuangxiaoxi("音量键已禁用", "设置")
+end
+
+-- ==================== 保护菜单 ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
@@ -2558,8 +2605,7 @@ showProtectMenu = function()
                     if trimmed ~= "" then table.insert(keywords, trimmed) end
                 end
                 if #keywords == 0 then
-                    tanchuangxiaoxi("未检测到有效关键词", "保护")
-                    return
+                    tanchuangxiaoxi("未检测到有效关键词", "保护"); return
                 end
                 local addedCount = 0
                 for _, kw in ipairs(keywords) do
@@ -2714,7 +2760,7 @@ showProtectMenu = function()
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理（新增导出，移除重复清空） ====================
+-- ==================== 关键词管理 ====================
 showKeywordManageMenu = function()
     local buttons = {}
     if #userProtectKeywords == 0 then
@@ -2808,7 +2854,7 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
--- ==================== 关键词详情（含复制、修复删除Bug） ====================
+-- ==================== 关键词详情 ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -3070,6 +3116,7 @@ local function showSmartSubMenu()
     createMenu("修改模式", buttons, nil)
 end
 
+-- ==================== 主菜单 ====================
 function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -3123,6 +3170,7 @@ function showMainMenu()
                     "64. 【修复】结束脚本无反应，现在会彻底还原所有状态再关闭",
                     "65. 【新增】准心添加按钮支持长按开关准心",
                     "66. 【新增】输入透明度弹窗内集成滑动条，实时调整",
+                    "67. 【修复】音量键设置缺失函数导致的报错",
                     "",
                     "感谢使用！"
                 }
@@ -3592,6 +3640,7 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
+-- ==================== 按钮绑定：上升 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -3622,6 +3671,8 @@ do
         end
     end)
 end
+
+-- ==================== 按钮绑定：下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     down.MouseButton1Down:Connect(function()
@@ -3653,6 +3704,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：加速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -3691,6 +3743,8 @@ do
         end
     end)
 end
+
+-- ==================== 按钮绑定：减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
@@ -3734,6 +3788,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：speed 多功能按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3820,6 +3875,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：onof 模式切换 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3883,6 +3939,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：隐藏/设置 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3988,6 +4045,7 @@ do
     end)
 end
 
+-- ==================== 亮度设置弹窗 ====================
 function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -4106,12 +4164,16 @@ function showBrightnessDialog()
     end)
 end
 
-local function fullShutdown()
+-- ==================== 彻底关闭（顺序还原所有状态） ====================
+function fullShutdown()
+    -- 1. 关闭动态功能并还原状态
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
     if nightVisionEnabled then pcall(disableNightVision) end
     if SmartBuilding.isActive() then pcall(SmartBuilding.closeUI) end
+
+    -- 2. 还原相机状态
     pcall(stopCamFreeze)
     pcall(disableCamNoClip)
     if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
@@ -4121,14 +4183,21 @@ local function fullShutdown()
         local hum = char:FindFirstChildWhichIsA("Humanoid")
         if hum then pcall(function() hum.CameraOffset = Vector3.zero end) end
     end
+
+    -- 3. 断开所有连接
     if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
     if accelConn then accelConn:Disconnect() accelConn = nil end
     if _G._flyData then removeFly() end
     stopPhysAccel()
     tpwalking = false
+
+    -- 4. 断开音量键连接
+    if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
+    volumeKeyEnabled = false
 end
 
+-- ==================== 销毁时清理 ====================
 main.Destroying:Connect(function()
     pcall(fullShutdown)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
@@ -4136,6 +4205,7 @@ main.Destroying:Connect(function()
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
 end)
 
+-- ==================== 初始化 ====================
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
