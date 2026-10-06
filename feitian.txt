@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.8（穿墙 CanCollide 原值保存 + 相机偏移冻结 + showCameraMenu 修复）
+-- Version 8.3.9（相机偏移预览 + 穿墙修复 + showCameraMenu 修复 + 相机偏移冻结）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -146,7 +146,7 @@ local savedFeatureStates = { fly = false, speed = false, noclip = false }
 local noclipEnabled = false
 local noclipConnection = nil
 local noclipStateConnection = nil
-local noclipSaved = {}   -- 【新增】[part] = 原始 CanCollide
+local noclipSaved = {}
 
 local smartSubMode = "smart"
 
@@ -1758,7 +1758,6 @@ local function applyNoclip()
     if not char then return end
     for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") then
-            -- 【关键修复】首次接触记录原值
             if noclipSaved[part] == nil then
                 noclipSaved[part] = part.CanCollide
             end
@@ -1768,7 +1767,6 @@ local function applyNoclip()
 end
 
 local function restoreNoclip()
-    -- 【关键修复】恢复原值，而不是无脑 true
     for part, orig in pairs(noclipSaved) do
         if part and part.Parent then
             part.CanCollide = orig
@@ -1784,7 +1782,7 @@ local function disableNoclip()
     if noclipStateConnection then noclipStateConnection:Disconnect() noclipStateConnection = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     restoreNoclip()
-    noclipSaved = {}   -- 【新增】兜底清空
+    noclipSaved = {}
     updateMainButtonText(); updateSpeedButtonText()
 end
 
@@ -2502,12 +2500,12 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.8 更新内容：",
+                    "版本 8.3.9 更新内容：",
                     "",
-                    "1-55. (略，历史更新)",
-                    "56. 【关键】穿墙 CanCollide 原值保存",
-                    "    - 修复关闭穿墙后贴地抖动",
-                    "    - 修复后遗症",
+                    "1-56. (略，历史更新)",
+                    "57. 【新增】相机偏移预览功能",
+                    "    - 输入秒数，到时自动还原",
+                    "58. 打开相机偏移自动关闭设置菜单",
                     "",
                     "感谢使用！"
                 }
@@ -2578,6 +2576,7 @@ function showMainMenu()
                     "🔹 名单窗默认隐藏，点「📋 名单」开关",
                     "🔹 缩放 50%~150% 生效重建 UI",
                     "🔹 相机偏移（设置）会持续冻结，防回拉",
+                    "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
                     "🔹 穿墙关闭后会完整恢复原碰撞",
                     "🔹 音量键隐藏：音量减隐藏，加显示",
                 }
@@ -2658,7 +2657,8 @@ function showMainMenu()
                             string.format("%.1f", camOffsetY) .. ", " ..
                             string.format("%.1f", camOffsetZ) .. ")",
                           callback = function(subMenu)
-                              subMenu:Destroy(); showCamOffsetDialog(); createSettingMenu()
+                              subMenu:Destroy()
+                              showCamOffsetDialog()
                           end },
                         { text = "🎥 自由相机",
                           callback = function(subMenu)
@@ -2748,7 +2748,7 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- ==================== 相机偏移对话框 ====================
+-- ==================== 相机偏移对话框（v8.3.9：加入预览功能） ====================
 function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
@@ -2821,20 +2821,63 @@ function showCamOffsetDialog()
     local btnReset = makeBtn4("🔄 重置", 2, Color3.fromRGB(200, 130, 0))
     local btnRecord = makeBtn4("📌 记录", 3, Color3.fromRGB(80, 120, 200))
     local btnConfirm = makeBtn4("确认", 4, Color3.fromRGB(0, 150, 0))
+
+    -- 底部两个按钮：还原 + 预览
     local btnRestore = Instance.new("TextButton")
-    btnRestore.Parent = bg; btnRestore.Size = UDim2.new(1, -20, 0, 32)
+    btnRestore.Parent = bg
+    btnRestore.Size = UDim2.new(0.5, -15, 0, 32)
     btnRestore.Position = UDim2.new(0, 10, 0, 168)
     btnRestore.BackgroundColor3 = Color3.fromRGB(80, 80, 160)
-    btnRestore.Text = "↩️ 还原到已记录的值"
+    btnRestore.Text = "↩️ 还原"
     btnRestore.TextColor3 = Color3.new(1, 1, 1)
     btnRestore.Font = Enum.Font.GothamBold; btnRestore.TextSize = 13
     btnRestore.AutoButtonColor = false
     local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 6); rc.Parent = btnRestore
+
+    local btnPreview = Instance.new("TextButton")
+    btnPreview.Parent = bg
+    btnPreview.Size = UDim2.new(0.5, -15, 0, 32)
+    btnPreview.Position = UDim2.new(0.5, 5, 0, 168)
+    btnPreview.BackgroundColor3 = Color3.fromRGB(150, 80, 200)
+    btnPreview.Text = "⏱ 预览"
+    btnPreview.TextColor3 = Color3.new(1, 1, 1)
+    btnPreview.Font = Enum.Font.GothamBold; btnPreview.TextSize = 13
+    btnPreview.AutoButtonColor = false
+    local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 6); pc.Parent = btnPreview
+
+    -- 预览状态（对话框内部）
+    local previewBackup = nil
+    local previewToken = 0
+
+    local function cancelPreviewRestore()
+        -- 取消预览并还原到预览前
+        previewToken = previewToken + 1
+        if previewBackup then
+            camOffsetX = previewBackup.x
+            camOffsetY = previewBackup.y
+            camOffsetZ = previewBackup.z
+            applyCameraOffset()
+            previewBackup = nil
+        end
+    end
+
+    local function cancelPreviewKeep()
+        -- 取消预览但保留当前值（用于确认）
+        previewToken = previewToken + 1
+        previewBackup = nil
+    end
+
     local function close() dialog:Destroy() end
-    btnCancel.MouseButton1Click:Connect(close)
+
+    btnCancel.MouseButton1Click:Connect(function()
+        cancelPreviewRestore()
+        close()
+    end)
+
     btnReset.MouseButton1Click:Connect(function()
         boxX.Text = "0.00"; boxY.Text = "0.00"; boxZ.Text = "0.00"
     end)
+
     btnRecord.MouseButton1Click:Connect(function()
         local nx = tonumber(boxX.Text) or 0
         local ny = tonumber(boxY.Text) or 0
@@ -2846,7 +2889,9 @@ function showCamOffsetDialog()
             string.format("%.2f", nz) .. ")"
         tanchuangxiaoxi("已记录", "相机偏移")
     end)
+
     btnConfirm.MouseButton1Click:Connect(function()
+        cancelPreviewKeep()
         camOffsetX = tonumber(boxX.Text) or 0
         camOffsetY = tonumber(boxY.Text) or 0
         camOffsetZ = tonumber(boxZ.Text) or 0
@@ -2854,6 +2899,7 @@ function showCamOffsetDialog()
         tanchuangxiaoxi("已应用", "相机偏移")
         close()
     end)
+
     btnRestore.MouseButton1Click:Connect(function()
         boxX.Text = string.format("%.2f", camOffsetBaseline.x)
         boxY.Text = string.format("%.2f", camOffsetBaseline.y)
@@ -2864,6 +2910,52 @@ function showCamOffsetDialog()
         applyCameraOffset()
         tanchuangxiaoxi("已还原", "相机偏移")
     end)
+
+    -- 【新增】预览按钮
+    btnPreview.MouseButton1Click:Connect(function()
+        showInputDialog("输入预览秒数（到时自动还原）", "3", function(sec)
+            local s = tonumber(sec)
+            if not s or s <= 0 then return end
+
+            -- 取当前输入框的值
+            local nx = tonumber(boxX.Text) or 0
+            local ny = tonumber(boxY.Text) or 0
+            local nz = tonumber(boxZ.Text) or 0
+
+            -- 首次预览才记录还原点（连续预览不覆盖）
+            if not previewBackup then
+                previewBackup = { x = camOffsetX, y = camOffsetY, z = camOffsetZ }
+            end
+
+            -- 取消旧预览任务
+            previewToken = previewToken + 1
+            local myToken = previewToken
+
+            -- 应用新值
+            camOffsetX = nx; camOffsetY = ny; camOffsetZ = nz
+            applyCameraOffset()
+
+            tanchuangxiaoxi(string.format("预览 %.1fs 后自动还原", s), "相机偏移")
+
+            task.delay(s, function()
+                if previewToken ~= myToken then return end
+                if previewBackup then
+                    camOffsetX = previewBackup.x
+                    camOffsetY = previewBackup.y
+                    camOffsetZ = previewBackup.z
+                    applyCameraOffset()
+                    previewBackup = nil
+                end
+                if dialog.Parent then
+                    boxX.Text = string.format("%.2f", camOffsetX)
+                    boxY.Text = string.format("%.2f", camOffsetY)
+                    boxZ.Text = string.format("%.2f", camOffsetZ)
+                end
+                tanchuangxiaoxi("预览结束，已还原", "相机偏移")
+            end)
+        end)
+    end)
+
     return dialog
 end
 
