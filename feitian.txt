@@ -804,7 +804,11 @@ local SmartBuilding = (function()
             end)
         end)
         pickBtn.MouseButton1Up:Connect(function()
-            if pickLongTriggered then return end
+            pickPressStart = 0
+            if pickLongTriggered then
+            pickLongTriggered = false
+        return
+        end
             if not SB.getTargetInCenter or not SB.addTarget then return end
             local t = SB.getTargetInCenter()
             if not t then showNotification("未对准目标"); return end
