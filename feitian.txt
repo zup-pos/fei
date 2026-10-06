@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.9（相机偏移预览 + 穿墙修复 + showCameraMenu 修复 + 相机偏移冻结）
+-- Version 8.3.10（结束脚本状态完整还原 + 相机偏移预览 + 穿墙修复 + 相机偏移冻结）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -2500,12 +2500,12 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.9 更新内容：",
+                    "版本 8.3.10 更新内容：",
                     "",
-                    "1-56. (略，历史更新)",
-                    "57. 【新增】相机偏移预览功能",
-                    "    - 输入秒数，到时自动还原",
-                    "58. 打开相机偏移自动关闭设置菜单",
+                    "1-57. (略，历史更新)",
+                    "58. 【关键】结束脚本状态完整还原",
+                    "    - 飞天/移速/相机偏移恢复正常",
+                    "    - 通过 fullShutdown 统一关闭",
                     "",
                     "感谢使用！"
                 }
@@ -2578,6 +2578,7 @@ function showMainMenu()
                     "🔹 相机偏移（设置）会持续冻结，防回拉",
                     "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
                     "🔹 穿墙关闭后会完整恢复原碰撞",
+                    "🔹 结束脚本会完整还原所有状态",
                     "🔹 音量键隐藏：音量减隐藏，加显示",
                 }
                 local cc = Instance.new("Frame")
@@ -2697,15 +2698,13 @@ function showMainMenu()
                     { text = "确认",
                       callback = function(confirmMenu)
                           confirmMenu:Destroy()
-                          isFlying = false; tpwalking = false; speedModeEnabled = false
-                          if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
-                          if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
-                          if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
-                          removeFly(); stopPhysAccel(); disableNoclip(); disableNightVision()
-                          stopCamFreeze(); disableCamNoClip()
-                          pcall(function() SmartBuilding.shutdown() end)
+                          -- 【关键修复】按正常流程关闭所有功能，确保状态完整还原
+                          fullShutdown()
+                          -- 再销毁 UI
                           if main and main.Parent then main:Destroy() end
                           if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
+                          if noclipWindow and noclipWindow.Parent then noclipWindow:Destroy() noclipWindow = nil end
+                          if nightVisionWindow and nightVisionWindow.Parent then nightVisionWindow:Destroy() nightVisionWindow = nil end
                           for _, notif in ipairs(notifs) do
                               if notif.sg and notif.sg.Parent then notif.sg:Destroy() end
                           end
@@ -2748,7 +2747,7 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- ==================== 相机偏移对话框（v8.3.9：加入预览功能） ====================
+-- ==================== 相机偏移对话框（含预览） ====================
 function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
@@ -2822,7 +2821,6 @@ function showCamOffsetDialog()
     local btnRecord = makeBtn4("📌 记录", 3, Color3.fromRGB(80, 120, 200))
     local btnConfirm = makeBtn4("确认", 4, Color3.fromRGB(0, 150, 0))
 
-    -- 底部两个按钮：还原 + 预览
     local btnRestore = Instance.new("TextButton")
     btnRestore.Parent = bg
     btnRestore.Size = UDim2.new(0.5, -15, 0, 32)
@@ -2845,12 +2843,10 @@ function showCamOffsetDialog()
     btnPreview.AutoButtonColor = false
     local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 6); pc.Parent = btnPreview
 
-    -- 预览状态（对话框内部）
     local previewBackup = nil
     local previewToken = 0
 
     local function cancelPreviewRestore()
-        -- 取消预览并还原到预览前
         previewToken = previewToken + 1
         if previewBackup then
             camOffsetX = previewBackup.x
@@ -2860,9 +2856,7 @@ function showCamOffsetDialog()
             previewBackup = nil
         end
     end
-
     local function cancelPreviewKeep()
-        -- 取消预览但保留当前值（用于确认）
         previewToken = previewToken + 1
         previewBackup = nil
     end
@@ -2873,11 +2867,9 @@ function showCamOffsetDialog()
         cancelPreviewRestore()
         close()
     end)
-
     btnReset.MouseButton1Click:Connect(function()
         boxX.Text = "0.00"; boxY.Text = "0.00"; boxZ.Text = "0.00"
     end)
-
     btnRecord.MouseButton1Click:Connect(function()
         local nx = tonumber(boxX.Text) or 0
         local ny = tonumber(boxY.Text) or 0
@@ -2889,7 +2881,6 @@ function showCamOffsetDialog()
             string.format("%.2f", nz) .. ")"
         tanchuangxiaoxi("已记录", "相机偏移")
     end)
-
     btnConfirm.MouseButton1Click:Connect(function()
         cancelPreviewKeep()
         camOffsetX = tonumber(boxX.Text) or 0
@@ -2899,7 +2890,6 @@ function showCamOffsetDialog()
         tanchuangxiaoxi("已应用", "相机偏移")
         close()
     end)
-
     btnRestore.MouseButton1Click:Connect(function()
         boxX.Text = string.format("%.2f", camOffsetBaseline.x)
         boxY.Text = string.format("%.2f", camOffsetBaseline.y)
@@ -2911,32 +2901,21 @@ function showCamOffsetDialog()
         tanchuangxiaoxi("已还原", "相机偏移")
     end)
 
-    -- 【新增】预览按钮
     btnPreview.MouseButton1Click:Connect(function()
         showInputDialog("输入预览秒数（到时自动还原）", "3", function(sec)
             local s = tonumber(sec)
             if not s or s <= 0 then return end
-
-            -- 取当前输入框的值
             local nx = tonumber(boxX.Text) or 0
             local ny = tonumber(boxY.Text) or 0
             local nz = tonumber(boxZ.Text) or 0
-
-            -- 首次预览才记录还原点（连续预览不覆盖）
             if not previewBackup then
                 previewBackup = { x = camOffsetX, y = camOffsetY, z = camOffsetZ }
             end
-
-            -- 取消旧预览任务
             previewToken = previewToken + 1
             local myToken = previewToken
-
-            -- 应用新值
             camOffsetX = nx; camOffsetY = ny; camOffsetZ = nz
             applyCameraOffset()
-
             tanchuangxiaoxi(string.format("预览 %.1fs 后自动还原", s), "相机偏移")
-
             task.delay(s, function()
                 if previewToken ~= myToken then return end
                 if previewBackup then
@@ -3513,14 +3492,43 @@ function showBrightnessDialog()
     end)
 end
 
+-- ==================== 【新增】统一完整关闭（结束脚本前调用） ====================
+local function fullShutdown()
+    -- 用正常流程关闭，确保状态完整还原
+    if isFlying then pcall(toggleFly, false) end
+    if speedModeEnabled then pcall(applySpeedMode, false) end
+    if noclipEnabled then pcall(disableNoclip) end
+    if nightVisionEnabled then pcall(disableNightVision) end
+    if SmartBuilding.isActive() then pcall(SmartBuilding.closeUI) end
+
+    -- 相机冻结 / 穿墙
+    pcall(stopCamFreeze)
+    pcall(disableCamNoClip)
+
+    -- 相机偏移：断开 + 归零
+    if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
+    camOffsetX, camOffsetY, camOffsetZ = 0, 0, 0
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then pcall(function() hum.CameraOffset = Vector3.zero end) end
+    end
+
+    -- 断开遗留连接
+    if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
+    if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
+    if accelConn then accelConn:Disconnect() accelConn = nil end
+
+    -- 清空目标表
+    if _G._flyData then removeFly() end
+    stopPhysAccel()
+    tpwalking = false
+end
+
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
-    if speedModeConnection then speedModeConnection:Disconnect() end
-    if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
-    if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
-    removeFly(); stopPhysAccel(); disableNoclip(); disableNightVision()
-    stopCamFreeze(); disableCamNoClip()
-    pcall(function() SmartBuilding.shutdown() end)
+    -- 兜底：若 fullShutdown 已经执行过，这里的 pcall 不会重复动作
+    pcall(fullShutdown)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
