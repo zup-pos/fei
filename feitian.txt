@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.4（名单按钮修复 + 缩放崩溃修复 + 名单默认隐藏）
+-- Version 8.3.5（修复重建 + 名单紧凑 + 透明度滑条）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -104,7 +104,7 @@ local accelObj, accelAttach, accelConn = nil, nil, nil
 local accelForceScale = 100
 local accelLastMethod = nil
 
--- 透视变量（前移）
+-- 透视变量
 local originalLighting = {}
 local nightVisionMaintainConnection = nil
 local atmosphereInstance = nil
@@ -158,7 +158,7 @@ local SmartBuilding = (function()
     local UI = {
         scale = 1.0,
         ctrlW = 200, ctrlH = 300,
-        infoW = 200, infoH = 240,
+        infoW = 200, infoH = 180,  -- 【改动】240 → 180，名单窗紧凑
         btnH = 26, btnText = 11, titleText = 12, statusText = 10,
         pad = 6, rowH = 24, titleBarH = 24,
     }
@@ -220,6 +220,7 @@ local SmartBuilding = (function()
     local ui = {}
     local crosshair = nil
     local scanRunning = false
+    local controlAlphaConn = nil  -- 【新增】透明度滑条连接
 
     -- ========== 匹配 ==========
     local function nameMatches(inst, list)
@@ -563,8 +564,13 @@ local SmartBuilding = (function()
     containerGui.Enabled = false
 
     -- ========== 控制窗 ==========
-    local openControlWindow = function()
+    -- 【关键修复】前向声明，让函数体内部可引用自身（重建时用）
+    local openControlWindow
+    openControlWindow = function()
         if ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent then return end
+        -- 【新增】断开旧的透明度滑条连接，避免累积
+        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
+
         local sz = applyScale()
         local W, H = sz.ctrlW, sz.ctrlH
         local win = createWindow({
@@ -617,6 +623,51 @@ local SmartBuilding = (function()
         local tbc = Instance.new("UICorner"); tbc.CornerRadius = UDim.new(0, 4); tbc.Parent = tBox
         y = y + 26
 
+        -- 【新增】透明度快速滑动条
+        local alphaSliderBg = Instance.new("Frame")
+        alphaSliderBg.Name = "AlphaSlider"
+        alphaSliderBg.Size = UDim2.new(1, -pad * 2, 0, 6)
+        alphaSliderBg.Position = UDim2.new(0, pad, 0, y)
+        alphaSliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+        alphaSliderBg.BorderSizePixel = 0
+        alphaSliderBg.Parent = content
+        local asbc = Instance.new("UICorner"); asbc.CornerRadius = UDim.new(0, 3); asbc.Parent = alphaSliderBg
+
+        local alphaKnob = Instance.new("TextButton")
+        alphaKnob.Size = UDim2.new(0, 14, 0, 14)
+        alphaKnob.Position = UDim2.new(CONFIG.transparency, -7, 0, -4)
+        alphaKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+        alphaKnob.Text = ""; alphaKnob.AutoButtonColor = false
+        alphaKnob.Parent = alphaSliderBg
+        local akc = Instance.new("UICorner"); akc.CornerRadius = UDim.new(1, 0); akc.Parent = alphaKnob
+
+        local alphaDragging = false
+        alphaKnob.MouseButton1Down:Connect(function() alphaDragging = true end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+                alphaDragging = false
+            end
+        end)
+
+        controlAlphaConn = RunService.RenderStepped:Connect(function()
+            if not alphaDragging then return end
+            if not alphaSliderBg.Parent then return end
+            local mp = UserInputService:GetMouseLocation()
+            local ap = alphaSliderBg.AbsolutePosition
+            local as = alphaSliderBg.AbsoluteSize.X
+            local relX = math.clamp(mp.X - ap.X, 0, as)
+            local cp = relX / as
+            CONFIG.transparency = math.floor(cp * 100) / 100
+            alphaKnob.Position = UDim2.new(cp, -7, 0, -4)
+            tBox.Text = string.format("%.2f", CONFIG.transparency)
+            tLbl.Text = "透明度: " .. tBox.Text
+            for part, _ in pairs(targetList) do
+                setObjTransparency(part, CONFIG.transparency)
+            end
+        end)
+        y = y + 12
+
         local halfW = math.floor((W - pad * 3) / 2)
         local listBtn = Instance.new("TextButton")
         listBtn.Size = UDim2.new(0, halfW, 0, 22)
@@ -649,9 +700,9 @@ local SmartBuilding = (function()
 
         ui.control = { scanBtn = scanBtn, pickBtn = pickBtn, clearBtn = clearBtn,
                        tLbl = tLbl, tBox = tBox, status = status,
-                       listBtn = listBtn, scaleBox = scaleBox }
+                       listBtn = listBtn, scaleBox = scaleBox,
+                       alphaKnob = alphaKnob }
 
-        -- 【修复】延迟引用，避免 openInfoWindow / smartScan 尚未挂载
         scanBtn.MouseButton1Click:Connect(function()
             if SB.smartScan then SB.smartScan() end
         end)
@@ -674,18 +725,18 @@ local SmartBuilding = (function()
                 CONFIG.transparency = math.clamp(num, 0, 1)
                 tBox.Text = string.format("%.2f", CONFIG.transparency)
                 tLbl.Text = "透明度: " .. tBox.Text
+                -- 【新增】同步滑动条
+                alphaKnob.Position = UDim2.new(CONFIG.transparency, -7, 0, -4)
                 for part, _ in pairs(targetList) do
                     setObjTransparency(part, CONFIG.transparency)
                 end
             end
         end)
 
-        -- 【修复】延迟引用
         listBtn.MouseButton1Click:Connect(function()
             if SB.openInfoWindow then SB.openInfoWindow() end
         end)
 
-        -- 【修复】延迟重建，避免在 FocusLost 里销毁自身导致崩溃
         scaleBox.FocusLost:Connect(function()
             local num = tonumber(string.match(scaleBox.Text, "%d+"))
             if num then
@@ -748,7 +799,6 @@ local SmartBuilding = (function()
         ui.info = { listFrame = listFrame, status = status }
         if SB.refreshListUI then SB.refreshListUI() end
     end
-    -- 【修复】挂载到 SB，供按钮延迟引用
     SB.openInfoWindow = openInfoWindow
 
     -- ========== 名单刷新 ==========
@@ -995,6 +1045,9 @@ local SmartBuilding = (function()
             ui.control.tBox.Text = string.format("%.2f", CONFIG.transparency)
             ui.control.tLbl.Text = "透明度: " .. ui.control.tBox.Text
         end
+        if ui.control and ui.control.alphaKnob then
+            ui.control.alphaKnob.Position = UDim2.new(CONFIG.transparency, -7, 0, -4)
+        end
     end
 
     -- ========== 打开/关闭完整 UI ==========
@@ -1004,7 +1057,6 @@ local SmartBuilding = (function()
         containerGui.Enabled = true
         createCrosshair()
         openControlWindow()
-        -- 【调整】名单窗不再自动打开，用户主动点「📋 名单」才显示
     end
 
     SB.closeUI = function()
@@ -1012,6 +1064,7 @@ local SmartBuilding = (function()
         active = false
         containerGui.Enabled = false
         removeCrosshair()
+        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
         if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
         if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
         ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
@@ -1026,6 +1079,7 @@ local SmartBuilding = (function()
         active = false
         containerGui.Enabled = false
         removeCrosshair()
+        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
         if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
         if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
         ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
@@ -2440,12 +2494,12 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.4 更新内容：",
+                    "版本 8.3.5 更新内容：",
                     "",
-                    "1-48. (略，历史更新)",
-                    "49. 修复【📋 名单】按钮无反应",
-                    "50. 修复缩放输入框崩溃",
-                    "51. 名单窗默认隐藏（用户主动点开）",
+                    "1-51. (略，历史更新)",
+                    "52. 修复缩放重建（openControlWindow 前向声明）",
+                    "53. 名单窗默认高度压缩（更紧凑）",
+                    "54. 控制窗新增透明度快速拖动条",
                     "",
                     "感谢使用！"
                 }
@@ -2512,10 +2566,9 @@ function showMainMenu()
                     "🔹 【修改模式】短按 onof = 执行当前子模式",
                     "   - 智能识别（默认）：静默扫描，无 UI",
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
-                    "🔹 扫描完成会弹通知：共修改 N 个部件",
-                    "🔹 关闭时弹通知：已恢复 N 个部件",
-                    "🔹 名单窗默认不显示，点「📋 名单」开关",
-                    "🔹 缩放输入框 50%~150% 生效重建 UI",
+                    "🔹 透明度可用输入框或下方滑动条调整",
+                    "🔹 名单窗默认隐藏，点「📋 名单」开关",
+                    "🔹 缩放 50%~150% 生效重建 UI",
                     "🔹 音量键隐藏：音量减隐藏，加显示",
                 }
                 local cc = Instance.new("Frame")
@@ -3361,9 +3414,7 @@ end
 main.Destroying:Connect(function()
     if speedModeConnection then speedModeConnection:Disconnect() end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
-    removeFly(); stopPhysAccel(); disableNoclip()
-    if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
-    if nightVisionEnabled then restoreLighting() end
+    removeFly(); stopPhysAccel(); disableNoclip(); disableNightVision()
     stopCamFreeze(); disableCamNoClip()
     pcall(function() SmartBuilding.shutdown() end)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
