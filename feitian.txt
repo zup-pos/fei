@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.2.3 (UI 拖拽把柄化 + 多指保护)
+-- Version 8.2.4 (UI 拖拽把柄化 + 多指保护)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -69,7 +69,7 @@ uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
-uiLabel.Active = true   -- 【关键】作为拖动把柄，消费触摸让相机不响应
+uiLabel.Active = true
 
 hide.Name = "hide"
 hide.Parent = Frame
@@ -300,7 +300,7 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 【最终修复】把柄式拖拽逻辑 ====================
+-- ==================== 主窗口拖拽逻辑（把柄式） ====================
 -- 【原理】
 --   1. uiLabel.Active = true → 触摸被它消费 → 相机不接收 → 视角不乱晃
 --   2. 拖动事件绑定在 uiLabel 自己身上 → 只有触摸"UI"标签才触发
@@ -318,7 +318,6 @@ uiLabel.InputBegan:Connect(function(input)
 
     activeTouches = activeTouches + 1
 
-    -- 已有手指在拖动，忽略新手指，避免 dragStartPos 被覆盖
     if isDragging then return end
 
     isDragging = true
@@ -359,7 +358,6 @@ uiLabel.InputEnded:Connect(function(input)
 
     activeTouches = math.max(0, activeTouches - 1)
 
-    -- 只有当按在 uiLabel 上的所有手指都离开时，才结束拖动
     if activeTouches == 0 then
         isDragging = false
         dragStartPos = nil
@@ -2924,11 +2922,13 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.2.3 更新内容：",
+                    "版本 8.2.4 更新内容：",
                     "",
                     "1-32. (略，历史更新)",
-                    "33. 【本次修复】拖动 UI 视角乱晃（把柄消费触摸）",
-                    "34. 【本次修复】双指拖动 UI 闪烁（多指计数保护）",
+                    "33. 【本次修复】主 UI 拖动视角乱晃（把柄消费触摸）",
+                    "34. 【本次修复】主 UI 双指拖动闪烁（多指计数保护）",
+                    "35. 【本次修复】mini 折叠后拖动视角乱晃",
+                    "36. 【本次修复】mini 折叠后双指拖动闪烁",
                     "",
                     "感谢使用！"
                 }
@@ -3034,7 +3034,8 @@ function showMainMenu()
                     "🔹 设置 - 自由相机：冻结/单次/穿墙/快照",
                     "🔹 设置 - 相机偏移：自定义相机相对身体位置",
                     "🔹 音量键隐藏：按音量减隐藏 UI，加显示",
-                    "🔹 UI 拖动：触摸『UI』标签拖动整个面板，视角不会乱晃",
+                    "🔹 UI 拖动：触摸『UI』标签拖动主面板",
+                    "🔹 mini 拖动：触摸迷你『UI』按钮拖动折叠面板",
                 }
 
                 local contentContainer = Instance.new("Frame")
@@ -3645,7 +3646,7 @@ do
     end)
 end
 
--- ==================== 【Bug 2 修复】隐藏按钮 ====================
+-- ==================== 【mini 修复】隐藏按钮 ====================
 do
     local pressStartTime = 0
     local isPressing = false
@@ -3683,59 +3684,72 @@ do
 
         local miniX_var, miniY_var = miniX, miniY
         local miniIsDragging = false
-        local miniDragTouch = nil
         local miniLastTouchPos = nil
         local miniLatestTouchPos = nil
         local miniTotalDelta = 0
         local miniPressStartPos = nil
+        local miniActiveTouches = 0
 
+        -- 【mini 修复】拖动绑定在 miniBtn 自己身上，多指用 miniActiveTouches 计数
         miniBtn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch then
-                miniIsDragging = true
-                miniDragTouch = input
-                miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
-                miniLatestTouchPos = miniLastTouchPos
-                miniTotalDelta = 0
-                miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                return
             end
+
+            miniActiveTouches = miniActiveTouches + 1
+
+            if miniIsDragging then return end
+
+            miniIsDragging = true
+            miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
+            miniLatestTouchPos = miniLastTouchPos
+            miniTotalDelta = 0
+            miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
         end)
 
-        UserInputService.InputChanged:Connect(function(input)
-            if miniIsDragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-                local newPos = Vector2.new(input.Position.X, input.Position.Y)
-                miniTotalDelta = miniTotalDelta + (newPos - miniLatestTouchPos).Magnitude
-                miniLatestTouchPos = newPos
-            end
-        end)
-
-        UserInputService.InputEnded:Connect(function(input)
+        miniBtn.InputChanged:Connect(function(input)
             if not miniIsDragging then return end
-            if input.UserInputType == Enum.UserInputType.Touch
-            or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                local endPos = Vector2.new(input.Position.X, input.Position.Y)
-                local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
-                if straightDist < 10 and miniTotalDelta < 15 then
-                    -- 【Bug 2 修复】展开公式必须与收起公式互逆
-                    -- 收起: miniX = frameX + 132,  miniY = frameY
-                    -- 展开: frameX = miniX - 132,  frameY = miniY
-                    local vp2 = getScreenSize()
-                    local frameW = Frame.Size.X.Offset
-                    local frameH = Frame.Size.Y.Offset
-                    local newX = miniX_var - 132
-                    local newY = miniY_var
-                    newX = clamp(newX, 0, vp2.X - frameW)
-                    newY = clamp(newY, 0, vp2.Y - frameH)
-                    setFramePos(newX, newY)
-                    Frame.Visible = true
-                    mini:Destroy()
-                    miniWindow = nil
-                end
-                miniIsDragging = false
-                miniDragTouch = nil
-                miniLastTouchPos = nil
-                miniLatestTouchPos = nil
-                miniPressStartPos = nil
+            if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseMovement then
+                return
             end
+
+            local newPos = Vector2.new(input.Position.X, input.Position.Y)
+            miniTotalDelta = miniTotalDelta + (newPos - miniLatestTouchPos).Magnitude
+            miniLatestTouchPos = newPos
+        end)
+
+        miniBtn.InputEnded:Connect(function(input)
+            if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                return
+            end
+
+            miniActiveTouches = math.max(0, miniActiveTouches - 1)
+
+            if miniActiveTouches > 0 then return end
+
+            local endPos = Vector2.new(input.Position.X, input.Position.Y)
+            local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
+            if straightDist < 10 and miniTotalDelta < 15 then
+                -- 展开公式与收起公式互逆
+                local vp2 = getScreenSize()
+                local frameW = Frame.Size.X.Offset
+                local frameH = Frame.Size.Y.Offset
+                local newX = miniX_var - 132
+                local newY = miniY_var
+                newX = clamp(newX, 0, vp2.X - frameW)
+                newY = clamp(newY, 0, vp2.Y - frameH)
+                setFramePos(newX, newY)
+                Frame.Visible = true
+                mini:Destroy()
+                miniWindow = nil
+            end
+            miniIsDragging = false
+            miniLastTouchPos = nil
+            miniLatestTouchPos = nil
+            miniPressStartPos = nil
         end)
 
         local miniRenderConn
