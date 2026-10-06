@@ -2358,7 +2358,8 @@ function showInputDialog(title, defaultText, callback, extraButton)
                 local input = textBox.Text
                 if title == "输入透明度 (0-1)"
                     or string.find(title, "关键词")
-                    or string.find(title, "名称") then
+                    or string.find(title, "名称")
+                    or string.find(title, "文件名") then
                     callback(input) close() return
                 end
                 local num = tonumber(input)
