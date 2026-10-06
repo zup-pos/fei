@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.3（智能识别静默 + 完整 UI 原版 + 扫描完成通知）
+-- Version 8.3.4（名单按钮修复 + 缩放崩溃修复 + 名单默认隐藏）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -73,7 +73,7 @@ onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize =
 -- ==================== 服务与玩家 ====================
 local player = game:GetService("Players").LocalPlayer
 if not player then return end
-local camera = workspace.CurrentCamera   -- 【修复】补回 camera 变量
+local camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
@@ -149,7 +149,6 @@ local noclipStateConnection = nil
 
 local smartSubMode = "smart"
 
--- 前向声明
 local tanchuangxiaoxi
 
 -- ==================== 智能透视模块 ====================
@@ -652,13 +651,18 @@ local SmartBuilding = (function()
                        tLbl = tLbl, tBox = tBox, status = status,
                        listBtn = listBtn, scaleBox = scaleBox }
 
-        scanBtn.MouseButton1Click:Connect(SB.smartScan)
+        -- 【修复】延迟引用，避免 openInfoWindow / smartScan 尚未挂载
+        scanBtn.MouseButton1Click:Connect(function()
+            if SB.smartScan then SB.smartScan() end
+        end)
         pickBtn.MouseButton1Click:Connect(function()
+            if not SB.getTargetInCenter or not SB.addTarget then return end
             local t = SB.getTargetInCenter()
             if not t then showNotification("未对准目标"); return end
             SB.addTarget(t)
         end)
         clearBtn.MouseButton1Click:Connect(function()
+            if not SB.restoreAll then return end
             local n = SB.restoreAll()
             showNotification("已恢复所有对象")
             tanchuangxiaoxi(string.format("已恢复 %d 个部件", n), "修改模式")
@@ -676,23 +680,28 @@ local SmartBuilding = (function()
             end
         end)
 
-        listBtn.MouseButton1Click:Connect(SB.openInfoWindow)
+        -- 【修复】延迟引用
+        listBtn.MouseButton1Click:Connect(function()
+            if SB.openInfoWindow then SB.openInfoWindow() end
+        end)
 
+        -- 【修复】延迟重建，避免在 FocusLost 里销毁自身导致崩溃
         scaleBox.FocusLost:Connect(function()
             local num = tonumber(string.match(scaleBox.Text, "%d+"))
             if num then
                 UI.scale = math.clamp(num / 100, MIN_SCALE, MAX_SCALE)
-                scaleBox.Text = tostring(math.floor(UI.scale * 100)) .. "%"
-                if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
-                if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
-                ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
-                openControlWindow()
+                task.defer(function()
+                    if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
+                    if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
+                    ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
+                    openControlWindow()
+                end)
             else
                 scaleBox.Text = tostring(math.floor(UI.scale * 100)) .. "%"
             end
         end)
 
-        SB.refreshListUI()
+        if SB.refreshListUI then SB.refreshListUI() end
     end
 
     -- ========== 名单窗 ==========
@@ -737,8 +746,10 @@ local SmartBuilding = (function()
         status.Parent = content
 
         ui.info = { listFrame = listFrame, status = status }
-        SB.refreshListUI()
+        if SB.refreshListUI then SB.refreshListUI() end
     end
+    -- 【修复】挂载到 SB，供按钮延迟引用
+    SB.openInfoWindow = openInfoWindow
 
     -- ========== 名单刷新 ==========
     SB.refreshListUI = function()
@@ -838,7 +849,7 @@ local SmartBuilding = (function()
         return r and r.Instance or nil
     end
 
-    -- ========== 智能扫描（唯一扫描函数，静默/UI 通用） ==========
+    -- ========== 智能扫描 ==========
     SB.smartScan = function()
         if scanRunning then return end
         scanRunning = true
@@ -846,10 +857,7 @@ local SmartBuilding = (function()
         task.spawn(function()
             local t0 = tick()
             local cam = workspace.CurrentCamera
-            if not cam then
-                scanRunning = false
-                return
-            end
+            if not cam then scanRunning = false return end
             local range = CONFIG.scanRange
             local camPos = cam.CFrame.Position
             local look = cam.CFrame.LookVector
@@ -905,7 +913,6 @@ local SmartBuilding = (function()
             if ui.control then
                 showNotification(string.format("完成 %d (%.2fs)", applied, elapsed))
             end
-            -- 【新】弹窗显示总数（静默/UI 模式都弹）
             tanchuangxiaoxi(
                 string.format("共修改 %d 个部件  (%.2fs)", applied, elapsed),
                 "修改模式"
@@ -961,24 +968,19 @@ local SmartBuilding = (function()
         SB.refreshListUI()
     end
 
-    -- 【改动】返回恢复计数
     SB.restoreAll = function()
         local n = 0
         for part, _ in pairs(targetList) do
             if part and part.Parent then
-                restoreObj(part)
-                n = n + 1
+                restoreObj(part); n = n + 1
             end
         end
         for obj, _ in pairs(guiStateMap) do
             if obj and obj.Parent then
-                restoreObj(obj)
-                n = n + 1
+                restoreObj(obj); n = n + 1
             end
         end
-        targetList = {}
-        guiStateMap = {}
-        partRootMap = {}
+        targetList = {}; guiStateMap = {}; partRootMap = {}
         SB.refreshListUI()
         return n
     end
@@ -1002,10 +1004,9 @@ local SmartBuilding = (function()
         containerGui.Enabled = true
         createCrosshair()
         openControlWindow()
-        openInfoWindow()
+        -- 【调整】名单窗不再自动打开，用户主动点「📋 名单」才显示
     end
 
-    -- 【改动】先恢复透明度再关闭所有窗口，并返回恢复计数
     SB.closeUI = function()
         local n = SB.restoreAll()
         active = false
@@ -2387,10 +2388,7 @@ local function showSmartSubMenu()
         callback = function(menu)
             smartSubMode = "smart"
             menu:Destroy()
-            -- 若当前是 UI 模式打开着，先关闭
-            if SmartBuilding.isActive() then
-                SmartBuilding.closeUI()
-            end
+            if SmartBuilding.isActive() then SmartBuilding.closeUI() end
             updateMainButtonText()
             tanchuangxiaoxi("已切换: 智能识别（静默）", "修改模式")
         end
@@ -2401,7 +2399,6 @@ local function showSmartSubMenu()
         callback = function(menu)
             smartSubMode = "ui"
             menu:Destroy()
-            -- 打开完整 UI
             SmartBuilding.openUI()
             updateMainButtonText()
             tanchuangxiaoxi("已打开完整 UI", "修改模式")
@@ -2443,13 +2440,12 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.3 更新内容：",
+                    "版本 8.3.4 更新内容：",
                     "",
-                    "1-45. (略，历史更新)",
-                    "46. 修复 camera 变量缺失导致扫描无效",
-                    "47. 智能识别模式复用 smartScan（无 UI 时静默）",
-                    "48. 扫描完成 → 弹窗：共修改 N 个部件",
-                    "49. 主开关关闭 → 弹窗：已恢复 N 个部件",
+                    "1-48. (略，历史更新)",
+                    "49. 修复【📋 名单】按钮无反应",
+                    "50. 修复缩放输入框崩溃",
+                    "51. 名单窗默认隐藏（用户主动点开）",
                     "",
                     "感谢使用！"
                 }
@@ -2518,8 +2514,8 @@ function showMainMenu()
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
                     "🔹 扫描完成会弹通知：共修改 N 个部件",
                     "🔹 关闭时弹通知：已恢复 N 个部件",
-                    "🔹 【修改模式】短按 speed → 设置透明度",
-                    "🔹 【修改模式】长按 speed → 切换子模式",
+                    "🔹 名单窗默认不显示，点「📋 名单」开关",
+                    "🔹 缩放输入框 50%~150% 生效重建 UI",
                     "🔹 音量键隐藏：音量减隐藏，加显示",
                 }
                 local cc = Instance.new("Frame")
@@ -3089,9 +3085,7 @@ do
         elseif modeIndex == 2 then
             if noclipEnabled then disableNoclip() else enableNoclip() end
         elseif modeIndex == 3 then
-            -- 【修改模式】短按
             if smartSubMode == "smart" then
-                -- 智能识别：复用 smartScan，UI 未打开时天然静默
                 if SmartBuilding.isActive() then
                     local n = SmartBuilding.restoreAll()
                     SmartBuilding.setActive(false)
@@ -3102,7 +3096,6 @@ do
                     tanchuangxiaoxi("已启动智能识别，扫描中...", "修改模式")
                 end
             elseif smartSubMode == "ui" then
-                -- 添加目标：打开/关闭完整 UI
                 if SmartBuilding.isActive() then
                     local n = SmartBuilding.closeUI()
                     tanchuangxiaoxi(string.format("已恢复 %d 个部件并关闭", n), "修改模式")
