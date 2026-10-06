@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.2.3 (UI 拖拽把柄化 + 多指保护)
+-- Version 8.2.4 (UI 拖拽把柄化 + 多指保护 + 断触修复)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -69,7 +69,7 @@ uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
-uiLabel.Active = true   -- 【关键】作为拖动把柄，消费触摸让相机不响应
+uiLabel.Active = true   -- 作为拖动把柄，消费触摸让相机不响应
 
 hide.Name = "hide"
 hide.Parent = Frame
@@ -300,18 +300,26 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 【最终修复】把柄式拖拽逻辑（多指丝滑 + 身份锁定） ====================
+-- ==================== 通用命中检测 ====================
+local function isPointInGui(guiObj, x, y)
+    if not guiObj or not guiObj.Parent then return false end
+    local tl = guiObj.AbsolutePosition
+    local sz = guiObj.AbsoluteSize
+    if sz.X <= 0 or sz.Y <= 0 then return false end
+    return x >= tl.X and x <= tl.X + sz.X
+       and y >= tl.Y and y <= tl.Y + sz.Y
+end
+
+-- ==================== 【断触修复】把柄式拖拽逻辑 ====================
 -- 【原理】
 --   1. uiLabel.Active = true → 触摸被它消费 → 相机不接收 → 视角不乱晃
---   2. InputBegan 记录发起拖动的 InputObject 身份（dragInput）
---   3. InputChanged / InputEnded 用全局 UIS：手指移出 uiLabel 后依然跟手
---      → 只响应身份匹配的输入，其它手指乱动/抬起都不会影响
---   4. handleTouches 记录所有按在 uiLabel 上的手指：
---      发起手指抬起时，若还有其它手指按着，则转交给它继续拖动（不中断）
+--   2. 用【全局 UIS.InputBegan】+ 手动命中检测判断"是否按在把柄上"，
+--      彻底摆脱 GuiObject 的触摸捕获 —— 手指拖出把柄范围后 UIS 仍持有该触摸
+--   3. InputChanged 用 input.Delta 累加位移，快速滑动时不会因 Position 卡顿丢失位移
+--   4. 多指保护：handleTouches 记录所有按在把柄上的手指，
+--      发起手指抬起时若还有其它手指按着，则转交给它继续拖动
 local isDragging = false
 local dragInput = nil
-local dragStartPos = nil
-local dragStartFrame = nil
 local handleTouches = {}
 
 local function isDragStartInput(input)
@@ -322,22 +330,20 @@ end
 local function beginExpandDrag(input)
     isDragging = true
     dragInput = input
-    dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
-    dragStartFrame = Vector2.new(frameX, frameY)
 end
 
-uiLabel.InputBegan:Connect(function(input)
+-- 【关键修复 1】用全局 UIS.InputBegan + 命中检测替代 uiLabel.InputBegan
+UserInputService.InputBegan:Connect(function(input, _gpe)
     if not isDragStartInput(input) then return end
+    if not isPointInGui(uiLabel, input.Position.X, input.Position.Y) then return end
 
     handleTouches[input] = true
-
-    -- 已有手指在拖动，忽略新手指，避免 dragStartPos 被覆盖
+    -- 已有手指在拖动，忽略新手指，避免 dragInput 被覆盖
     if isDragging then return end
-
     beginExpandDrag(input)
 end)
 
--- 【关键】InputChanged 用全局 UIS：手指移出 uiLabel 后依然触发；只认发起手指
+-- 【关键修复 2】用 input.Delta 累加位移，避免快速滑动时 Position 卡顿/跳变
 UserInputService.InputChanged:Connect(function(input)
     if not isDragging then return end
 
@@ -354,29 +360,28 @@ UserInputService.InputChanged:Connect(function(input)
         return
     end
 
-    local currentPos = Vector2.new(input.Position.X, input.Position.Y)
-    local delta = currentPos - dragStartPos
+    local d = Vector2.new(input.Delta.X, input.Delta.Y)
+    if d.Magnitude == 0 then return end
 
     local camera = workspace.CurrentCamera
     if not camera then return end
     local vp = camera.ViewportSize
-    local frameW = Frame.Size.X.Offset
-    local frameH = Frame.Size.Y.Offset
+    local fw = Frame.Size.X.Offset
+    local fh = Frame.Size.Y.Offset
 
-    local newX = clamp(dragStartFrame.X + delta.X, 0, vp.X - frameW)
-    local newY = clamp(dragStartFrame.Y + delta.Y, 0, vp.Y - frameH)
-
+    local newX = clamp(frameX + d.X, 0, vp.X - fw)
+    local newY = clamp(frameY + d.Y, 0, vp.Y - fh)
     setFramePos(newX, newY)
 end)
 
--- 【关键】InputEnded 用全局 UIS：手指在别处抬起也能结束拖动；支持手指转交
+-- 支持手指在别处抬起也能结束拖动；支持手指转交
 UserInputService.InputEnded:Connect(function(input)
     if handleTouches[input] then handleTouches[input] = nil end
 
     if not isDragging or input ~= dragInput then return end
     if not isDragStartInput(input) then return end
 
-    -- 发起手指抬起：若还有其它手指按在 uiLabel 上，转交给它继续拖动
+    -- 发起手指抬起：若还有其它手指按在把柄上，转交给它继续拖动
     local nextInput = nil
     for t in pairs(handleTouches) do
         nextInput = t
@@ -388,8 +393,6 @@ UserInputService.InputEnded:Connect(function(input)
     else
         isDragging = false
         dragInput = nil
-        dragStartPos = nil
-        dragStartFrame = nil
     end
 end)
 
@@ -2950,11 +2953,12 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.2.3 更新内容：",
+                    "版本 8.2.4 更新内容：",
                     "",
                     "1-32. (略，历史更新)",
-                    "33. 【本次修复】拖动 UI 视角乱晃（把柄消费触摸）",
-                    "34. 【本次修复】双指拖动 UI 闪烁（多指计数保护）",
+                    "33. 拖动 UI 视角乱晃（把柄消费触摸）",
+                    "34. 双指拖动 UI 闪烁（多指计数保护）",
+                    "35. 【本次修复】拖动 UI 快速甩出后断触",
                     "",
                     "感谢使用！"
                 }
@@ -3671,7 +3675,7 @@ do
     end)
 end
 
--- ==================== 【Bug 2 修复】隐藏按钮 ====================
+-- ==================== 隐藏按钮（迷你 UI） ====================
 do
     local pressStartTime = 0
     local isPressing = false
@@ -3710,10 +3714,7 @@ do
         local miniX_var, miniY_var = miniX, miniY
         local miniIsDragging = false
         local miniDragInput = nil
-        local miniDragStartPos = nil
-        local miniDragStartFrame = nil
         local miniHandleTouches = {}
-        local miniLastTouchPos = nil
         local miniTotalDelta = 0
         local miniPressStartPos = nil
 
@@ -3725,25 +3726,21 @@ do
         local function beginMiniDrag(input)
             miniIsDragging = true
             miniDragInput = input
-            miniDragStartPos = Vector2.new(input.Position.X, input.Position.Y)
-            miniDragStartFrame = Vector2.new(miniX_var, miniY_var)
-            miniLastTouchPos = miniDragStartPos
         end
 
-        miniBtn.InputBegan:Connect(function(input)
+        -- 【断触修复】全局 InputBegan + 命中检测
+        UserInputService.InputBegan:Connect(function(input, _gpe)
             if not isMiniStartInput(input) then return end
+            if not isPointInGui(miniBtn, input.Position.X, input.Position.Y) then return end
 
             miniHandleTouches[input] = true
-
-            -- 已有手指在拖动，忽略新手指
             if miniIsDragging then return end
-
             beginMiniDrag(input)
             miniTotalDelta = 0
             miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
         end)
 
-        -- 【关键】身份锁定：只跟发起拖动的那根手指；直接跟手，无需逐帧 delta 累积
+        -- 【断触修复】用 input.Delta 累加位移
         UserInputService.InputChanged:Connect(function(input)
             if not miniIsDragging then return end
 
@@ -3758,23 +3755,17 @@ do
                 return
             end
 
-            local curPos = Vector2.new(input.Position.X, input.Position.Y)
-            if miniLastTouchPos then
-                miniTotalDelta = miniTotalDelta + (curPos - miniLastTouchPos).Magnitude
-            end
-            miniLastTouchPos = curPos
-
-            local delta = curPos - miniDragStartPos
-            local newX = miniDragStartFrame.X + delta.X
-            local newY = miniDragStartFrame.Y + delta.Y
+            local d = Vector2.new(input.Delta.X, input.Delta.Y)
+            miniTotalDelta = miniTotalDelta + d.Magnitude
+            if d.Magnitude == 0 then return end
 
             local camera = workspace.CurrentCamera
             if not camera then return end
             local vp3 = camera.ViewportSize
             local miniW = mini.Size.X.Offset
             local miniH = mini.Size.Y.Offset
-            newX = clamp(newX, 0, vp3.X - miniW)
-            newY = clamp(newY, 0, vp3.Y - miniH)
+            local newX = clamp(miniX_var + d.X, 0, vp3.X - miniW)
+            local newY = clamp(miniY_var + d.Y, 0, vp3.Y - miniH)
             miniX_var = newX
             miniY_var = newY
             mini.Position = UDim2.fromOffset(newX, newY)
@@ -3801,7 +3792,7 @@ do
             local endPos = Vector2.new(input.Position.X, input.Position.Y)
             local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
             if straightDist < 10 and miniTotalDelta < 15 then
-                -- 【Bug 2 修复】展开公式必须与收起公式互逆
+                -- 展开公式必须与收起公式互逆
                 -- 收起: miniX = frameX + 132,  miniY = frameY
                 -- 展开: frameX = miniX - 132,  frameY = miniY
                 local vp2 = getScreenSize()
@@ -3818,9 +3809,6 @@ do
             end
             miniIsDragging = false
             miniDragInput = nil
-            miniDragStartPos = nil
-            miniDragStartFrame = nil
-            miniLastTouchPos = nil
             miniPressStartPos = nil
         end)
 
