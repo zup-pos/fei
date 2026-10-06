@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.0 (整合智能透视工具 + 移除建筑/贴图相关代码)
+-- Version 8.3.1（智能模式静默化 + 透视不受影响）
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -35,102 +35,55 @@ Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
 Frame.Active = false
 Frame.Draggable = false
 
-up.Name = "up"
-up.Parent = Frame
+up.Name = "up"; up.Parent = Frame
 up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
-up.Position = UDim2.new(0, 0, 0, 0)
-up.Size = UDim2.new(0, 44, 0, 28)
-up.Font = Enum.Font.SourceSans
-up.Text = "上升"
-up.TextColor3 = Color3.fromRGB(0, 0, 0)
-up.TextScaled = true
-up.TextSize = 14
-up.Active = true
+up.Position = UDim2.new(0, 0, 0, 0); up.Size = UDim2.new(0, 44, 0, 28)
+up.Font = Enum.Font.SourceSans; up.Text = "上升"
+up.TextColor3 = Color3.fromRGB(0, 0, 0); up.TextScaled = true; up.TextSize = 14; up.Active = true
 
-plus.Name = "plus"
-plus.Parent = Frame
+plus.Name = "plus"; plus.Parent = Frame
 plus.BackgroundColor3 = Color3.fromRGB(133, 145, 255)
-plus.Position = UDim2.new(0, 44, 0, 0)
-plus.Size = UDim2.new(0, 44, 0, 28)
-plus.Font = Enum.Font.SourceSans
-plus.Text = "加速"
-plus.TextColor3 = Color3.fromRGB(0, 0, 0)
-plus.TextScaled = true
-plus.TextSize = 14
-plus.Active = true
+plus.Position = UDim2.new(0, 44, 0, 0); plus.Size = UDim2.new(0, 44, 0, 28)
+plus.Font = Enum.Font.SourceSans; plus.Text = "加速"
+plus.TextColor3 = Color3.fromRGB(0, 0, 0); plus.TextScaled = true; plus.TextSize = 14; plus.Active = true
 
-uiLabel.Name = "uiLabel"
-uiLabel.Parent = Frame
+uiLabel.Name = "uiLabel"; uiLabel.Parent = Frame
 uiLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
-uiLabel.Position = UDim2.new(0, 88, 0, 0)
-uiLabel.Size = UDim2.new(0, 44, 0, 28)
-uiLabel.Font = Enum.Font.SourceSans
-uiLabel.Text = "UI"
-uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
-uiLabel.TextScaled = true
-uiLabel.TextSize = 14
+uiLabel.Position = UDim2.new(0, 88, 0, 0); uiLabel.Size = UDim2.new(0, 44, 0, 28)
+uiLabel.Font = Enum.Font.SourceSans; uiLabel.Text = "UI"
+uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0); uiLabel.TextScaled = true; uiLabel.TextSize = 14
 uiLabel.Active = true
 
-hide.Name = "hide"
-hide.Parent = Frame
+hide.Name = "hide"; hide.Parent = Frame
 hide.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-hide.Position = UDim2.new(0, 132, 0, 0)
-hide.Size = UDim2.new(0, 58, 0, 28)
-hide.Font = Enum.Font.SourceSans
-hide.Text = "隐藏/设置"
-hide.TextColor3 = Color3.fromRGB(0, 0, 0)
-hide.TextScaled = true
-hide.TextSize = 14
-hide.Active = true
+hide.Position = UDim2.new(0, 132, 0, 0); hide.Size = UDim2.new(0, 58, 0, 28)
+hide.Font = Enum.Font.SourceSans; hide.Text = "隐藏/设置"
+hide.TextColor3 = Color3.fromRGB(0, 0, 0); hide.TextScaled = true; hide.TextSize = 14; hide.Active = true
 
-down.Name = "down"
-down.Parent = Frame
+down.Name = "down"; down.Parent = Frame
 down.BackgroundColor3 = Color3.fromRGB(215, 255, 121)
-down.Position = UDim2.new(0, 0, 0, 28)
-down.Size = UDim2.new(0, 44, 0, 28)
-down.Font = Enum.Font.SourceSans
-down.Text = "下降"
-down.TextColor3 = Color3.fromRGB(0, 0, 0)
-down.TextScaled = true
-down.TextSize = 14
-down.Active = true
+down.Position = UDim2.new(0, 0, 0, 28); down.Size = UDim2.new(0, 44, 0, 28)
+down.Font = Enum.Font.SourceSans; down.Text = "下降"
+down.TextColor3 = Color3.fromRGB(0, 0, 0); down.TextScaled = true; down.TextSize = 14; down.Active = true
 
-mine.Name = "mine"
-mine.Parent = Frame
+mine.Name = "mine"; mine.Parent = Frame
 mine.BackgroundColor3 = Color3.fromRGB(123, 255, 247)
-mine.Position = UDim2.new(0, 44, 0, 28)
-mine.Size = UDim2.new(0, 44, 0, 28)
-mine.Font = Enum.Font.SourceSans
-mine.Text = "减速"
-mine.TextColor3 = Color3.fromRGB(0, 0, 0)
-mine.TextScaled = true
-mine.TextSize = 14
-mine.Active = true
+mine.Position = UDim2.new(0, 44, 0, 28); mine.Size = UDim2.new(0, 44, 0, 28)
+mine.Font = Enum.Font.SourceSans; mine.Text = "减速"
+mine.TextColor3 = Color3.fromRGB(0, 0, 0); mine.TextScaled = true; mine.TextSize = 14; mine.Active = true
 
-speed.Name = "speed"
-speed.Parent = Frame
+speed.Name = "speed"; speed.Parent = Frame
 speed.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
-speed.Position = UDim2.new(0, 88, 0, 28)
-speed.Size = UDim2.new(0, 44, 0, 28)
-speed.Font = Enum.Font.SourceSans
-speed.Text = "1"
-speed.TextColor3 = Color3.fromRGB(0, 0, 0)
-speed.TextScaled = true
-speed.TextSize = 14
-speed.AutoButtonColor = false
-speed.Active = true
+speed.Position = UDim2.new(0, 88, 0, 28); speed.Size = UDim2.new(0, 44, 0, 28)
+speed.Font = Enum.Font.SourceSans; speed.Text = "1"
+speed.TextColor3 = Color3.fromRGB(0, 0, 0); speed.TextScaled = true; speed.TextSize = 14
+speed.AutoButtonColor = false; speed.Active = true
 
-onof.Name = "onof"
-onof.Parent = Frame
+onof.Name = "onof"; onof.Parent = Frame
 onof.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
-onof.Position = UDim2.new(0, 132, 0, 28)
-onof.Size = UDim2.new(0, 58, 0, 28)
-onof.Font = Enum.Font.SourceSans
-onof.Text = "飞天(关闭)"
-onof.TextColor3 = Color3.fromRGB(0, 0, 0)
-onof.TextScaled = true
-onof.TextSize = 14
-onof.Active = true
+onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
+onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
+onof.TextColor3 = Color3.fromRGB(0, 0, 0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
 
 -- ==================== 服务与玩家 ====================
 local player = game:GetService("Players").LocalPlayer
@@ -163,9 +116,7 @@ local flyFaceMode = "全局"
 
 local speedSubMode = "修改"
 
-local accelObj = nil
-local accelAttach = nil
-local accelConn = nil
+local accelObj, accelAttach, accelConn = nil, nil, nil
 local accelForceScale = 100
 local accelLastMethod = nil
 
@@ -174,9 +125,7 @@ local camFreezeEnabled = false
 local camNoClipEnabled = false
 local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
 local camFreezeBound = false
-local camOffsetX = 0
-local camOffsetY = 0
-local camOffsetZ = 0
+local camOffsetX, camOffsetY, camOffsetZ = 0, 0, 0
 local camOffsetBaseline = { x = 0, y = 0, z = 0 }
 
 local frameX = initX
@@ -186,7 +135,6 @@ local noclipWindow = nil
 local nightVisionWindow = nil
 
 local modeIndex = 0
--- 【文本修改】"删除" → "修改"
 local modeNames = { "fly", "speed", "noclip", "modify", "nightvision" }
 local modeDisplayNames = { "飞天", "移速", "穿墙", "修改", "透视" }
 
@@ -203,25 +151,22 @@ local noclipEnabled = false
 local noclipConnection = nil
 local noclipStateConnection = nil
 
--- 智能透视相关状态（原建筑移除相关已全部删除）
--- 智能透视的"当前模式"：'smart' = 智能识别（无悬浮窗）；'picker' = 添加目标（打开小 UI）
+-- 智能透视：当前子模式
+--   "smart"  = 智能识别（默认，无悬浮窗）
+--   "picker" = 添加目标（打开 picker 悬浮窗）
 local smartSubMode = "smart"
 
--- ==================== 智能透视模块 ====================
--- 完整集成 v2.8.1 智能建筑透视工具，提供 API 供主脚本调用
+-- ==================== 智能透视模块（简化：无控制窗/名单窗） ====================
 local SmartBuilding = (function()
     local SB = {}
 
-    -- 配置
     local CFG = {
         scanRange = 1200,
         transparency = 0.85,
-        maxTargetsLabel = 100,
         maxModelParts = 1500,
         maxPartsPerScan = 8000,
         batchClassify = 100,
         batchApply = 30,
-
         strongIgnore = { "terrain", "sky", "clouds", "atmosphere", "baseplate" },
         exactIgnore = { "ground", "floor", "road", "grass", "dirt", "sand",
                         "water", "platform", "tile" },
@@ -252,21 +197,14 @@ local SmartBuilding = (function()
         protectClasses = { "SpawnLocation", "Tool", "Seat", "VehicleSeat", "Accessory" }
     }
 
-    -- 状态
     local active = false
     local targetList = {}
     local guiStateMap = {}
     local partRootMap = {}
-    local smartUI = {}
-    local crosshair = nil
-    local scanRunning = false
     local pickerGUI = nil
+    local scanRunning = false
 
-    local refreshListUI, removeTarget, showNotification
-    local openControlWindow, openInfoWindow, closeAllWindows
-    local getTargetInCenter
-
-    -- ========== 匹配辅助 ==========
+    -- ========== 匹配 ==========
     local function nameMatches(inst, list)
         if not inst then return false end
         local n = string.lower(inst.Name)
@@ -291,41 +229,35 @@ local SmartBuilding = (function()
     end
 
     local function ancestorsMatch(inst, list)
-        local cur = inst
-        local depth = 0
+        local cur, depth = inst, 0
         while cur and cur ~= workspace and depth < 15 do
             if nameMatches(cur, list) then return true end
-            cur = cur.Parent
-            depth = depth + 1
+            cur = cur.Parent; depth = depth + 1
         end
         return false
     end
 
     local function ancestorsHavePrompt(inst)
-        local cur = inst
-        local depth = 0
+        local cur, depth = inst, 0
         while cur and cur ~= workspace and depth < 15 do
             for _, c in ipairs(cur:GetChildren()) do
                 if c:IsA("ProximityPrompt") or c:IsA("ClickDetector") then return true end
             end
-            cur = cur.Parent
-            depth = depth + 1
+            cur = cur.Parent; depth = depth + 1
         end
         return false
     end
 
     local function ancestorsHaveHumanoid(inst)
-        local cur = inst
-        local depth = 0
+        local cur, depth = inst, 0
         while cur and cur ~= workspace and depth < 15 do
             if cur:IsA("Model") and cur:FindFirstChildOfClass("Humanoid") then return true end
-            cur = cur.Parent
-            depth = depth + 1
+            cur = cur.Parent; depth = depth + 1
         end
         return false
     end
 
-    -- ========== 空气墙 / 拦截 ==========
+    -- ========== 拦截 ==========
     local function isInvisibleWall(part)
         if not part or not part:IsA("BasePart") then return false end
         if nameMatches(part, CFG.buildingKeywords) then return false end
@@ -341,9 +273,8 @@ local SmartBuilding = (function()
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
-        if nameMatches(part, CFG.invisibleWallKeywords) and not nameMatches(part, CFG.buildingKeywords) then
-            return true, "空气墙名"
-        end
+        if nameMatches(part, CFG.invisibleWallKeywords)
+            and not nameMatches(part, CFG.buildingKeywords) then return true, "空气墙名" end
         if nameMatches(part, CFG.strongIgnore) then return true, "强忽略词" end
         if exactMatchAny(part.Name, CFG.exactIgnore) then return true, "忽略词" end
         if ancestorsMatch(part, CFG.protectKeywords) then return true, "祖先含保护词" end
@@ -356,19 +287,17 @@ local SmartBuilding = (function()
         return false, nil
     end
 
-    local function isIgnored(part)
-        return checkIgnored(part)
-    end
+    local function isIgnored(part) return (checkIgnored(part)) end
 
-    -- ========== 透明度设置 ==========
+    -- ========== 透明度 ==========
     local function setObjTransparency(obj, trans)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
-            local record = targetList[obj]
-            if not record then
-                record = { transparency = obj.Transparency, material = obj.Material,
-                           castShadow = obj.CastShadow, reflectance = obj.Reflectance }
-                targetList[obj] = record
+            local rec = targetList[obj]
+            if not rec then
+                rec = { transparency = obj.Transparency, material = obj.Material,
+                        castShadow = obj.CastShadow, reflectance = obj.Reflectance }
+                targetList[obj] = rec
             end
             obj.Transparency = trans
             obj.Material = Enum.Material.SmoothPlastic
@@ -377,34 +306,34 @@ local SmartBuilding = (function()
             return
         end
         if obj:IsA("Decal") or obj:IsA("Texture") then
-            local record = targetList[obj]
-            if not record then record = { transparency = obj.Transparency } end
-            targetList[obj] = record
+            local rec = targetList[obj]
+            if not rec then rec = { transparency = obj.Transparency } end
+            targetList[obj] = rec
             obj.Transparency = trans
             return
         end
         if obj:IsA("SurfaceAppearance") then
-            local record = targetList[obj]
-            if not record then
-                record = { colorMap = obj.ColorMap, metalnessMap = obj.MetalnessMap,
-                           roughnessMap = obj.RoughnessMap, normalMap = obj.NormalMap }
-                targetList[obj] = record
+            local rec = targetList[obj]
+            if not rec then
+                rec = { colorMap = obj.ColorMap, metalnessMap = obj.MetalnessMap,
+                        roughnessMap = obj.RoughnessMap, normalMap = obj.NormalMap }
+                targetList[obj] = rec
             end
             obj.ColorMap = ""; obj.MetalnessMap = ""; obj.RoughnessMap = ""; obj.NormalMap = ""
             return
         end
         if obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
-            local record = guiStateMap[obj]
-            if not record then record = { enabled = obj.Enabled } end
-            guiStateMap[obj] = record
+            local rec = guiStateMap[obj]
+            if not rec then rec = { enabled = obj.Enabled } end
+            guiStateMap[obj] = rec
             obj.Enabled = false
             return
         end
         if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail")
             or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-            local record = guiStateMap[obj]
-            if not record then record = { enabled = obj.Enabled } end
-            guiStateMap[obj] = record
+            local rec = guiStateMap[obj]
+            if not rec then rec = { enabled = obj.Enabled } end
+            guiStateMap[obj] = rec
             obj.Enabled = false
             return
         end
@@ -413,39 +342,39 @@ local SmartBuilding = (function()
     local function restoreObj(obj)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
-            local record = targetList[obj]
-            if record then
-                obj.Transparency = record.transparency
-                obj.Material = record.material
-                obj.CastShadow = record.castShadow
-                obj.Reflectance = record.reflectance
+            local rec = targetList[obj]
+            if rec then
+                obj.Transparency = rec.transparency
+                obj.Material = rec.material
+                obj.CastShadow = rec.castShadow
+                obj.Reflectance = rec.reflectance
             end
             return
         end
         if obj:IsA("Decal") or obj:IsA("Texture") then
-            local record = targetList[obj]
-            if record then obj.Transparency = record.transparency end
+            local rec = targetList[obj]
+            if rec then obj.Transparency = rec.transparency end
             return
         end
         if obj:IsA("SurfaceAppearance") then
-            local record = targetList[obj]
-            if record then
-                obj.ColorMap = record.colorMap
-                obj.MetalnessMap = record.metalnessMap
-                obj.RoughnessMap = record.roughnessMap
-                obj.NormalMap = record.normalMap
+            local rec = targetList[obj]
+            if rec then
+                obj.ColorMap = rec.colorMap
+                obj.MetalnessMap = rec.metalnessMap
+                obj.RoughnessMap = rec.roughnessMap
+                obj.NormalMap = rec.normalMap
             end
             return
         end
         if obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
-            local record = guiStateMap[obj]
-            if record then obj.Enabled = record.enabled end
+            local rec = guiStateMap[obj]
+            if rec then obj.Enabled = rec.enabled end
             return
         end
         if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail")
             or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-            local record = guiStateMap[obj]
-            if record then obj.Enabled = record.enabled end
+            local rec = guiStateMap[obj]
+            if rec then obj.Enabled = rec.enabled end
             return
         end
     end
@@ -454,8 +383,7 @@ local SmartBuilding = (function()
         if not part then return nil end
         local model = part:FindFirstAncestorOfClass("Model")
         if model and model ~= workspace then
-            local count = 0
-            local tooBig = false
+            local count, tooBig = 0, false
             for _, d in ipairs(model:GetDescendants()) do
                 if d:IsA("BasePart") then
                     count = count + 1
@@ -488,30 +416,28 @@ local SmartBuilding = (function()
         return list
     end
 
-    local function getTargetCount()
-        local n = 0
-        for _ in pairs(targetList) do n = n + 1 end
-        return n
-    end
-
-    -- ========== 添加/移除/恢复 ==========
+    -- ========== 核心 ==========
     local function addTarget(target)
         if not target then return false end
-        if not (target:IsA("BasePart") or target:IsA("Model")) then
-            showNotification("无效目标"); return false
-        end
+        if not (target:IsA("BasePart") or target:IsA("Model")) then return false end
         local root = getTargetRoot(target)
         if not root then return false end
         local parts = collectTargetParts(root)
-        if #parts == 0 then showNotification("无有效部件"); return false end
+        if #parts == 0 then return false end
 
         local alreadyAll = true
         for _, p in ipairs(parts) do
-            if targetList[p] == nil and guiStateMap[p] == nil then alreadyAll = false break end
+            if targetList[p] == nil and guiStateMap[p] == nil then
+                alreadyAll = false; break
+            end
         end
         if alreadyAll then
-            removeTarget(root)
-            showNotification("已取消: " .. root.Name)
+            for _, p in ipairs(parts) do
+                restoreObj(p)
+                targetList[p] = nil
+                guiStateMap[p] = nil
+                partRootMap[p] = nil
+            end
             return false
         end
 
@@ -525,26 +451,7 @@ local SmartBuilding = (function()
                 added = added + 1
             end
         end
-
-        refreshListUI()
-        if added > 0 then
-            showNotification("已添加 " .. root.Name .. " (" .. added .. ")")
-        else
-            showNotification("全部被拦，未添加")
-        end
         return added > 0
-    end
-
-    removeTarget = function(root)
-        if not root then return end
-        local parts = collectTargetParts(root)
-        for _, p in ipairs(parts) do
-            restoreObj(p)
-            targetList[p] = nil
-            guiStateMap[p] = nil
-            partRootMap[p] = nil
-        end
-        refreshListUI()
     end
 
     local function restoreAll()
@@ -553,18 +460,14 @@ local SmartBuilding = (function()
         targetList = {}
         guiStateMap = {}
         partRootMap = {}
-        refreshListUI()
     end
-    SB.restoreAll = restoreAll
 
-    -- ========== 智能扫描 ==========
+    -- ========== 智能扫描（无 UI 版）==========
     local function smartScan()
-        if scanRunning then showNotification("扫描中..."); return end
+        if scanRunning then return end
         scanRunning = true
-        showNotification("扫描中...")
 
         task.spawn(function()
-            local t0 = tick()
             local range = CFG.scanRange
             local camPos = camera.CFrame.Position
             local look = camera.CFrame.LookVector
@@ -592,15 +495,10 @@ local SmartBuilding = (function()
                         end
                     end
                 end
-                if i % CFG.batchClassify == 0 then
-                    task.wait()
-                    showNotification(string.format("分类 %d%%", math.floor(i / total * 100)))
-                end
+                if i % CFG.batchClassify == 0 then task.wait() end
             end
 
-            local applied = 0
-            local processedRoots = 0
-
+            local applied, processedRoots = 0, 0
             for _, root in ipairs(roots) do
                 local subParts = collectTargetParts(root)
                 for _, p in ipairs(subParts) do
@@ -613,52 +511,21 @@ local SmartBuilding = (function()
                     end
                 end
                 processedRoots = processedRoots + 1
-                if processedRoots % CFG.batchApply == 0 then
-                    task.wait()
-                    showNotification(string.format("应用 %d/%d", processedRoots, #roots))
-                end
+                if processedRoots % CFG.batchApply == 0 then task.wait() end
             end
 
-            refreshListUI()
-            showNotification(string.format("完成 %d (%.2fs)", applied, tick() - t0))
             scanRunning = false
+            tanchuangxiaoxi(string.format("智能识别完成：%d 个部件", applied), "修改模式")
         end)
     end
-    SB.smartScan = smartScan
 
-    -- ========== 准心 ==========
-    local function createCrosshair()
-        if crosshair then return end
-        crosshair = Instance.new("ScreenGui")
-        crosshair.Name = "SmartCrosshair"
-        crosshair.Parent = playerGui
-        crosshair.ResetOnSpawn = false
-        crosshair.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        crosshair.IgnoreGuiInset = true
-        local f = Instance.new("Frame")
-        f.Size = UDim2.new(0, 20, 0, 20)
-        f.Position = UDim2.new(0.5, -10, 0.5, -10)
-        f.BackgroundTransparency = 1
-        f.Parent = crosshair
-        local h = Instance.new("Frame")
-        h.Size = UDim2.new(0, 12, 0, 2)
-        h.Position = UDim2.new(0.5, -6, 0.5, -1)
-        h.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
-        h.BorderSizePixel = 0
-        h.Parent = f
-        local v = Instance.new("Frame")
-        v.Size = UDim2.new(0, 2, 0, 12)
-        v.Position = UDim2.new(0.5, -1, 0.5, -6)
-        v.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
-        v.BorderSizePixel = 0
-        v.Parent = f
+    -- ========== Picker（准心添加）==========
+    local function closePicker()
+        if pickerGUI and pickerGUI.Parent then pickerGUI:Destroy() end
+        pickerGUI = nil
     end
 
-    local function removeCrosshair()
-        if crosshair then crosshair:Destroy() crosshair = nil end
-    end
-
-    getTargetInCenter = function()
+    local function getTargetInCenter()
         local vp = camera.ViewportSize
         local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
         local params = RaycastParams.new()
@@ -669,451 +536,7 @@ local SmartBuilding = (function()
         return r and r.Instance or nil
     end
 
-    -- ========== 拖动 ===========
-    local function makeDraggable(frame, handle)
-        handle = handle or frame
-        local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
-        handle.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-            and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            dragging = true; dragInput = input
-            dragStart = Vector2.new(input.Position.X, input.Position.Y)
-            startPos = frame.Position
-        end)
-        UserInputService.InputChanged:Connect(function(input)
-            if not dragging then return end
-            local matched = (input == dragInput)
-                or (dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1
-                    and input.UserInputType == Enum.UserInputType.MouseMovement)
-            if not matched then return end
-            if input.UserInputType ~= Enum.UserInputType.MouseMovement
-            and input.UserInputType ~= Enum.UserInputType.Touch then return end
-            local cur = Vector2.new(input.Position.X, input.Position.Y)
-            local d = cur - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-                                       startPos.Y.Scale, startPos.Y.Offset + d.Y)
-        end)
-        UserInputService.InputEnded:Connect(function(input)
-            if input == dragInput then dragging = false; dragInput = nil end
-        end)
-    end
-
-    -- ========== UI 缩放 ==========
-    local SZ = {
-        ctrlW = 200, ctrlH = 300,
-        infoW = 200, infoH = 240,
-        btnH = 26, btnText = 11, titleText = 12, statusText = 10,
-        pad = 6, rowH = 24, titleBarH = 24,
-    }
-
-    -- ========== 窗口工厂 ==========
-    local function createWindow(config)
-        local sz = SZ
-        local isMinimized = false
-        local savedPos = config.position
-
-        local frame = Instance.new("Frame")
-        frame.Name = config.name
-        frame.Size = UDim2.new(0, config.width, 0, config.height)
-        frame.Position = config.position
-        frame.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-        frame.BackgroundTransparency = 0.1
-        frame.BorderSizePixel = 0
-        frame.Active = true
-        frame.Parent = config.parent
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 8)
-        corner.Parent = frame
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(80, 80, 120)
-        stroke.Thickness = 1
-        stroke.Transparency = 0.5
-        stroke.Parent = frame
-
-        local titleBar = Instance.new("Frame")
-        titleBar.Size = UDim2.new(1, 0, 0, sz.titleBarH)
-        titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-        titleBar.BackgroundTransparency = 0.3
-        titleBar.BorderSizePixel = 0
-        titleBar.Parent = frame
-        local tc = Instance.new("UICorner")
-        tc.CornerRadius = UDim.new(0, 8)
-        tc.Parent = titleBar
-        local tcCover = Instance.new("Frame")
-        tcCover.Size = UDim2.new(1, 0, 0, sz.titleBarH / 2)
-        tcCover.Position = UDim2.new(0, 0, 1, -sz.titleBarH / 2)
-        tcCover.BackgroundColor3 = titleBar.BackgroundColor3
-        tcCover.BackgroundTransparency = titleBar.BackgroundTransparency
-        tcCover.BorderSizePixel = 0
-        tcCover.Parent = titleBar
-
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, -50, 1, 0)
-        title.Position = UDim2.new(0, 8, 0, 0)
-        title.BackgroundTransparency = 1
-        title.Text = config.title
-        title.TextColor3 = Color3.new(1, 1, 1)
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = sz.titleText
-        title.TextXAlignment = Enum.TextXAlignment.Left
-        title.Parent = titleBar
-
-        local minBtn = Instance.new("TextButton")
-        minBtn.Size = UDim2.new(0, sz.titleBarH - 6, 0, sz.titleBarH - 6)
-        minBtn.Position = UDim2.new(1, -sz.titleBarH + 3, 0, 3)
-        minBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 120)
-        minBtn.Text = "—"
-        minBtn.TextColor3 = Color3.new(1, 1, 1)
-        minBtn.Font = Enum.Font.GothamBold
-        minBtn.TextSize = math.max(10, sz.titleText)
-        minBtn.AutoButtonColor = false
-        minBtn.Parent = titleBar
-        local mbc = Instance.new("UICorner")
-        mbc.CornerRadius = UDim.new(0, 4)
-        mbc.Parent = minBtn
-
-        local content = Instance.new("Frame")
-        content.Size = UDim2.new(1, 0, 1, -sz.titleBarH)
-        content.Position = UDim2.new(0, 0, 0, sz.titleBarH)
-        content.BackgroundTransparency = 1
-        content.Parent = frame
-
-        makeDraggable(frame, titleBar)
-
-        minBtn.MouseButton1Click:Connect(function()
-            isMinimized = not isMinimized
-            if isMinimized then
-                savedPos = frame.Position
-                frame.Size = UDim2.new(0, sz.titleBarH + 18, 0, sz.titleBarH)
-                content.Visible = false
-                title.Visible = false
-                minBtn.Size = UDim2.new(0, sz.titleBarH - 6, 0, sz.titleBarH - 6)
-                minBtn.Position = UDim2.new(0, 3, 0, 3)
-                minBtn.Text = config.icon or "□"
-            else
-                frame.Position = savedPos
-                frame.Size = UDim2.new(0, config.width, 0, config.height)
-                content.Visible = true
-                title.Visible = true
-                minBtn.Size = UDim2.new(0, sz.titleBarH - 6, 0, sz.titleBarH - 6)
-                minBtn.Position = UDim2.new(1, -sz.titleBarH + 3, 0, 3)
-                minBtn.Text = "—"
-            end
-        end)
-
-        return { frame = frame, titleBar = titleBar, content = content, minBtn = minBtn }
-    end
-
-    showNotification = function(text)
-        if smartUI.control and smartUI.control.status then
-            smartUI.control.status.Text = text
-            task.delay(3, function()
-                if smartUI.control and smartUI.control.status
-                    and smartUI.control.status.Text == text then
-                    smartUI.control.status.Text = "目标组: " .. getTargetCount()
-                end
-            end)
-        end
-    end
-
-    -- ========== 控制窗 ==========
-    local containerGui = Instance.new("ScreenGui")
-    containerGui.Name = "SmartBuildingUI"
-    containerGui.ResetOnSpawn = false
-    containerGui.IgnoreGuiInset = true
-    containerGui.Parent = playerGui
-    containerGui.Enabled = false
-
-    openControlWindow = function()
-        if smartUI.controlWin and smartUI.controlWin.frame and smartUI.controlWin.frame.Parent then return end
-        local sz = SZ
-        local W, H = sz.ctrlW, sz.ctrlH
-
-        local win = createWindow({
-            name = "ControlWindow", title = "🎛 智能透视", icon = "🎛",
-            width = W, height = H,
-            position = UDim2.new(1, -W - 6, 0.5, -H / 2),
-            parent = containerGui,
-        })
-        smartUI.controlWin = win
-        local content = win.content
-        local pad = sz.pad
-        local btnH = sz.btnH
-        local btnText = sz.btnText
-
-        local function makeBtn(y, text, bg)
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1, -pad * 2, 0, btnH)
-            b.Position = UDim2.new(0, pad, 0, y)
-            b.BackgroundColor3 = bg
-            b.TextColor3 = Color3.new(1, 1, 1)
-            b.Text = text
-            b.Font = Enum.Font.GothamBold
-            b.TextSize = btnText
-            b.AutoButtonColor = false
-            b.Parent = content
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 4)
-            c.Parent = b
-            return b
-        end
-
-        local y = 4
-        local gap = btnH + 3
-        local scanBtn = makeBtn(y, "🧠 智能扫描", Color3.fromRGB(70, 130, 180)); y = y + gap
-        local pickBtn = makeBtn(y, "🎯 准心添加", Color3.fromRGB(46, 139, 87)); y = y + gap
-        local clearBtn = makeBtn(y, "🗑 全部取消", Color3.fromRGB(178, 34, 34)); y = y + gap
-
-        local tLbl = Instance.new("TextLabel")
-        tLbl.Size = UDim2.new(1, -pad * 2, 0, 14)
-        tLbl.Position = UDim2.new(0, pad, 0, y + 2)
-        tLbl.BackgroundTransparency = 1
-        tLbl.Text = "透明度: " .. string.format("%.2f", CFG.transparency)
-        tLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-        tLbl.TextXAlignment = Enum.TextXAlignment.Left
-        tLbl.Font = Enum.Font.Gotham
-        tLbl.TextSize = sz.statusText
-        tLbl.Parent = content
-        y = y + 18
-
-        local tBox = Instance.new("TextBox")
-        tBox.Size = UDim2.new(1, -pad * 2, 0, 22)
-        tBox.Position = UDim2.new(0, pad, 0, y)
-        tBox.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-        tBox.TextColor3 = Color3.new(1, 1, 1)
-        tBox.Text = string.format("%.2f", CFG.transparency)
-        tBox.Font = Enum.Font.Gotham
-        tBox.TextSize = btnText
-        tBox.ClearTextOnFocus = false
-        tBox.Parent = content
-        local tbc = Instance.new("UICorner")
-        tbc.CornerRadius = UDim.new(0, 4)
-        tbc.Parent = tBox
-        y = y + 26
-
-        local halfW = math.floor((W - pad * 3) / 2)
-        local listBtn = Instance.new("TextButton")
-        listBtn.Size = UDim2.new(0, halfW, 0, 22)
-        listBtn.Position = UDim2.new(0, pad, 0, y)
-        listBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 140)
-        listBtn.TextColor3 = Color3.new(1, 1, 1)
-        listBtn.Text = "📋 名单"
-        listBtn.Font = Enum.Font.GothamBold
-        listBtn.TextSize = btnText
-        listBtn.AutoButtonColor = false
-        listBtn.Parent = content
-        local lbc = Instance.new("UICorner")
-        lbc.CornerRadius = UDim.new(0, 4)
-        lbc.Parent = listBtn
-
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.Size = UDim2.new(0, halfW, 0, 22)
-        closeBtn.Position = UDim2.new(0, pad * 2 + halfW, 0, y)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
-        closeBtn.TextColor3 = Color3.new(1, 1, 1)
-        closeBtn.Text = "🛑 关闭"
-        closeBtn.Font = Enum.Font.GothamBold
-        closeBtn.TextSize = btnText
-        closeBtn.AutoButtonColor = false
-        closeBtn.Parent = content
-        local cbc = Instance.new("UICorner")
-        cbc.CornerRadius = UDim.new(0, 4)
-        cbc.Parent = closeBtn
-
-        local status = Instance.new("TextLabel")
-        status.Size = UDim2.new(1, -pad * 2, 0, 14)
-        status.Position = UDim2.new(0, pad, 1, -18)
-        status.BackgroundTransparency = 1
-        status.Text = "就绪"
-        status.TextColor3 = Color3.fromRGB(150, 200, 255)
-        status.TextXAlignment = Enum.TextXAlignment.Left
-        status.Font = Enum.Font.Code
-        status.TextSize = sz.statusText
-        status.Parent = content
-
-        smartUI.control = { scanBtn = scanBtn, pickBtn = pickBtn, clearBtn = clearBtn,
-                            tLbl = tLbl, tBox = tBox, status = status,
-                            listBtn = listBtn, closeBtn = closeBtn }
-
-        scanBtn.MouseButton1Click:Connect(smartScan)
-        pickBtn.MouseButton1Click:Connect(function()
-            local t = getTargetInCenter()
-            if not t then showNotification("未对准目标"); return end
-            addTarget(t)
-        end)
-        clearBtn.MouseButton1Click:Connect(function()
-            restoreAll()
-            showNotification("已恢复所有对象")
-        end)
-        closeBtn.MouseButton1Click:Connect(function()
-            SB.deactivate()
-        end)
-
-        tBox.FocusLost:Connect(function()
-            local num = tonumber(tBox.Text)
-            if num then
-                CFG.transparency = math.clamp(num, 0, 1)
-                tBox.Text = string.format("%.2f", CFG.transparency)
-                tLbl.Text = "透明度: " .. tBox.Text
-                for part, _ in pairs(targetList) do
-                    setObjTransparency(part, CFG.transparency)
-                end
-            end
-        end)
-
-        listBtn.MouseButton1Click:Connect(openInfoWindow)
-        refreshListUI()
-    end
-
-    openInfoWindow = function()
-        if smartUI.infoWin and smartUI.infoWin.frame and smartUI.infoWin.frame.Parent then
-            smartUI.infoWin.frame.Visible = not smartUI.infoWin.frame.Visible
-            return
-        end
-        local sz = SZ
-        local W, H = sz.infoW, sz.infoH
-
-        local win = createWindow({
-            name = "InfoWindow", title = "📋 目标名单", icon = "📋",
-            width = W, height = H,
-            position = UDim2.new(0, 6, 0.5, -H / 2),
-            parent = containerGui,
-        })
-        smartUI.infoWin = win
-        local content = win.content
-        local pad = sz.pad
-
-        local listFrame = Instance.new("ScrollingFrame")
-        listFrame.Name = "ListFrame"
-        listFrame.Size = UDim2.new(1, -pad * 2, 1, -24)
-        listFrame.Position = UDim2.new(0, pad, 0, 4)
-        listFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
-        listFrame.BorderSizePixel = 0
-        listFrame.ScrollBarThickness = 4
-        listFrame.ScrollBarImageColor3 = Color3.fromRGB(120, 120, 180)
-        listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-        listFrame.Parent = content
-        local lfc = Instance.new("UICorner")
-        lfc.CornerRadius = UDim.new(0, 4)
-        lfc.Parent = listFrame
-
-        local layout = Instance.new("UIListLayout")
-        layout.Padding = UDim.new(0, 2)
-        layout.Parent = listFrame
-
-        local status = Instance.new("TextLabel")
-        status.Size = UDim2.new(1, -pad * 2, 0, 14)
-        status.Position = UDim2.new(0, pad, 1, -18)
-        status.BackgroundTransparency = 1
-        status.Text = "目标组: 0  对象数: 0"
-        status.TextColor3 = Color3.fromRGB(180, 180, 220)
-        status.TextXAlignment = Enum.TextXAlignment.Left
-        status.Font = Enum.Font.Code
-        status.TextSize = sz.statusText
-        status.Parent = content
-
-        smartUI.info = { listFrame = listFrame, status = status }
-        refreshListUI()
-    end
-
-    closeAllWindows = function()
-        if smartUI.controlWin and smartUI.controlWin.frame then
-            smartUI.controlWin.frame:Destroy()
-        end
-        if smartUI.infoWin and smartUI.infoWin.frame then
-            smartUI.infoWin.frame:Destroy()
-        end
-        smartUI.controlWin = nil
-        smartUI.infoWin = nil
-        smartUI.info = nil
-        smartUI.control = nil
-    end
-
-    refreshListUI = function()
-        if not smartUI.info or not smartUI.info.listFrame then return end
-        local sz = SZ
-        local listFrame = smartUI.info.listFrame
-
-        for _, c in ipairs(listFrame:GetChildren()) do
-            if c:IsA("Frame") then c:Destroy() end
-        end
-
-        local groups = {}
-        for part, _ in pairs(targetList) do
-            if part and part.Parent then
-                local root = partRootMap[part]
-                if root and root.Parent then
-                    if not groups[root] then groups[root] = {} end
-                    table.insert(groups[root], part)
-                else
-                    targetList[part] = nil
-                    partRootMap[part] = nil
-                end
-            else
-                targetList[part] = nil
-                partRootMap[part] = nil
-            end
-        end
-
-        local index = 0
-        for root, parts in pairs(groups) do
-            local rowH = sz.rowH
-            local row = Instance.new("Frame")
-            row.Size = UDim2.new(1, -4, 0, rowH)
-            row.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-            row.BackgroundTransparency = 0.3
-            row.BorderSizePixel = 0
-            row.Parent = listFrame
-            local rc = Instance.new("UICorner")
-            rc.CornerRadius = UDim.new(0, 4)
-            rc.Parent = row
-
-            local nameLabel = Instance.new("TextLabel")
-            nameLabel.Size = UDim2.new(1, -52, 1, 0)
-            nameLabel.Position = UDim2.new(0, 6, 0, 0)
-            nameLabel.BackgroundTransparency = 1
-            nameLabel.Text = root.Name .. " (" .. #parts .. ")"
-            nameLabel.TextColor3 = Color3.fromRGB(230, 230, 250)
-            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-            nameLabel.Font = Enum.Font.Gotham
-            nameLabel.TextSize = sz.statusText + 1
-            nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-            nameLabel.Parent = row
-
-            local rBtn = Instance.new("TextButton")
-            rBtn.Size = UDim2.new(0, 40, 0, rowH - 6)
-            rBtn.Position = UDim2.new(1, -44, 0, 3)
-            rBtn.BackgroundColor3 = Color3.fromRGB(178, 34, 34)
-            rBtn.TextColor3 = Color3.new(1, 1, 1)
-            rBtn.Text = "取消"
-            rBtn.Font = Enum.Font.GothamBold
-            rBtn.TextSize = sz.statusText
-            rBtn.AutoButtonColor = false
-            rBtn.Parent = row
-            local rbc = Instance.new("UICorner")
-            rbc.CornerRadius = UDim.new(0, 3)
-            rbc.Parent = rBtn
-
-            rBtn.MouseButton1Click:Connect(function() removeTarget(root) end)
-
-            index = index + 1
-            if index >= CFG.maxTargetsLabel then break end
-        end
-
-        smartUI.info.status.Text = "目标组: " .. index .. "  对象数: " .. getTargetCount()
-    end
-
-    -- ========== Picker（准心拾取 UI）==========
-    SB.closePicker = function()
-        if pickerGUI and pickerGUI.Parent then
-            pickerGUI:Destroy()
-        end
-        pickerGUI = nil
-    end
-
-    SB.openPicker = function()
+    local function openPicker()
         if pickerGUI and pickerGUI.Parent then return end
         local sg = Instance.new("ScreenGui")
         sg.Name = "SmartPickerUI"
@@ -1124,87 +547,66 @@ local SmartBuilding = (function()
         pickerGUI = sg
 
         -- 准心
-        local crosshairFrame = Instance.new("Frame")
-        crosshairFrame.Size = UDim2.new(0, 30, 0, 30)
-        crosshairFrame.Position = UDim2.new(0.5, -15, 0.5, -15)
-        crosshairFrame.BackgroundTransparency = 1
-        crosshairFrame.Parent = sg
-        for _, data in ipairs({{0, 0.5, 10, 2}, {1, 0.5, -10, 2}, {0.5, 0, 2, 10}, {0.5, 1, 2, -10}}) do
+        local cross = Instance.new("Frame")
+        cross.Size = UDim2.new(0, 30, 0, 30)
+        cross.Position = UDim2.new(0.5, -15, 0.5, -15)
+        cross.BackgroundTransparency = 1
+        cross.Parent = sg
+        for _, d in ipairs({{0, 0.5, 10, 2}, {1, 0.5, -10, 2}, {0.5, 0, 2, 10}, {0.5, 1, 2, -10}}) do
             local l = Instance.new("Frame")
-            l.Size = UDim2.new(0, data[3], 0, data[4])
-            l.Position = UDim2.new(data[1], data[1] == 0.5 and -1 or 0, data[2], data[2] == 0.5 and -1 or 0)
+            l.Size = UDim2.new(0, d[3], 0, d[4])
+            l.Position = UDim2.new(d[1], d[1] == 0.5 and -1 or 0, d[2], d[2] == 0.5 and -1 or 0)
             l.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
             l.BorderSizePixel = 0
-            l.Parent = crosshairFrame
+            l.Parent = cross
         end
 
-        -- 目标提示栏
-        local targetBar = Instance.new("Frame")
-        targetBar.Size = UDim2.new(0, 300, 0, 28)
-        targetBar.Position = UDim2.new(0.5, -150, 0.5, 25)
-        targetBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-        targetBar.BackgroundTransparency = 0.35
-        targetBar.BorderSizePixel = 0
-        targetBar.Parent = sg
-        local tbCorner = Instance.new("UICorner")
-        tbCorner.CornerRadius = UDim.new(0, 6)
-        tbCorner.Parent = targetBar
-        local targetLabel = Instance.new("TextLabel")
-        targetLabel.Size = UDim2.new(1, -10, 1, 0)
-        targetLabel.Position = UDim2.new(0, 5, 0, 0)
-        targetLabel.BackgroundTransparency = 1
-        targetLabel.Text = "瞄准中..."
-        targetLabel.TextColor3 = Color3.fromRGB(255, 255, 200)
-        targetLabel.Font = Enum.Font.Code
-        targetLabel.TextSize = 11
-        targetLabel.Parent = targetBar
+        -- 目标提示
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(0, 300, 0, 28)
+        bar.Position = UDim2.new(0.5, -150, 0.5, 25)
+        bar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        bar.BackgroundTransparency = 0.35
+        bar.BorderSizePixel = 0
+        bar.Parent = sg
+        local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 6); bc.Parent = bar
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -10, 1, 0); lbl.Position = UDim2.new(0, 5, 0, 0)
+        lbl.BackgroundTransparency = 1; lbl.Text = "瞄准中..."
+        lbl.TextColor3 = Color3.fromRGB(255, 255, 200)
+        lbl.Font = Enum.Font.Code; lbl.TextSize = 11; lbl.Parent = bar
 
-        -- 控制面板
+        -- 面板
         local PW, PH = 240, 200
         local panel = Instance.new("Frame")
         panel.Size = UDim2.new(0, PW, 0, PH)
         panel.Position = UDim2.new(1, -PW - 10, 1, -PH - 10)
         panel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
         panel.BackgroundTransparency = 0.15
-        panel.BorderSizePixel = 0
-        panel.Parent = sg
-        local pc = Instance.new("UICorner")
-        pc.CornerRadius = UDim.new(0, 10)
-        pc.Parent = panel
+        panel.BorderSizePixel = 0; panel.Parent = sg
+        local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 10); pc.Parent = panel
 
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, -20, 0, 22)
-        title.Position = UDim2.new(0, 10, 0, 6)
-        title.BackgroundTransparency = 1
-        title.Text = "🎯 添加目标"
-        title.TextColor3 = Color3.new(1, 1, 1)
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = 13
-        title.TextXAlignment = Enum.TextXAlignment.Left
-        title.Parent = panel
+        local t = Instance.new("TextLabel")
+        t.Size = UDim2.new(1, -20, 0, 22); t.Position = UDim2.new(0, 10, 0, 6)
+        t.BackgroundTransparency = 1; t.Text = "🎯 添加目标"
+        t.TextColor3 = Color3.new(1, 1, 1); t.Font = Enum.Font.GothamBold
+        t.TextSize = 13; t.TextXAlignment = Enum.TextXAlignment.Left; t.Parent = panel
 
-        local function makeBtn(text, x, y, w, h, bg)
+        local function mkBtn(text, x, y, w, h, bg)
             local b = Instance.new("TextButton")
-            b.Size = UDim2.new(0, w, 0, h)
-            b.Position = UDim2.new(0, x, 0, y)
-            b.BackgroundColor3 = bg
-            b.Text = text
-            b.TextColor3 = Color3.new(1, 1, 1)
-            b.Font = Enum.Font.GothamBold
-            b.TextSize = 11
-            b.AutoButtonColor = false
-            b.Parent = panel
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 6)
-            c.Parent = b
+            b.Size = UDim2.new(0, w, 0, h); b.Position = UDim2.new(0, x, 0, y)
+            b.BackgroundColor3 = bg; b.Text = text
+            b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.GothamBold
+            b.TextSize = 11; b.AutoButtonColor = false; b.Parent = panel
+            local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = b
             return b
         end
 
         local halfW = math.floor((PW - 30) / 2)
-        local btnAdd = makeBtn("➕ 添加目标", 10, 32, halfW, 30, Color3.fromRGB(200, 60, 60))
-        local btnRemove = makeBtn("➖ 移除目标", 20 + halfW, 32, halfW, 30, Color3.fromRGB(60, 140, 200))
-        local btnRestoreAll = makeBtn("↩️ 全部恢复", 10, 68, PW - 20, 26, Color3.fromRGB(120, 80, 40))
-        local btnClose = makeBtn("🛑 关闭拾取", 10, PH - 40, PW - 20, 30, Color3.fromRGB(180, 40, 40))
+        local btnAdd = mkBtn("➕ 添加目标", 10, 32, halfW, 30, Color3.fromRGB(200, 60, 60))
+        local btnRemove = mkBtn("➖ 移除目标", 20 + halfW, 32, halfW, 30, Color3.fromRGB(60, 140, 200))
+        local btnRestoreAll = mkBtn("↩️ 全部恢复", 10, 68, PW - 20, 26, Color3.fromRGB(120, 80, 40))
+        local btnClose = mkBtn("🛑 关闭", 10, PH - 40, PW - 20, 30, Color3.fromRGB(180, 40, 40))
 
         local currentTarget = nil
         RunService.RenderStepped:Connect(function()
@@ -1224,13 +626,13 @@ local SmartBuilding = (function()
         task.spawn(function()
             while sg.Parent do
                 if currentTarget then
-                    local t = "-"
+                    local tr = "-"
                     if currentTarget:IsA("BasePart") then
-                        t = string.format("%.2f", currentTarget.Transparency)
+                        tr = string.format("%.2f", currentTarget.Transparency)
                     end
-                    targetLabel.Text = currentTarget.Name .. " (" .. currentTarget.ClassName .. ") T=" .. t
+                    lbl.Text = currentTarget.Name .. " (" .. currentTarget.ClassName .. ") T=" .. tr
                 else
-                    targetLabel.Text = "瞄准中..."
+                    lbl.Text = "瞄准中..."
                 end
                 task.wait(0.1)
             end
@@ -1243,56 +645,41 @@ local SmartBuilding = (function()
         btnRemove.MouseButton1Click:Connect(function()
             if not currentTarget then return end
             local root = getTargetRoot(currentTarget)
-            removeTarget(root)
+            local parts = collectTargetParts(root)
+            for _, p in ipairs(parts) do
+                restoreObj(p)
+                targetList[p] = nil
+                guiStateMap[p] = nil
+                partRootMap[p] = nil
+            end
         end)
-        btnRestoreAll.MouseButton1Click:Connect(function()
-            restoreAll()
-        end)
+        btnRestoreAll.MouseButton1Click:Connect(restoreAll)
         btnClose.MouseButton1Click:Connect(function()
-            SB.closePicker()
+            closePicker()
+            SB.setActive(false)
         end)
     end
 
     -- ========== 对外 API ==========
     SB.isActive = function() return active end
+    SB.setActive = function(v) active = v end
     SB.getAlpha = function() return CFG.transparency end
-
     SB.setAlpha = function(v)
         CFG.transparency = math.clamp(v, 0, 1)
-        -- 若已有目标，同步更新
         for part, _ in pairs(targetList) do
             setObjTransparency(part, CFG.transparency)
         end
-        -- 同步控制窗里的显示
-        if smartUI.control and smartUI.control.tBox then
-            smartUI.control.tBox.Text = string.format("%.2f", CFG.transparency)
-            smartUI.control.tLbl.Text = "透明度: " .. smartUI.control.tBox.Text
-        end
     end
+    SB.smartScan = smartScan
+    SB.openPicker = openPicker
+    SB.closePicker = closePicker
+    SB.restoreAll = restoreAll
 
-    SB.activate = function()
-        if active then return end
-        active = true
-        containerGui.Enabled = true
-        createCrosshair()
-        openControlWindow()
-        openInfoWindow()
-        showNotification("智能透视已开启")
-    end
-
-    SB.deactivate = function()
-        if not active then return end
-        -- 先恢复所有透明度
+    SB.shutdown = function()
         restoreAll()
+        closePicker()
         active = false
-        containerGui.Enabled = false
-        removeCrosshair()
-        SB.closePicker()
-        closeAllWindows()
     end
-
-    SB.getSubMode = function() return SB._subMode or "smart" end
-    SB.setSubMode = function(m) SB._subMode = m end
 
     return SB
 end)()
@@ -1338,22 +725,21 @@ local createMenu
 local showInputDialog
 local showMainMenu
 
--- ==================== 辅助函数 ====================
+-- ==================== 辅助 ====================
 local function clamp(val, min, max)
     return math.max(min, math.min(max, val))
 end
 
 local function getScreenSize()
-    local screenSize = main.AbsoluteSize
-    if screenSize.X == 0 or screenSize.Y == 0 then
-        screenSize = workspace.CurrentCamera.ViewportSize
+    local s = main.AbsoluteSize
+    if s.X == 0 or s.Y == 0 then
+        s = workspace.CurrentCamera.ViewportSize
     end
-    return screenSize
+    return s
 end
 
 local function setFramePos(x, y)
-    frameX = x
-    frameY = y
+    frameX = x; frameY = y
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
@@ -1366,7 +752,7 @@ local function isPointInGui(guiObj, x, y)
        and y >= tl.Y and y <= tl.Y + sz.Y
 end
 
--- ==================== 拖拽逻辑 ====================
+-- ==================== UI 拖动 ====================
 local isDragging = false
 local dragInput = nil
 local handleTouches = {}
@@ -1420,7 +806,7 @@ UserInputService.InputEnded:Connect(function(input)
     else isDragging = false; dragInput = nil end
 end)
 
--- ==================== 辅助函数（续） ====================
+-- ==================== 文本更新 ====================
 local function updateButtonText()
     if moveMode == "角色上下" or moveMode == "屏幕上下" or moveMode == "水平上下" then
         up.Text = "上升"; down.Text = "下降"
@@ -1472,7 +858,6 @@ local function updateSpeedButtonText()
     elseif modeIndex == 2 then
         speed.Text = noclipEnabled and "开启" or "关闭"
     elseif modeIndex == 3 then
-        -- 【文本修改】显示当前透明度（贴图/建筑透明度），与智能透视同步
         speed.Text = string.format("%.2f", SmartBuilding.getAlpha())
     elseif modeIndex == 4 then
         speed.Text = string.format("%.2f", nightVisionBrightness)
@@ -1499,7 +884,7 @@ end
 -- ==================== TP Walk ====================
 local function stopTpwalking() tpwalking = false end
 
--- ==================== 飞天辅助 ====================
+-- ==================== 飞天 ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -1515,7 +900,6 @@ local function applyFly()
     if not hum then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-
     char.Animate.Disabled = true
     for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
         pcall(function() track:AdjustSpeed(0) end)
@@ -1523,7 +907,6 @@ local function applyFly()
     for _, state in ipairs(VALID_HUMANOD_STATES) do
         pcall(function() hum:SetStateEnabled(state, false) end)
     end
-
     local isFreeMode = (flyMode == "自由")
     if isFreeMode then
         hum.PlatformStand = true
@@ -1534,22 +917,17 @@ local function applyFly()
             hum.PlatformStand = true
         end)
     end
-
     local startY = hrp.Position.Y
-
     local bg = Instance.new("BodyGyro")
     bg.P = 9e4
     bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     bg.CFrame = hrp.CFrame
     bg.Parent = hrp
-
     local bv = Instance.new("BodyVelocity")
     bv.Velocity = Vector3.new(0, 0.1, 0)
     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     bv.Parent = hrp
-
     _G._flyData = { bg = bg, bv = bv, hrp = hrp, startY = startY }
-
     task.spawn(function()
         while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
             RunService.Heartbeat:Wait()
@@ -1560,7 +938,6 @@ local function applyFly()
                 local curHrp = char:FindFirstChild("HumanoidRootPart")
                 if not curHrp then break end
                 local anchorPos = curHrp.Position
-
                 if isFreeMode then
                     local camLook = camera.CFrame.LookVector
                     local camRight = camera.CFrame.RightVector
@@ -1568,14 +945,12 @@ local function applyFly()
                     local flatRight = Vector3.new(camRight.X, 0, camRight.Z)
                     if flatLook.Magnitude > 0.001 then flatLook = flatLook.Unit end
                     if flatRight.Magnitude > 0.001 then flatRight = flatRight.Unit end
-                    local forwardInput = moveDir:Dot(flatLook)
-                    local rightInput = moveDir:Dot(flatRight)
-                    local combined = camLook * forwardInput + camRight * rightInput
+                    local fi = moveDir:Dot(flatLook)
+                    local ri = moveDir:Dot(flatRight)
+                    local combined = camLook * fi + camRight * ri
                     if combined.Magnitude > 1 then combined = combined.Unit end
-
                     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                     bv.Velocity = combined * maxspeed
-
                     if flyFaceMode == "水平" then
                         local look = camera.CFrame.LookVector
                         local yaw = math.atan2(-look.X, -look.Z)
@@ -1586,13 +961,13 @@ local function applyFly()
                 else
                     if flyMode == "悬空" then
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                        local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                        bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                        local hd = Vector3.new(moveDir.X, 0, moveDir.Z)
+                        bv.Velocity = (hd.Magnitude > 0) and (hd.Unit * maxspeed) or Vector3.new(0,0,0)
                         bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
                     elseif flyMode == "绝对锁高" then
                         bv.MaxForce = Vector3.new(9e9, 0, 9e9)
-                        local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-                        bv.Velocity = (horizontalDir.Magnitude > 0) and (horizontalDir.Unit * maxspeed) or Vector3.new(0,0,0)
+                        local hd = Vector3.new(moveDir.X, 0, moveDir.Z)
+                        bv.Velocity = (hd.Magnitude > 0) and (hd.Unit * maxspeed) or Vector3.new(0,0,0)
                         bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
                         local pos = curHrp.Position
                         curHrp.CFrame = CFrame.new(pos.X, startY, pos.Z) * (curHrp.CFrame - curHrp.Position)
@@ -1624,7 +999,7 @@ local function resetHumanoidAfterFly()
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
--- ==================== 物理加速核心 ====================
+-- ==================== 物理加速 ====================
 local function stopPhysAccel()
     if accelConn then accelConn:Disconnect() accelConn = nil end
     if accelObj then pcall(function() accelObj:Destroy() end) accelObj = nil end
@@ -1751,18 +1126,14 @@ local function toggleFly(enable)
         if isFlying then return end
         forceDisableSpeedMode()
         isFlying = true
-        updateMainButtonText()
-        updateSpeedButtonText()
-        updateSpeedDisplayLoop()
+        updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
         stopTpwalking()
         tanchuangxiaoxi("已开启飞天 (" .. flyMode .. ")", "飞天")
         applyFly()
     else
         if not isFlying then return end
         isFlying = false
-        updateMainButtonText()
-        updateSpeedButtonText()
-        updateSpeedDisplayLoop()
+        updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
         stopTpwalking()
         tanchuangxiaoxi("已关闭飞天", "飞天")
         removeFly()
@@ -1785,7 +1156,6 @@ local function applySpeedMode(enable)
         originalWalkSpeed = currentWS
         lockedSpeed = currentWS
         speedModeEnabled = true
-
         if speedSubMode == "修改" then
             if speedModeConnection then speedModeConnection:Disconnect() end
             speedModeConnection = RunService.Heartbeat:Connect(function()
@@ -1801,16 +1171,12 @@ local function applySpeedMode(enable)
             local ok = startPhysAccel()
             if not ok then
                 speedModeEnabled = false
-                updateMainButtonText()
-                updateSpeedButtonText()
+                updateMainButtonText(); updateSpeedButtonText()
                 tanchuangxiaoxi("角色未就绪", "移速模式")
                 return
             end
         end
-
-        updateMainButtonText()
-        updateSpeedButtonText()
-        updateSpeedDisplayLoop()
+        updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
         tanchuangxiaoxi("已开启" .. speedSubMode, "移速模式")
     else
         if not speedModeEnabled then return end
@@ -1823,14 +1189,24 @@ local function applySpeedMode(enable)
         end
         lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
-        updateMainButtonText()
-        updateSpeedButtonText()
-        updateSpeedDisplayLoop()
+        updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
         tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
 end
 
--- ==================== 透视基础 ====================
+-- ==================== 透视（未改动） ====================
+local originalLighting = {}
+local nightVisionMaintainConnection = nil
+local atmosphereInstance = nil
+local originalAtmosphere = {}
+local lightingFrozenConnections = {}
+local nightVisionEnabled = false
+local nightVisionBrightness = 2.5
+local nightVisionSettings = {
+    shadows = false, envAo = false, fog = false,
+    atmosphere = false, ambient = true
+}
+
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -1928,6 +1304,17 @@ local function applyNightVision()
             if originalAtmosphere.Density then freezeLightingProperty(atmosphereInstance, "Density", originalAtmosphere.Density, false) end
             if originalAtmosphere.Haze then freezeLightingProperty(atmosphereInstance, "Haze", originalAtmosphere.Haze, false) end
         end
+    end
+end
+
+local function disableNightVision()
+    if nightVisionEnabled then
+        if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
+        if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() nightVisionMaintainConnection = nil end
+        restoreLighting()
+        nightVisionEnabled = false
+        tanchuangxiaoxi("已关闭透视", "透视")
+        updateMainButtonText(); updateSpeedButtonText()
     end
 end
 
@@ -2035,9 +1422,7 @@ end
 local function enableCamNoClip()
     if camNoClipEnabled then return end
     camNoClipEnabled = true
-    pcall(function()
-        player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
-    end)
+    pcall(function() player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam end)
     tanchuangxiaoxi("相机穿墙已开启", "自由相机")
 end
 
@@ -2054,8 +1439,7 @@ end
 
 local function restoreFromCamSnapshot()
     if not camSnapshot then
-        tanchuangxiaoxi("尚无快照", "自由相机")
-        return
+        tanchuangxiaoxi("尚无快照", "自由相机"); return
     end
     stopCamFreeze()
     camNoClipEnabled = false
@@ -2078,12 +1462,10 @@ end
 local function manualResnap()
     if takeCamSnapshot() then
         tanchuangxiaoxi("已重新拍摄快照", "自由相机")
-    else
-        tanchuangxiaoxi("快照失败", "自由相机")
-    end
+    else tanchuangxiaoxi("快照失败", "自由相机") end
 end
 
--- ==================== 穿墙核心 ====================
+-- ==================== 穿墙 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -2116,100 +1498,56 @@ local function disableNoclip()
     if noclipStateConnection then noclipStateConnection:Disconnect() noclipStateConnection = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     restoreNoclip()
-    updateMainButtonText()
-    updateSpeedButtonText()
-end
-
-local function disableNightVision()
-    if nightVisionEnabled then
-        if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
-        if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() nightVisionMaintainConnection = nil end
-        restoreLighting()
-        nightVisionEnabled = false
-        tanchuangxiaoxi("已关闭透视", "透视")
-        updateMainButtonText()
-        updateSpeedButtonText()
-    end
+    updateMainButtonText(); updateSpeedButtonText()
 end
 
 -- ==================== 穿墙悬浮窗 ====================
 local function createNoclipWindow()
     local sg = Instance.new("ScreenGui")
-    sg.Name = "NoclipWindow"
-    sg.Parent = playerGui
-    sg.IgnoreGuiInset = true
-    sg.ResetOnSpawn = false
-
+    sg.Name = "NoclipWindow"; sg.Parent = playerGui
+    sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
     local bg = Instance.new("Frame")
-    bg.Parent = sg
-    bg.Size = UDim2.new(0, 150, 0, 50)
+    bg.Parent = sg; bg.Size = UDim2.new(0, 150, 0, 50)
     bg.Position = UDim2.new(0.5, -75, 0.5, -25)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.Draggable = true
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 5)
-    corner.Parent = bg
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+    bg.Active = true; bg.Draggable = true
+    local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
-    title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 14)
-    title.Position = UDim2.new(0, 3, 0, 2)
-    title.BackgroundTransparency = 1
-    title.Text = "穿墙"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 10
+    title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
+    title.Position = UDim2.new(0, 3, 0, 2); title.BackgroundTransparency = 1
+    title.Text = "穿墙"; title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold; title.TextSize = 10
     title.TextXAlignment = Enum.TextXAlignment.Left
-
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 16, 0, 16)
+    closeBtn.Parent = bg; closeBtn.Size = UDim2.new(0, 16, 0, 16)
     closeBtn.Position = UDim2.new(1, -18, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 9
+    closeBtn.Text = "X"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 9
     closeBtn.AutoButtonColor = false
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 2)
-    closeCorner.Parent = closeBtn
-
-    closeBtn.MouseButton1Click:Connect(function()
-        sg:Destroy()
-        noclipWindow = nil
-    end)
-
-    local emergencyBtn = Instance.new("TextButton")
-    emergencyBtn.Parent = bg
-    emergencyBtn.Size = UDim2.new(0.8, 0, 0, 18)
-    emergencyBtn.Position = UDim2.new(0.1, 0, 0, 18)
-    emergencyBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-    emergencyBtn.Text = "应急"
-    emergencyBtn.TextColor3 = Color3.new(1, 1, 1)
-    emergencyBtn.Font = Enum.Font.GothamBold
-    emergencyBtn.TextSize = 9
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 3)
-    btnCorner.Parent = emergencyBtn
-
-    emergencyBtn.MouseButton1Click:Connect(function()
+    local c1 = Instance.new("UICorner"); c1.CornerRadius = UDim.new(0, 2); c1.Parent = closeBtn
+    closeBtn.MouseButton1Click:Connect(function() sg:Destroy(); noclipWindow = nil end)
+    local eb = Instance.new("TextButton")
+    eb.Parent = bg; eb.Size = UDim2.new(0.8, 0, 0, 18)
+    eb.Position = UDim2.new(0.1, 0, 0, 18)
+    eb.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+    eb.Text = "应急"; eb.TextColor3 = Color3.new(1, 1, 1)
+    eb.Font = Enum.Font.GothamBold; eb.TextSize = 9
+    local c2 = Instance.new("UICorner"); c2.CornerRadius = UDim.new(0, 3); c2.Parent = eb
+    eb.MouseButton1Click:Connect(function()
         local char = player.Character
         if not char then return end
         local rootPart = char:FindFirstChild("HumanoidRootPart")
         if not rootPart then return end
         if not isFlying then toggleFly(true) end
         local startTime = tick()
-        local connection
-        connection = RunService.Heartbeat:Connect(function()
-            if tick() - startTime >= 5 then connection:Disconnect() return end
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if tick() - startTime >= 5 then conn:Disconnect() return end
             if rootPart and rootPart.Parent then
                 rootPart.CFrame = rootPart.CFrame + Vector3.new(0, moveStep, 0)
-            else connection:Disconnect() end
+            else conn:Disconnect() end
         end)
         task.delay(5, function()
             if noclipEnabled then disableNoclip() end
@@ -2222,103 +1560,63 @@ end
 -- ==================== 透视悬浮窗 ====================
 local function createNightVisionWindow()
     local sg = Instance.new("ScreenGui")
-    sg.Name = "NightVisionWindow"
-    sg.Parent = playerGui
-    sg.IgnoreGuiInset = true
-    sg.ResetOnSpawn = false
-
+    sg.Name = "NightVisionWindow"; sg.Parent = playerGui
+    sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
     local bg = Instance.new("Frame")
-    bg.Parent = sg
-    bg.Size = UDim2.new(0, 190, 0, 110)
+    bg.Parent = sg; bg.Size = UDim2.new(0, 190, 0, 110)
     bg.Position = UDim2.new(0.5, -95, 0.5, -55)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.Draggable = true
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 5)
-    corner.Parent = bg
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+    bg.Active = true; bg.Draggable = true
+    local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
-    title.Parent = bg
-    title.Size = UDim2.new(1, -25, 0, 14)
-    title.Position = UDim2.new(0, 3, 0, 2)
-    title.BackgroundTransparency = 1
-    title.Text = "透视"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 10
+    title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
+    title.Position = UDim2.new(0, 3, 0, 2); title.BackgroundTransparency = 1
+    title.Text = "透视"; title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold; title.TextSize = 10
     title.TextXAlignment = Enum.TextXAlignment.Left
-
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Parent = bg
-    closeBtn.Size = UDim2.new(0, 16, 0, 16)
+    closeBtn.Parent = bg; closeBtn.Size = UDim2.new(0, 16, 0, 16)
     closeBtn.Position = UDim2.new(1, -18, 0, 1)
     closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "X"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 9
+    closeBtn.Text = "X"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 9
     closeBtn.AutoButtonColor = false
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 2)
-    closeCorner.Parent = closeBtn
-    closeBtn.MouseButton1Click:Connect(function()
-        sg:Destroy()
-        nightVisionWindow = nil
-    end)
+    local c1 = Instance.new("UICorner"); c1.CornerRadius = UDim.new(0, 2); c1.Parent = closeBtn
+    closeBtn.MouseButton1Click:Connect(function() sg:Destroy(); nightVisionWindow = nil end)
 
     local valueLabel = Instance.new("TextLabel")
-    valueLabel.Parent = bg
-    valueLabel.Size = UDim2.new(1, -10, 0, 12)
-    valueLabel.Position = UDim2.new(0, 5, 0, 14)
-    valueLabel.BackgroundTransparency = 1
+    valueLabel.Parent = bg; valueLabel.Size = UDim2.new(1, -10, 0, 12)
+    valueLabel.Position = UDim2.new(0, 5, 0, 14); valueLabel.BackgroundTransparency = 1
     valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
     valueLabel.TextColor3 = Color3.new(1, 1, 1)
-    valueLabel.Font = Enum.Font.Gotham
-    valueLabel.TextSize = 8
+    valueLabel.Font = Enum.Font.Gotham; valueLabel.TextSize = 8
     valueLabel.TextXAlignment = Enum.TextXAlignment.Left
 
     local sliderBg = Instance.new("Frame")
-    sliderBg.Parent = bg
-    sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
+    sliderBg.Parent = bg; sliderBg.Size = UDim2.new(0.8, 0, 0, 3)
     sliderBg.Position = UDim2.new(0.1, 0, 0, 30)
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    local sliderCorner = Instance.new("UICorner")
-    sliderCorner.CornerRadius = UDim.new(0, 1)
-    sliderCorner.Parent = sliderBg
+    local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0, 1); sc.Parent = sliderBg
 
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 12, 0, 12)
-    local minBright = 0.01
-    local maxBright = 100
+    local minBright, maxBright = 0.01, 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -6, 0, -4.5)
-    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    knob.Text = ""
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200); knob.Text = ""
     knob.Parent = sliderBg
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob
+    local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = knob
 
     local windowButtons = {}
-
     local function createToggleBtn(name, key, xPos, yPos)
         local btn = Instance.new("TextButton")
-        btn.Parent = bg
-        btn.Size = UDim2.new(0, 55, 0, 18)
+        btn.Parent = bg; btn.Size = UDim2.new(0, 55, 0, 18)
         btn.Position = UDim2.new(0, xPos, 0, yPos)
         btn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        btn.Text = name .. " 关"
-        btn.TextColor3 = Color3.new(1, 1, 1)
-        btn.Font = Enum.Font.Gotham
-        btn.TextSize = 9
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(0, 3)
-        btnCorner.Parent = btn
-
+        btn.Text = name .. " 关"; btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.Font = Enum.Font.Gotham; btn.TextSize = 9
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 3); c.Parent = btn
         local function updateBtnUI()
             local isOn = nightVisionSettings[key]
             btn.BackgroundColor3 = isOn and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
@@ -2333,7 +1631,6 @@ local function createNightVisionWindow()
         table.insert(windowButtons, { updateUI = updateBtnUI })
         return btn
     end
-
     createToggleBtn("阴影", "shadows", 8, 48)
     createToggleBtn("遮蔽", "envAo", 68, 48)
     createToggleBtn("迷雾", "fog", 128, 48)
@@ -2341,18 +1638,12 @@ local function createNightVisionWindow()
     createToggleBtn("亮光", "ambient", 68, 72)
 
     local resetBtn = Instance.new("TextButton")
-    resetBtn.Parent = bg
-    resetBtn.Size = UDim2.new(0, 55, 0, 18)
+    resetBtn.Parent = bg; resetBtn.Size = UDim2.new(0, 55, 0, 18)
     resetBtn.Position = UDim2.new(0, 128, 0, 72)
     resetBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-    resetBtn.Text = "重置"
-    resetBtn.TextColor3 = Color3.new(1, 1, 1)
-    resetBtn.Font = Enum.Font.Gotham
-    resetBtn.TextSize = 9
-    local resetCorner = Instance.new("UICorner")
-    resetCorner.CornerRadius = UDim.new(0, 3)
-    resetCorner.Parent = resetBtn
-
+    resetBtn.Text = "重置"; resetBtn.TextColor3 = Color3.new(1, 1, 1)
+    resetBtn.Font = Enum.Font.Gotham; resetBtn.TextSize = 9
+    local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 3); rc.Parent = resetBtn
     resetBtn.MouseButton1Click:Connect(function()
         restoreLighting()
         nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true }
@@ -2364,30 +1655,27 @@ local function createNightVisionWindow()
     local dragging = false
     knob.MouseButton1Down:Connect(function() dragging = true end)
     local inputEndConn = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
-
     local conn
     conn = RunService.RenderStepped:Connect(function()
         if dragging then
-            local mousePos = UserInputService:GetMouseLocation()
-            local absPos = sliderBg.AbsolutePosition
-            local absSize = sliderBg.AbsoluteSize.X
-            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
-            local currentPercent = relX / absSize
-            local newBrightness = minBright + currentPercent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100) / 100
-            nightVisionBrightness = newBrightness
+            local mp = UserInputService:GetMouseLocation()
+            local ap = sliderBg.AbsolutePosition
+            local as = sliderBg.AbsoluteSize.X
+            local relX = clamp(mp.X - ap.X, 0, as)
+            local cp = relX / as
+            local nb = minBright + cp * (maxBright - minBright)
+            nb = math.floor(nb * 100) / 100
+            nightVisionBrightness = nb
             if nightVisionEnabled then applyNightVision() end
         end
-        local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-        knob.Position = UDim2.new(syncPercent, -6, 0, -4.5)
+        local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
+        knob.Position = UDim2.new(sp, -6, 0, -4.5)
         valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
         if modeIndex == 4 then updateSpeedButtonText() end
     end)
-
     sg.Destroying:Connect(function()
         if conn then conn:Disconnect() end
         if inputEndConn then inputEndConn:Disconnect() end
@@ -2406,10 +1694,10 @@ local function enableNoclip()
         if noclipStateConnection then noclipStateConnection:Disconnect() end
         noclipStateConnection = hum.StateChanged:Connect(function(oldState, newState)
             if not noclipEnabled then return end
-            if newState == Enum.HumanoidStateType.Jumping or
-               newState == Enum.HumanoidStateType.Freefall or
-               newState == Enum.HumanoidStateType.FallingDown or
-               newState == Enum.HumanoidStateType.Landed then
+            if newState == Enum.HumanoidStateType.Jumping
+            or newState == Enum.HumanoidStateType.Freefall
+            or newState == Enum.HumanoidStateType.FallingDown
+            or newState == Enum.HumanoidStateType.Landed then
                 applyNoclip()
             end
         end)
@@ -2420,8 +1708,7 @@ local function enableNoclip()
     end)
     if noclipWindow then noclipWindow:Destroy() end
     noclipWindow = createNoclipWindow()
-    updateMainButtonText()
-    updateSpeedButtonText()
+    updateMainButtonText(); updateSpeedButtonText()
 end
 
 local function enableNightVision()
@@ -2436,8 +1723,7 @@ local function enableNightVision()
     tanchuangxiaoxi("已开启透视", "透视")
     if nightVisionWindow then nightVisionWindow:Destroy() end
     nightVisionWindow = createNightVisionWindow()
-    updateMainButtonText()
-    updateSpeedButtonText()
+    updateMainButtonText(); updateSpeedButtonText()
 end
 
 -- ==================== 死亡与重生 ====================
@@ -2451,7 +1737,10 @@ local function disableAffectedFeatures()
     if isFlying then toggleFly(false) end
     if speedModeEnabled then applySpeedMode(false) end
     if noclipEnabled then disableNoclip() end
-    if SmartBuilding.isActive() then SmartBuilding.deactivate() end
+    if SmartBuilding.isActive() then
+        SmartBuilding.shutdown()
+        updateMainButtonText()
+    end
 end
 
 local function restoreFeatureStates()
@@ -2465,20 +1754,13 @@ end
 local function onCharacterAdded(char)
     task.wait(0.7)
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
-
     if deathMode == 2 then restoreFeatureStates()
     elseif deathMode == 3 then disableAffectedFeatures()
     elseif deathMode == 4 then disableAffectedFeatures() restoreFeatureStates() end
-
     if nightVisionEnabled then enableNightVision() end
     stopTpwalking()
-    updateSpeedButtonText()
-    updateMainButtonText()
-    updateSpeedDisplayLoop()
-
-    task.wait(0.2)
-    applyCameraOffset()
-
+    updateSpeedButtonText(); updateMainButtonText(); updateSpeedDisplayLoop()
+    task.wait(0.2); applyCameraOffset()
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.Died:Connect(function()
@@ -2524,89 +1806,64 @@ local function processReady()
             TweenService:Create(n.title, fadeOut, {TextTransparency = 1}):Play()
             TweenService:Create(n.line, fadeOut, {BackgroundTransparency = 1}):Play()
             TweenService:Create(n.msg, fadeOut, {TextTransparency = 1}):Play()
-            t1:Play()
-            t1.Completed:Wait()
-            remove(f)
-            sg:Destroy()
+            t1:Play(); t1.Completed:Wait()
+            remove(f); sg:Destroy()
         end
     end
     reposition()
 end
 
 function tanchuangxiaoxi(msg, title)
-    title = title or "弹窗消息"
-    msg = msg or "空消息"
+    title = title or "弹窗消息"; msg = msg or "空消息"
     msg = tostring(msg); title = tostring(title)
-    local padding = 2
-    local lineHeight = 2
-    local titleFont = Enum.Font.GothamBold
-    local msgFont = Enum.Font.Gotham
-    local titleSize = 14
-    local msgSize = 12
-    local titleSizeVec = TextService:GetTextSize(title, titleSize, titleFont, Vector2.new(1000, 1000))
-    local msgSizeVec = TextService:GetTextSize(msg, msgSize, msgFont, Vector2.new(1000, 1000))
-    local contentWidth = math.max(titleSizeVec.X, msgSizeVec.X)
-    local frameWidth = contentWidth + 2 * padding
-    local frameHeight = padding + titleSizeVec.Y + lineHeight + msgSizeVec.Y + padding
+    local padding, lineHeight = 2, 2
+    local titleFont, msgFont = Enum.Font.GothamBold, Enum.Font.Gotham
+    local titleSize, msgSize = 14, 12
+    local tSV = TextService:GetTextSize(title, titleSize, titleFont, Vector2.new(1000, 1000))
+    local mSV = TextService:GetTextSize(msg, msgSize, msgFont, Vector2.new(1000, 1000))
+    local cw = math.max(tSV.X, mSV.X)
+    local fw = cw + 2 * padding
+    local fh = padding + tSV.Y + lineHeight + mSV.Y + padding
 
     local sg = Instance.new("ScreenGui")
-    sg.Parent = playerGui
-    sg.IgnoreGuiInset = true
-    sg.ResetOnSpawn = false
-
+    sg.Parent = playerGui; sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
     local f = Instance.new("Frame")
     f.Parent = sg
-    f.Size = UDim2.new(0, frameWidth, 0, frameHeight)
-    f.Position = UDim2.new(1, -frameWidth - 10, 0, -frameHeight)
+    f.Size = UDim2.new(0, fw, 0, fh)
+    f.Position = UDim2.new(1, -fw - 10, 0, -fh)
     f.BackgroundColor3 = Color3.fromRGB(30,30,30)
     f.BackgroundTransparency = popupTransparency
-    f.BorderSizePixel = 0
-    f.ClipsDescendants = true
-
-    local corner = Instance.new("UICorner")
-    corner.Parent = f
-    corner.CornerRadius = UDim.new(0, 6)
-
+    f.BorderSizePixel = 0; f.ClipsDescendants = true
+    local corner = Instance.new("UICorner"); corner.Parent = f; corner.CornerRadius = UDim.new(0, 6)
     local titleL = Instance.new("TextLabel")
     titleL.Parent = f
-    titleL.Size = UDim2.new(0, contentWidth, 0, titleSizeVec.Y)
+    titleL.Size = UDim2.new(0, cw, 0, tSV.Y)
     titleL.Position = UDim2.new(0, padding, 0, padding)
-    titleL.BackgroundTransparency = 1
-    titleL.Text = title
-    titleL.TextColor3 = Color3.new(1, 1, 1)
-    titleL.Font = titleFont
+    titleL.BackgroundTransparency = 1; titleL.Text = title
+    titleL.TextColor3 = Color3.new(1, 1, 1); titleL.Font = titleFont
     titleL.TextSize = titleSize
     titleL.TextXAlignment = Enum.TextXAlignment.Center
     titleL.TextYAlignment = Enum.TextYAlignment.Center
-
     local line = Instance.new("Frame")
     line.Parent = f
-    line.Size = UDim2.new(0, contentWidth, 0, lineHeight)
-    line.Position = UDim2.new(0, padding, 0, padding + titleSizeVec.Y)
+    line.Size = UDim2.new(0, cw, 0, lineHeight)
+    line.Position = UDim2.new(0, padding, 0, padding + tSV.Y)
     line.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    line.BackgroundTransparency = 0.3
-    line.BorderSizePixel = 0
-
+    line.BackgroundTransparency = 0.3; line.BorderSizePixel = 0
     local msgL = Instance.new("TextLabel")
     msgL.Parent = f
-    msgL.Size = UDim2.new(0, contentWidth, 0, msgSizeVec.Y)
-    msgL.Position = UDim2.new(0, padding, 0, padding + titleSizeVec.Y + lineHeight)
-    msgL.BackgroundTransparency = 1
-    msgL.Text = msg
-    msgL.TextColor3 = Color3.fromRGB(220, 220, 220)
-    msgL.Font = msgFont
+    msgL.Size = UDim2.new(0, cw, 0, mSV.Y)
+    msgL.Position = UDim2.new(0, padding, 0, padding + tSV.Y + lineHeight)
+    msgL.BackgroundTransparency = 1; msgL.Text = msg
+    msgL.TextColor3 = Color3.fromRGB(220, 220, 220); msgL.Font = msgFont
     msgL.TextSize = msgSize
     msgL.TextXAlignment = Enum.TextXAlignment.Center
     msgL.TextYAlignment = Enum.TextYAlignment.Top
-
-    local notif = { frame = f, sg = sg, title = titleL, line = line, msg = msgL, height = frameHeight }
-    table.insert(notifs, 1, notif)
-    reposition()
-
+    local notif = { frame = f, sg = sg, title = titleL, line = line, msg = msgL, height = fh }
+    table.insert(notifs, 1, notif); reposition()
     task.delay(3, function()
         if notif.frame and notif.frame.Parent then
-            table.insert(readyQueue, notif)
-            processReady()
+            table.insert(readyQueue, notif); processReady()
         end
     end)
 end
@@ -2616,36 +1873,22 @@ function showInputDialog(title, defaultText, callback, extraButton)
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
     local dialogHeight = 180
-
     local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
-
+    dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
     bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0; bg.Active = true
+    local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Parent = bg
     titleLabel.Size = UDim2.new(1, -20, 0, 30)
     titleLabel.Position = UDim2.new(0, 10, 0, 10)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = title
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 16
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+    titleLabel.BackgroundTransparency = 1; titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 16; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
     local textBox = Instance.new("TextBox")
     textBox.Parent = bg
     textBox.Size = UDim2.new(1, -40, 0, 40)
@@ -2653,77 +1896,59 @@ function showInputDialog(title, defaultText, callback, extraButton)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
     textBox.PlaceholderText = "请输入数字"
-    textBox.Text = defaultText
-    textBox.Font = Enum.Font.Gotham
-    textBox.TextSize = 14
-    textBox.ClearTextOnFocus = false
-
+    textBox.Text = defaultText; textBox.Font = Enum.Font.Gotham
+    textBox.TextSize = 14; textBox.ClearTextOnFocus = false
     local buttonFrame = Instance.new("Frame")
     buttonFrame.Parent = bg
     buttonFrame.Size = UDim2.new(1, -20, 0, 40)
     buttonFrame.Position = UDim2.new(0, 10, 1, -50)
     buttonFrame.BackgroundTransparency = 1
-
     local buttons = {}
     if extraButton then
-        local btnWidth = (dialogWidth - 20 - 10) / 3
+        local bw = (dialogWidth - 20 - 10) / 3
         local cancel = Instance.new("TextButton")
         cancel.Parent = buttonFrame
-        cancel.Size = UDim2.new(0, btnWidth, 1, 0)
-        cancel.Position = UDim2.new(0, 0, 0, 0)
+        cancel.Size = UDim2.new(0, bw, 1, 0); cancel.Position = UDim2.new(0, 0, 0, 0)
         cancel.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
         cancel.Text = "取消"; cancel.TextColor3 = Color3.new(1, 1, 1)
         cancel.Font = Enum.Font.GothamBold; cancel.TextSize = 14
         table.insert(buttons, cancel)
-
         local extra = Instance.new("TextButton")
         extra.Parent = buttonFrame
-        extra.Size = UDim2.new(0, btnWidth, 1, 0)
-        extra.Position = UDim2.new(0, btnWidth + 5, 0, 0)
+        extra.Size = UDim2.new(0, bw, 1, 0); extra.Position = UDim2.new(0, bw + 5, 0, 0)
         extra.BackgroundColor3 = Color3.fromRGB(80, 80, 200)
-        extra.Text = extraButton.text
-        extra.TextColor3 = Color3.new(1, 1, 1)
-        extra.Font = Enum.Font.GothamBold
-        extra.TextSize = 14
+        extra.Text = extraButton.text; extra.TextColor3 = Color3.new(1, 1, 1)
+        extra.Font = Enum.Font.GothamBold; extra.TextSize = 14
         extra.TextScaled = true
         table.insert(buttons, extra)
-
         local confirm = Instance.new("TextButton")
         confirm.Parent = buttonFrame
-        confirm.Size = UDim2.new(0, btnWidth, 1, 0)
-        confirm.Position = UDim2.new(0, 2*(btnWidth + 5), 0, 0)
+        confirm.Size = UDim2.new(0, bw, 1, 0); confirm.Position = UDim2.new(0, 2*(bw + 5), 0, 0)
         confirm.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
         confirm.Text = "确认"; confirm.TextColor3 = Color3.new(1, 1, 1)
         confirm.Font = Enum.Font.GothamBold; confirm.TextSize = 14
         table.insert(buttons, confirm)
-
         extra.MouseButton1Click:Connect(function() extraButton.callback(extra) end)
     else
         local cancel = Instance.new("TextButton")
         cancel.Parent = buttonFrame
-        cancel.Size = UDim2.new(0.5, -5, 1, 0)
-        cancel.Position = UDim2.new(0, 0, 0, 0)
+        cancel.Size = UDim2.new(0.5, -5, 1, 0); cancel.Position = UDim2.new(0, 0, 0, 0)
         cancel.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
         cancel.Text = "取消"; cancel.TextColor3 = Color3.new(1, 1, 1)
         cancel.Font = Enum.Font.GothamBold; cancel.TextSize = 14
         table.insert(buttons, cancel)
-
         local confirm = Instance.new("TextButton")
         confirm.Parent = buttonFrame
-        confirm.Size = UDim2.new(0.5, -5, 1, 0)
-        confirm.Position = UDim2.new(0.5, 5, 0, 0)
+        confirm.Size = UDim2.new(0.5, -5, 1, 0); confirm.Position = UDim2.new(0.5, 5, 0, 0)
         confirm.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
         confirm.Text = "确认"; confirm.TextColor3 = Color3.new(1, 1, 1)
         confirm.Font = Enum.Font.GothamBold; confirm.TextSize = 14
         table.insert(buttons, confirm)
     end
-
     local function close() dialog:Destroy() end
-
     for _, btn in ipairs(buttons) do
         if btn.Text == "取消" then btn.MouseButton1Click:Connect(close) end
     end
-
     for _, btn in ipairs(buttons) do
         if btn.Text == "确认" then
             btn.MouseButton1Click:Connect(function()
@@ -2746,145 +1971,88 @@ function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
     local dialogHeight = 260
-
     local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
-
+    dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
     bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0; bg.Active = true
+    local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
     local titleLabel = Instance.new("TextLabel")
-    titleLabel.Parent = bg
-    titleLabel.Size = UDim2.new(1, -20, 0, 26)
-    titleLabel.Position = UDim2.new(0, 10, 0, 8)
-    titleLabel.BackgroundTransparency = 1
+    titleLabel.Parent = bg; titleLabel.Size = UDim2.new(1, -20, 0, 26)
+    titleLabel.Position = UDim2.new(0, 10, 0, 8); titleLabel.BackgroundTransparency = 1
     titleLabel.Text = "📷 相机偏移 (X / Y / Z)"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 15
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+    titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 15; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
     local hint = Instance.new("TextLabel")
-    hint.Parent = bg
-    hint.Size = UDim2.new(1, -20, 0, 16)
-    hint.Position = UDim2.new(0, 10, 0, 34)
-    hint.BackgroundTransparency = 1
+    hint.Parent = bg; hint.Size = UDim2.new(1, -20, 0, 16)
+    hint.Position = UDim2.new(0, 10, 0, 34); hint.BackgroundTransparency = 1
     hint.Text = "0 = 默认，正数往右/上/前"
-    hint.TextColor3 = Color3.fromRGB(180, 180, 220)
-    hint.Font = Enum.Font.Gotham
-    hint.TextSize = 10
-    hint.TextXAlignment = Enum.TextXAlignment.Center
-
+    hint.TextColor3 = Color3.fromRGB(180, 180, 220); hint.Font = Enum.Font.Gotham
+    hint.TextSize = 10; hint.TextXAlignment = Enum.TextXAlignment.Center
     local function makeInputBox(labelText, defaultVal, xPos)
         local lbl = Instance.new("TextLabel")
-        lbl.Parent = bg
-        lbl.Size = UDim2.new(0, 30, 0, 20)
-        lbl.Position = UDim2.new(0, xPos, 0, 60)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = labelText
-        lbl.TextColor3 = Color3.fromRGB(200, 220, 255)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 13
+        lbl.Parent = bg; lbl.Size = UDim2.new(0, 30, 0, 20)
+        lbl.Position = UDim2.new(0, xPos, 0, 60); lbl.BackgroundTransparency = 1
+        lbl.Text = labelText; lbl.TextColor3 = Color3.fromRGB(200, 220, 255)
+        lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 13
         lbl.TextXAlignment = Enum.TextXAlignment.Left
-
         local box = Instance.new("TextBox")
-        box.Parent = bg
-        box.Size = UDim2.new(0, 80, 0, 32)
+        box.Parent = bg; box.Size = UDim2.new(0, 80, 0, 32)
         box.Position = UDim2.new(0, xPos + 22, 0, 56)
         box.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        box.TextColor3 = Color3.new(1, 1, 1)
-        box.Text = defaultVal
-        box.Font = Enum.Font.Gotham
-        box.TextSize = 13
-        box.ClearTextOnFocus = false
-        box.PlaceholderText = "0"
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 4)
-        c.Parent = box
+        box.TextColor3 = Color3.new(1, 1, 1); box.Text = defaultVal
+        box.Font = Enum.Font.Gotham; box.TextSize = 13
+        box.ClearTextOnFocus = false; box.PlaceholderText = "0"
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 4); c.Parent = box
         return box
     end
-
     local boxX = makeInputBox("X:", string.format("%.2f", camOffsetX), 20)
     local boxY = makeInputBox("Y:", string.format("%.2f", camOffsetY), 130)
     local boxZ = makeInputBox("Z:", string.format("%.2f", camOffsetZ), 240)
-
     local baselineLabel = Instance.new("TextLabel")
-    baselineLabel.Parent = bg
-    baselineLabel.Size = UDim2.new(1, -20, 0, 16)
-    baselineLabel.Position = UDim2.new(0, 10, 0, 96)
-    baselineLabel.BackgroundTransparency = 1
+    baselineLabel.Parent = bg; baselineLabel.Size = UDim2.new(1, -20, 0, 16)
+    baselineLabel.Position = UDim2.new(0, 10, 0, 96); baselineLabel.BackgroundTransparency = 1
     baselineLabel.Text = "已记录: (" ..
         string.format("%.2f", camOffsetBaseline.x) .. ", " ..
         string.format("%.2f", camOffsetBaseline.y) .. ", " ..
         string.format("%.2f", camOffsetBaseline.z) .. ")"
     baselineLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
-    baselineLabel.Font = Enum.Font.Gotham
-    baselineLabel.TextSize = 11
+    baselineLabel.Font = Enum.Font.Gotham; baselineLabel.TextSize = 11
     baselineLabel.TextXAlignment = Enum.TextXAlignment.Center
-
     local buttonFrame = Instance.new("Frame")
-    buttonFrame.Parent = bg
-    buttonFrame.Size = UDim2.new(1, -20, 0, 40)
-    buttonFrame.Position = UDim2.new(0, 10, 0, 120)
-    buttonFrame.BackgroundTransparency = 1
-
+    buttonFrame.Parent = bg; buttonFrame.Size = UDim2.new(1, -20, 0, 40)
+    buttonFrame.Position = UDim2.new(0, 10, 0, 120); buttonFrame.BackgroundTransparency = 1
     local function makeBtn4(text, idx, bgColor)
         local b = Instance.new("TextButton")
-        b.Parent = buttonFrame
-        b.Size = UDim2.new(0.25, -4, 1, 0)
+        b.Parent = buttonFrame; b.Size = UDim2.new(0.25, -4, 1, 0)
         b.Position = UDim2.new(0.25 * (idx - 1) + 0.01, 0, 0, 0)
-        b.BackgroundColor3 = bgColor
-        b.Text = text
-        b.TextColor3 = Color3.new(1, 1, 1)
-        b.Font = Enum.Font.GothamBold
-        b.TextSize = 11
-        b.AutoButtonColor = false
-        b.TextScaled = true
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 6)
-        c.Parent = b
+        b.BackgroundColor3 = bgColor; b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.GothamBold
+        b.TextSize = 11; b.AutoButtonColor = false; b.TextScaled = true
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = b
         return b
     end
-
-    local btnCancel  = makeBtn4("取消", 1, Color3.fromRGB(150, 0, 0))
-    local btnReset   = makeBtn4("🔄 重置", 2, Color3.fromRGB(200, 130, 0))
-    local btnRecord  = makeBtn4("📌 记录", 3, Color3.fromRGB(80, 120, 200))
+    local btnCancel = makeBtn4("取消", 1, Color3.fromRGB(150, 0, 0))
+    local btnReset = makeBtn4("🔄 重置", 2, Color3.fromRGB(200, 130, 0))
+    local btnRecord = makeBtn4("📌 记录", 3, Color3.fromRGB(80, 120, 200))
     local btnConfirm = makeBtn4("确认", 4, Color3.fromRGB(0, 150, 0))
-
     local btnRestore = Instance.new("TextButton")
-    btnRestore.Parent = bg
-    btnRestore.Size = UDim2.new(1, -20, 0, 32)
+    btnRestore.Parent = bg; btnRestore.Size = UDim2.new(1, -20, 0, 32)
     btnRestore.Position = UDim2.new(0, 10, 0, 168)
     btnRestore.BackgroundColor3 = Color3.fromRGB(80, 80, 160)
     btnRestore.Text = "↩️ 还原到已记录的值"
     btnRestore.TextColor3 = Color3.new(1, 1, 1)
-    btnRestore.Font = Enum.Font.GothamBold
-    btnRestore.TextSize = 13
+    btnRestore.Font = Enum.Font.GothamBold; btnRestore.TextSize = 13
     btnRestore.AutoButtonColor = false
-    local rc = Instance.new("UICorner")
-    rc.CornerRadius = UDim.new(0, 6)
-    rc.Parent = btnRestore
-
+    local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 6); rc.Parent = btnRestore
     local function close() dialog:Destroy() end
-
     btnCancel.MouseButton1Click:Connect(close)
-
     btnReset.MouseButton1Click:Connect(function()
         boxX.Text = "0.00"; boxY.Text = "0.00"; boxZ.Text = "0.00"
     end)
-
     btnRecord.MouseButton1Click:Connect(function()
         local nx = tonumber(boxX.Text) or 0
         local ny = tonumber(boxY.Text) or 0
@@ -2896,7 +2064,6 @@ function showCamOffsetDialog()
             string.format("%.2f", nz) .. ")"
         tanchuangxiaoxi("已记录", "相机偏移")
     end)
-
     btnConfirm.MouseButton1Click:Connect(function()
         camOffsetX = tonumber(boxX.Text) or 0
         camOffsetY = tonumber(boxY.Text) or 0
@@ -2905,7 +2072,6 @@ function showCamOffsetDialog()
         tanchuangxiaoxi("已应用", "相机偏移")
         close()
     end)
-
     btnRestore.MouseButton1Click:Connect(function()
         boxX.Text = string.format("%.2f", camOffsetBaseline.x)
         boxY.Text = string.format("%.2f", camOffsetBaseline.y)
@@ -2923,11 +2089,8 @@ end
 function createMenu(title, buttons, parentMenu)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
-    local btnHeight = 40
-    local spacing = 5
-    local padding = 10
-    local titleHeight = 40
-    local closeBtnHeight = 40
+    local btnHeight = 40; local spacing = 5; local padding = 10
+    local titleHeight = 40; local closeBtnHeight = 40
     local contentHeight = #buttons * btnHeight + (#buttons - 1) * spacing
     local totalContentHeight = contentHeight
     local totalHeight = padding + titleHeight + totalContentHeight + padding + closeBtnHeight + padding
@@ -2935,56 +2098,39 @@ function createMenu(title, buttons, parentMenu)
     local needsScrolling = totalHeight > maxHeight
     if needsScrolling then
         totalHeight = maxHeight
-        local scrollableHeight = totalHeight - padding - titleHeight - padding - closeBtnHeight - padding
-        contentHeight = math.min(contentHeight, scrollableHeight)
+        local sh = totalHeight - padding - titleHeight - padding - closeBtnHeight - padding
+        contentHeight = math.min(contentHeight, sh)
     end
-
     local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
-
+    dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, menuWidth, 0, totalHeight)
     bg.Position = UDim2.new(0.5, -menuWidth/2, 0.5, -totalHeight/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.ClipsDescendants = true
-
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+    bg.Active = true; bg.ClipsDescendants = true
+    local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Parent = bg
     titleLabel.Size = UDim2.new(1, -20, 0, 30)
     titleLabel.Position = UDim2.new(0, 10, 0, 5)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = title
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 18
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+    titleLabel.BackgroundTransparency = 1; titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 18; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
     local scrollingFrame = Instance.new("ScrollingFrame")
     scrollingFrame.Parent = bg
     scrollingFrame.Size = UDim2.new(1, -20, 0, contentHeight)
     scrollingFrame.Position = UDim2.new(0, 10, 0, 40)
     scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, totalContentHeight)
     scrollingFrame.ScrollBarThickness = 8
-    scrollingFrame.BackgroundTransparency = 1
-    scrollingFrame.BorderSizePixel = 0
+    scrollingFrame.BackgroundTransparency = 1; scrollingFrame.BorderSizePixel = 0
     scrollingFrame.ScrollingEnabled = needsScrolling
     scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
-
     local buttonContainer = Instance.new("Frame")
     buttonContainer.Parent = scrollingFrame
     buttonContainer.Size = UDim2.new(1, 0, 0, totalContentHeight)
     buttonContainer.BackgroundTransparency = 1
-
     local yPos = 0
     for _, btn in ipairs(buttons) do
         local button = Instance.new("TextButton")
@@ -2992,34 +2138,24 @@ function createMenu(title, buttons, parentMenu)
         button.Size = UDim2.new(1, -10, 0, btnHeight)
         button.Position = UDim2.new(0, 0, 0, yPos)
         button.BackgroundColor3 = btn.bgColor or Color3.fromRGB(50, 50, 50)
-        button.Text = btn.text
-        button.TextColor3 = Color3.new(1, 1, 1)
-        button.Font = Enum.Font.Gotham
-        button.TextSize = 14
-        button.TextWrapped = true
-        button.AutoButtonColor = true
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.Parent = button
-        btnCorner.CornerRadius = UDim.new(0, 4)
+        button.Text = btn.text; button.TextColor3 = Color3.new(1, 1, 1)
+        button.Font = Enum.Font.Gotham; button.TextSize = 14
+        button.TextWrapped = true; button.AutoButtonColor = true
+        local bc = Instance.new("UICorner"); bc.Parent = button; bc.CornerRadius = UDim.new(0, 4)
         button.MouseButton1Click:Connect(function()
             if btn.callback then btn.callback(dialog) end
         end)
         yPos = yPos + btnHeight + spacing
     end
-
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(1, -20, 0, 35)
     closeBtn.Position = UDim2.new(0, 10, 1, -45)
     closeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     closeBtn.Text = parentMenu and "返回上级" or "关闭"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.Gotham
-    closeBtn.TextSize = 14
-    closeBtn.AutoButtonColor = true
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.Parent = closeBtn
-    closeCorner.CornerRadius = UDim.new(0, 4)
+    closeBtn.TextColor3 = Color3.new(1, 1, 1); closeBtn.Font = Enum.Font.Gotham
+    closeBtn.TextSize = 14; closeBtn.AutoButtonColor = true
+    local cc = Instance.new("UICorner"); cc.Parent = closeBtn; cc.CornerRadius = UDim.new(0, 4)
     closeBtn.MouseButton1Click:Connect(function()
         dialog:Destroy()
         if parentMenu then parentMenu() end
@@ -3036,11 +2172,10 @@ local function setUIVisible(visible)
 end
 
 local function enableVolumeKey()
-    local hasVolumeDown = pcall(function() return Enum.KeyCode.VolumeDown end)
-    local hasVolumeUp = pcall(function() return Enum.KeyCode.VolumeUp end)
-    if not hasVolumeDown or not hasVolumeUp then
-        tanchuangxiaoxi("您的设备不支持音量键", "提示")
-        return
+    local hasVD = pcall(function() return Enum.KeyCode.VolumeDown end)
+    local hasVU = pcall(function() return Enum.KeyCode.VolumeUp end)
+    if not hasVD or not hasVU then
+        tanchuangxiaoxi("您的设备不支持音量键", "提示"); return
     end
     if volumeKeyEnabled then return end
     volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
@@ -3062,11 +2197,8 @@ end
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
-    local btnHeight = 40
-    local spacing = 5
-    local padding = 10
-    local titleHeight = 40
-    local closeBtnHeight = 40
+    local btnHeight, spacing, padding = 40, 5, 10
+    local titleHeight, closeBtnHeight = 40, 40
     local totalButtons = #FLY_MODES + 1
     local contentHeight = totalButtons * btnHeight + (totalButtons - 1) * spacing
     local totalHeight = padding + titleHeight + contentHeight + padding + closeBtnHeight + padding
@@ -3074,58 +2206,40 @@ local function showFlyModeSelection(currentMode, callback)
     local needsScrolling = totalHeight > maxHeight
     if needsScrolling then
         totalHeight = maxHeight
-        local scrollableHeight = totalHeight - padding - titleHeight - padding - closeBtnHeight - padding
-        contentHeight = math.min(contentHeight, scrollableHeight)
+        contentHeight = math.min(contentHeight,
+            totalHeight - padding - titleHeight - padding - closeBtnHeight - padding)
     end
-
     local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
-
+    dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, menuWidth, 0, totalHeight)
     bg.Position = UDim2.new(0.5, -menuWidth/2, 0.5, -totalHeight/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.ClipsDescendants = true
-
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
-
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+    bg.Active = true; bg.ClipsDescendants = true
+    local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Parent = bg
     titleLabel.Size = UDim2.new(1, -20, 0, 30)
     titleLabel.Position = UDim2.new(0, 10, 0, 5)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "选择飞行模式"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 18
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+    titleLabel.BackgroundTransparency = 1; titleLabel.Text = "选择飞行模式"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 18; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
     local scrollingFrame = Instance.new("ScrollingFrame")
     scrollingFrame.Parent = bg
     scrollingFrame.Size = UDim2.new(1, -20, 0, contentHeight)
     scrollingFrame.Position = UDim2.new(0, 10, 0, 40)
     scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, totalButtons * (btnHeight + spacing))
     scrollingFrame.ScrollBarThickness = 8
-    scrollingFrame.BackgroundTransparency = 1
-    scrollingFrame.BorderSizePixel = 0
+    scrollingFrame.BackgroundTransparency = 1; scrollingFrame.BorderSizePixel = 0
     scrollingFrame.ScrollingEnabled = needsScrolling
-
     local buttonContainer = Instance.new("Frame")
     buttonContainer.Parent = scrollingFrame
     buttonContainer.Size = UDim2.new(1, 0, 0, totalButtons * (btnHeight + spacing))
     buttonContainer.BackgroundTransparency = 1
-
     local yPos = 0
     local faceToggleBtn = nil
-
     local function refreshFaceToggleBtn()
         if not faceToggleBtn or not faceToggleBtn.Parent then return end
         faceToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
@@ -3135,7 +2249,6 @@ local function showFlyModeSelection(currentMode, callback)
             faceToggleBtn.Text = "🔀 朝向: 水平 (点击切换)"
         end
     end
-
     for _, mode in ipairs(FLY_MODES) do
         local isCurrent = (mode == currentMode)
         local button = Instance.new("TextButton")
@@ -3144,19 +2257,13 @@ local function showFlyModeSelection(currentMode, callback)
         button.Position = UDim2.new(0, 0, 0, yPos)
         button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
         button.Text = mode .. (isCurrent and " ✓" or "")
-        button.TextColor3 = Color3.new(1, 1, 1)
-        button.Font = Enum.Font.Gotham
-        button.TextSize = 14
-        button.AutoButtonColor = true
-        local btnCorner = Instance.new("UICorner")
-        btnCorner.Parent = button
-        btnCorner.CornerRadius = UDim.new(0, 4)
+        button.TextColor3 = Color3.new(1, 1, 1); button.Font = Enum.Font.Gotham
+        button.TextSize = 14; button.AutoButtonColor = true
+        local bc = Instance.new("UICorner"); bc.Parent = button; bc.CornerRadius = UDim.new(0, 4)
         button.MouseButton1Click:Connect(function()
-            dialog:Destroy()
-            callback(mode)
+            dialog:Destroy(); callback(mode)
         end)
         yPos = yPos + btnHeight + spacing
-
         if mode == "自由" then
             local ftBtn = Instance.new("TextButton")
             ftBtn.Parent = buttonContainer
@@ -3164,13 +2271,9 @@ local function showFlyModeSelection(currentMode, callback)
             ftBtn.Position = UDim2.new(0, 0, 0, yPos)
             ftBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
             ftBtn.Text = "🔀 朝向: 全局 (点击切换)"
-            ftBtn.TextColor3 = Color3.new(1, 1, 1)
-            ftBtn.Font = Enum.Font.GothamBold
-            ftBtn.TextSize = 14
-            ftBtn.AutoButtonColor = false
-            local ftCorner = Instance.new("UICorner")
-            ftCorner.Parent = ftBtn
-            ftCorner.CornerRadius = UDim.new(0, 4)
+            ftBtn.TextColor3 = Color3.new(1, 1, 1); ftBtn.Font = Enum.Font.GothamBold
+            ftBtn.TextSize = 14; ftBtn.AutoButtonColor = false
+            local fc = Instance.new("UICorner"); fc.Parent = ftBtn; fc.CornerRadius = UDim.new(0, 4)
             ftBtn.MouseButton1Click:Connect(function()
                 if flyFaceMode == "全局" then flyFaceMode = "水平"
                 else flyFaceMode = "全局" end
@@ -3182,20 +2285,15 @@ local function showFlyModeSelection(currentMode, callback)
             yPos = yPos + btnHeight + spacing
         end
     end
-
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
     closeBtn.Size = UDim2.new(1, -20, 0, 35)
     closeBtn.Position = UDim2.new(0, 10, 1, -45)
     closeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    closeBtn.Text = "关闭"
-    closeBtn.TextColor3 = Color3.new(1, 1, 1)
-    closeBtn.Font = Enum.Font.Gotham
-    closeBtn.TextSize = 14
+    closeBtn.Text = "关闭"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.Gotham; closeBtn.TextSize = 14
     closeBtn.AutoButtonColor = true
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.Parent = closeBtn
-    closeCorner.CornerRadius = UDim.new(0, 4)
+    local cc = Instance.new("UICorner"); cc.Parent = closeBtn; cc.CornerRadius = UDim.new(0, 4)
     closeBtn.MouseButton1Click:Connect(function() dialog:Destroy() end)
     return dialog
 end
@@ -3220,50 +2318,39 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
--- ==================== 智能透视子模式菜单（speed 长按触发） ====================
+-- ==================== 智能透视子菜单 ====================
 local function showSmartSubMenu()
     local buttons = {}
-    -- "智能识别"（默认）
+    -- 🧠 智能识别（默认，直接跑扫描）
     table.insert(buttons, {
         text = "🧠 智能识别" .. (smartSubMode == "smart" and " ✓" or " (默认)"),
         bgColor = Color3.fromRGB(70, 130, 180),
         callback = function(menu)
             smartSubMode = "smart"
             menu:Destroy()
-            -- 智能识别模式不打开任何悬浮窗，直接智能开启
-            if not SmartBuilding.isActive() then
-                SmartBuilding.activate()
-                SmartBuilding.closePicker()
-                -- 隐藏双窗口，只跑智能扫描
-                task.defer(function()
-                    local sg = playerGui:FindFirstChild("SmartBuildingUI")
-                    if sg then
-                        -- 关闭双窗口 UI（保留准心）
-                        -- 注意：SmartBuilding.activate() 会打开双窗口，我们用 closeAllWindows 隐藏
-                        -- 但我们这里只需要"扫描"，不需要窗口
-                        -- 直接跑 smartScan
-                        SmartBuilding.smartScan()
-                    end
-                end)
-            else
-                -- 已经开启，直接跑扫描
-                SmartBuilding.smartScan()
-            end
-            tanchuangxiaoxi("智能识别已启动", "智能透视")
+            -- 关闭 picker（如果开着）
+            SmartBuilding.closePicker()
+            -- 激活并直接跑智能扫描
+            SmartBuilding.setActive(true)
+            SmartBuilding.smartScan()
+            updateMainButtonText()
+            tanchuangxiaoxi("智能识别已启动", "修改模式")
         end
     })
-    -- "添加目标"
+    -- 🎯 添加目标（打开 picker）
     table.insert(buttons, {
-        text = "🎯 添加目标",
+        text = "🎯 添加目标" .. (smartSubMode == "picker" and " ✓" or ""),
         bgColor = Color3.fromRGB(46, 139, 87),
         callback = function(menu)
             smartSubMode = "picker"
             menu:Destroy()
+            SmartBuilding.setActive(true)
             SmartBuilding.openPicker()
-            tanchuangxiaoxi("已打开拾取窗口", "智能透视")
+            updateMainButtonText()
+            tanchuangxiaoxi("已打开拾取窗口", "修改模式")
         end
     })
-    createMenu("智能透视模式", buttons, nil)
+    createMenu("修改模式", buttons, nil)
 end
 
 -- ==================== 主菜单 ====================
@@ -3276,95 +2363,69 @@ function showMainMenu()
                 local screenSize = getScreenSize()
                 local dialogWidth = math.min(450, screenSize.X * 0.8)
                 local dialogHeight = math.min(500, screenSize.Y * 0.8)
-
                 local dialog = Instance.new("ScreenGui")
-                dialog.Parent = playerGui
-                dialog.IgnoreGuiInset = true
-                dialog.ResetOnSpawn = false
-
+                dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
                 local bg = Instance.new("Frame")
                 bg.Parent = dialog
                 bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
                 bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
                 bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                bg.BackgroundTransparency = 0.2
-                bg.BorderSizePixel = 0
-                bg.Active = true
-                bg.ClipsDescendants = true
-
-                local corner = Instance.new("UICorner")
-                corner.Parent = bg
-                corner.CornerRadius = UDim.new(0, 8)
-
+                bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+                bg.Active = true; bg.ClipsDescendants = true
+                local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
                 local titleLabel = Instance.new("TextLabel")
                 titleLabel.Parent = bg
                 titleLabel.Size = UDim2.new(1, -20, 0, 40)
                 titleLabel.Position = UDim2.new(0, 10, 0, 10)
-                titleLabel.BackgroundTransparency = 1
-                titleLabel.Text = "更新日志"
-                titleLabel.TextColor3 = Color3.new(1, 1, 1)
-                titleLabel.Font = Enum.Font.GothamBold
-                titleLabel.TextSize = 20
-                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+                titleLabel.BackgroundTransparency = 1; titleLabel.Text = "更新日志"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
                 local scrollingFrame = Instance.new("ScrollingFrame")
                 scrollingFrame.Parent = bg
                 scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
                 scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
                 scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
                 scrollingFrame.ScrollBarThickness = 8
-                scrollingFrame.BackgroundTransparency = 1
-                scrollingFrame.BorderSizePixel = 0
-
+                scrollingFrame.BackgroundTransparency = 1; scrollingFrame.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.0 更新内容：",
+                    "版本 8.3.1 更新内容：",
                     "",
-                    "1-35. (略，历史更新)",
-                    "36. 【本次整合】原建筑/贴图移除相关代码全部替换",
-                    "37. 主模式 '删除' 改为 '修改'，集成智能透视工具",
-                    "38. 短按设置透明度（同步智能透视）",
-                    "39. 长按弹出菜单：智能识别(默认) / 添加目标",
-                    "40. 主开关开启 → 打开智能透视 UI",
-                    "41. 主开关关闭 → 先恢复贴图，再关闭 UI",
+                    "1-40. (略，历史更新)",
+                    "41. 智能模式不再打开控制窗/名单窗",
+                    "42. 主开关直接执行智能扫描（静默）",
+                    "43. 长按 speed → 选择『智能识别』或『添加目标』",
+                    "44. 『添加目标』才打开拾取悬浮窗",
+                    "45. 修复透视功能",
                     "",
                     "感谢使用！"
                 }
-
                 local contentContainer = Instance.new("Frame")
                 contentContainer.Parent = scrollingFrame
                 contentContainer.Size = UDim2.new(1, -10, 0, 0)
                 contentContainer.BackgroundTransparency = 1
-
                 local yPos = 0
                 for _, lineText in ipairs(lines) do
-                    local lineLabel = Instance.new("TextLabel")
-                    lineLabel.Parent = contentContainer
-                    lineLabel.Size = UDim2.new(1, 0, 0, 20)
-                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
-                    lineLabel.BackgroundTransparency = 1
-                    lineLabel.Text = lineText
-                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-                    lineLabel.Font = Enum.Font.Gotham
-                    lineLabel.TextSize = 14
-                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    local ll = Instance.new("TextLabel")
+                    ll.Parent = contentContainer
+                    ll.Size = UDim2.new(1, 0, 0, 20)
+                    ll.Position = UDim2.new(0, 0, 0, yPos)
+                    ll.BackgroundTransparency = 1; ll.Text = lineText
+                    ll.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    ll.Font = Enum.Font.Gotham; ll.TextSize = 14
+                    ll.TextXAlignment = Enum.TextXAlignment.Left
+                    ll.TextYAlignment = Enum.TextYAlignment.Top
                     yPos = yPos + 22
                 end
                 contentContainer.Size = UDim2.new(1, -10, 0, yPos - 2)
                 scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
-
                 local backBtn = Instance.new("TextButton")
                 backBtn.Parent = bg
                 backBtn.Size = UDim2.new(1, -40, 0, 40)
                 backBtn.Position = UDim2.new(0, 20, 1, -50)
                 backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-                backBtn.Text = "返回"
-                backBtn.TextColor3 = Color3.new(1, 1, 1)
-                backBtn.Font = Enum.Font.GothamBold
-                backBtn.TextSize = 16
-                local backCorner = Instance.new("UICorner")
-                backCorner.Parent = backBtn
-                backCorner.CornerRadius = UDim.new(0, 8)
+                backBtn.Text = "返回"; backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold; backBtn.TextSize = 16
+                local bc = Instance.new("UICorner"); bc.Parent = backBtn; bc.CornerRadius = UDim.new(0, 8)
                 backBtn.MouseButton1Click:Connect(function()
                     dialog:Destroy(); showMainMenu()
                 end)
@@ -3377,95 +2438,69 @@ function showMainMenu()
                 local screenSize = getScreenSize()
                 local dialogWidth = math.min(400, screenSize.X * 0.8)
                 local dialogHeight = math.min(450, screenSize.Y * 0.8)
-
                 local dialog = Instance.new("ScreenGui")
-                dialog.Parent = playerGui
-                dialog.IgnoreGuiInset = true
-                dialog.ResetOnSpawn = false
-
+                dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
                 local bg = Instance.new("Frame")
                 bg.Parent = dialog
                 bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
                 bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
                 bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-                bg.BackgroundTransparency = 0.2
-                bg.BorderSizePixel = 0
-                bg.Active = true
-                bg.ClipsDescendants = true
-
-                local corner = Instance.new("UICorner")
-                corner.Parent = bg
-                corner.CornerRadius = UDim.new(0, 8)
-
+                bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+                bg.Active = true; bg.ClipsDescendants = true
+                local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
                 local titleLabel = Instance.new("TextLabel")
                 titleLabel.Parent = bg
                 titleLabel.Size = UDim2.new(1, -20, 0, 40)
                 titleLabel.Position = UDim2.new(0, 10, 0, 10)
-                titleLabel.BackgroundTransparency = 1
-                titleLabel.Text = "功能介绍"
-                titleLabel.TextColor3 = Color3.new(1, 1, 1)
-                titleLabel.Font = Enum.Font.GothamBold
-                titleLabel.TextSize = 20
-                titleLabel.TextXAlignment = Enum.TextXAlignment.Center
-
+                titleLabel.BackgroundTransparency = 1; titleLabel.Text = "功能介绍"
+                titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+                titleLabel.TextSize = 20; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
                 local scrollingFrame = Instance.new("ScrollingFrame")
                 scrollingFrame.Parent = bg
                 scrollingFrame.Size = UDim2.new(1, -20, 0, dialogHeight - 100)
                 scrollingFrame.Position = UDim2.new(0, 10, 0, 60)
                 scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
                 scrollingFrame.ScrollBarThickness = 8
-                scrollingFrame.BackgroundTransparency = 1
-                scrollingFrame.BorderSizePixel = 0
-
+                scrollingFrame.BackgroundTransparency = 1; scrollingFrame.BorderSizePixel = 0
                 local lines = {
                     "🔹 主按钮循环：飞天 ➔ 移速 ➔ 穿墙 ➔ 修改 ➔ 透视",
                     "🔹 长按主按钮切换模式",
-                    "🔹 【修改模式】短按开关智能透视 UI",
-                    "   - 开启：显示控制窗 + 名单窗 + 准心",
-                    "   - 关闭：先恢复所有贴图，再关闭窗口",
-                    "🔹 【修改模式】短按速度标签 → 设置透明度",
-                    "🔹 【修改模式】长按速度标签 → 选择模式：",
+                    "🔹 【修改模式】短按 onof = 执行当前子模式",
+                    "   - 智能识别（默认）：直接扫描，无 UI",
+                    "   - 添加目标：打开拾取悬浮窗",
+                    "🔹 【修改模式】短按 speed → 设置透明度",
+                    "🔹 【修改模式】长按 speed → 选择子模式",
                     "   - 🧠 智能识别（默认）：无 UI，直接扫描",
-                    "   - 🎯 添加目标：打开准心拾取小窗",
+                    "   - 🎯 添加目标：打开准心拾取窗口",
                     "🔹 音量键隐藏：音量减隐藏，加显示",
-                    "🔹 UI 拖动：触摸『UI』标签拖动，视角不乱晃",
                 }
-
                 local contentContainer = Instance.new("Frame")
                 contentContainer.Parent = scrollingFrame
                 contentContainer.Size = UDim2.new(1, -10, 0, 0)
                 contentContainer.BackgroundTransparency = 1
-
                 local yPos = 0
                 for _, lineText in ipairs(lines) do
-                    local lineLabel = Instance.new("TextLabel")
-                    lineLabel.Parent = contentContainer
-                    lineLabel.Size = UDim2.new(1, 0, 0, 20)
-                    lineLabel.Position = UDim2.new(0, 0, 0, yPos)
-                    lineLabel.BackgroundTransparency = 1
-                    lineLabel.Text = lineText
-                    lineLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-                    lineLabel.Font = Enum.Font.Gotham
-                    lineLabel.TextSize = 14
-                    lineLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    lineLabel.TextYAlignment = Enum.TextYAlignment.Top
+                    local ll = Instance.new("TextLabel")
+                    ll.Parent = contentContainer
+                    ll.Size = UDim2.new(1, 0, 0, 20)
+                    ll.Position = UDim2.new(0, 0, 0, yPos)
+                    ll.BackgroundTransparency = 1; ll.Text = lineText
+                    ll.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    ll.Font = Enum.Font.Gotham; ll.TextSize = 14
+                    ll.TextXAlignment = Enum.TextXAlignment.Left
+                    ll.TextYAlignment = Enum.TextYAlignment.Top
                     yPos = yPos + 22
                 end
                 contentContainer.Size = UDim2.new(1, -10, 0, yPos - 2)
                 scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, contentContainer.Size.Y.Offset + 10)
-
                 local backBtn = Instance.new("TextButton")
                 backBtn.Parent = bg
                 backBtn.Size = UDim2.new(1, -40, 0, 40)
                 backBtn.Position = UDim2.new(0, 20, 1, -50)
                 backBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-                backBtn.Text = "返回"
-                backBtn.TextColor3 = Color3.new(1, 1, 1)
-                backBtn.Font = Enum.Font.GothamBold
-                backBtn.TextSize = 16
-                local backCorner = Instance.new("UICorner")
-                backCorner.Parent = backBtn
-                backCorner.CornerRadius = UDim.new(0, 8)
+                backBtn.Text = "返回"; backBtn.TextColor3 = Color3.new(1, 1, 1)
+                backBtn.Font = Enum.Font.GothamBold; backBtn.TextSize = 16
+                local bc = Instance.new("UICorner"); bc.Parent = backBtn; bc.CornerRadius = UDim.new(0, 8)
                 backBtn.MouseButton1Click:Connect(function()
                     dialog:Destroy(); showMainMenu()
                 end)
@@ -3537,9 +2572,7 @@ function showMainMenu()
                                 string.format("%.1f", camOffsetY) .. ", " ..
                                 string.format("%.1f", camOffsetZ) .. ")",
                             callback = function(subMenu)
-                                subMenu:Destroy()
-                                showCamOffsetDialog()
-                                createSettingMenu()
+                                subMenu:Destroy(); showCamOffsetDialog(); createSettingMenu()
                             end
                         },
                         {
@@ -3566,8 +2599,7 @@ function showMainMenu()
                                         callback = function(subMenu)
                                             deathMode = i
                                             tanchuangxiaoxi("已切换: 模式 " .. i, "死亡设置")
-                                            subMenu:Destroy()
-                                            createSettingMenu()
+                                            subMenu:Destroy(); createSettingMenu()
                                         end
                                     })
                                 end
@@ -3588,36 +2620,55 @@ function showMainMenu()
                         text = "确认",
                         callback = function(confirmMenu)
                             confirmMenu:Destroy()
-                            isFlying = false
-                            tpwalking = false
-                            speedModeEnabled = false
+                            isFlying = false; tpwalking = false; speedModeEnabled = false
                             if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
                             if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
-                            removeFly()
-                            stopPhysAccel()
-                            disableNoclip()
-                            disableNightVision()
-                            stopCamFreeze()
-                            disableCamNoClip()
-                            -- 智能透视关闭
-                            pcall(function() SmartBuilding.deactivate() end)
+                            removeFly(); stopPhysAccel(); disableNoclip(); disableNightVision()
+                            stopCamFreeze(); disableCamNoClip()
+                            pcall(function() SmartBuilding.shutdown() end)
                             if main and main.Parent then main:Destroy() end
                             if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
                             for _, notif in ipairs(notifs) do
                                 if notif.sg and notif.sg.Parent then notif.sg:Destroy() end
                             end
-                            notifs = {}
-                            readyQueue = {}
+                            notifs = {}; readyQueue = {}
                         end
                     },
-                    {
-                        text = "取消",
-                        callback = function(confirmMenu) confirmMenu:Destroy() end
-                    }
+                    { text = "取消", callback = function(confirmMenu) confirmMenu:Destroy() end }
                 }, nil)
             end
         }
     }, nil)
+end
+
+-- ==================== 相机菜单 ====================
+local function showCameraMenu(parentMenu)
+    local function buildCamMenu()
+        local freezeText = camFreezeEnabled and "🧊 冻结解锁: 开启中" or "🧊 冻结解锁: 关闭"
+        local noClipText = camNoClipEnabled and "👻 相机穿墙: 开启" or "👻 相机穿墙: 关闭"
+        local snapText = camSnapshot and ("📸 重新拍摄 (上次 " .. os.date("%H:%M:%S", camSnapshot.takenAt) .. ")") or "📸 重新拍摄快照"
+        local restoreText = camSnapshot and "↩️ 恢复到快照" or "↩️ 恢复到快照 (无)"
+        createMenu("🎥 自由相机", {
+            { text = freezeText, callback = function(sm)
+                if camFreezeEnabled then stopCamFreeze() else startCamFreeze(true) end
+                sm:Destroy(); buildCamMenu()
+            end },
+            { text = "🔓 单次解锁", callback = function(sm)
+                doCamSingleUnlock(true); sm:Destroy(); buildCamMenu()
+            end },
+            { text = noClipText, callback = function(sm)
+                if camNoClipEnabled then disableCamNoClip() else enableCamNoClip() end
+                sm:Destroy(); buildCamMenu()
+            end },
+            { text = snapText, callback = function(sm)
+                manualResnap(); sm:Destroy(); buildCamMenu()
+            end },
+            { text = restoreText, callback = function(sm)
+                restoreFromCamSnapshot(); sm:Destroy(); buildCamMenu()
+            end },
+        }, parentMenu)
+    end
+    buildCamMenu()
 end
 
 -- ==================== 移动向量 ====================
@@ -3627,28 +2678,28 @@ local function getMoveVector(dir, rootPart)
     elseif moveMode == "角色前后" then return rootPart.CFrame.LookVector * step
     elseif moveMode == "角色左右" then return -rootPart.CFrame.RightVector * step
     elseif moveMode == "屏幕上下" then
-        local camera = workspace.CurrentCamera
-        if camera then return camera.CFrame.UpVector * step end
+        local c = workspace.CurrentCamera
+        if c then return c.CFrame.UpVector * step end
     elseif moveMode == "屏幕前后" then
-        local camera = workspace.CurrentCamera
-        if camera then return camera.CFrame.LookVector * step end
+        local c = workspace.CurrentCamera
+        if c then return c.CFrame.LookVector * step end
     elseif moveMode == "屏幕左右" then
-        local camera = workspace.CurrentCamera
-        if camera then return -camera.CFrame.RightVector * step end
+        local c = workspace.CurrentCamera
+        if c then return -c.CFrame.RightVector * step end
     elseif moveMode == "水平上下" then return Vector3.new(0, step, 0)
     elseif moveMode == "水平前后(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local look = camera.CFrame.LookVector
-            local horizontal = Vector3.new(look.X, 0, look.Z)
-            if horizontal.Magnitude > 0 then return horizontal.Unit * step end
+        local c = workspace.CurrentCamera
+        if c then
+            local l = c.CFrame.LookVector
+            local h = Vector3.new(l.X, 0, l.Z)
+            if h.Magnitude > 0 then return h.Unit * step end
         end
     elseif moveMode == "水平左右(屏幕)" then
-        local camera = workspace.CurrentCamera
-        if camera then
-            local right = camera.CFrame.RightVector
-            local horizontal = Vector3.new(right.X, 0, right.Z)
-            if horizontal.Magnitude > 0 then return horizontal.Unit * step end
+        local c = workspace.CurrentCamera
+        if c then
+            local r = c.CFrame.RightVector
+            local h = Vector3.new(r.X, 0, r.Z)
+            if h.Magnitude > 0 then return h.Unit * step end
         end
     end
     return Vector3.new()
@@ -3659,32 +2710,30 @@ do
     local pressStartTime = 0
     local isPressing = false
     local lastInterval = 0
-
     up.MouseButton1Down:Connect(function()
         if isPressing then return end
         isPressing = true; pressStartTime = tick(); lastInterval = tick()
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            local rootPart = char.HumanoidRootPart
-            rootPart.CFrame = rootPart.CFrame + getMoveVector(1, rootPart)
+            local r = char.HumanoidRootPart
+            r.CFrame = r.CFrame + getMoveVector(1, r)
         end
     end)
     up.MouseButton1Up:Connect(function() isPressing = false end)
     up.MouseLeave:Connect(function() isPressing = false end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
         if tick() - pressStartTime > 10 then isPressing = false; return end
-        local elapsed = tick() - pressStartTime
-        if elapsed < 0.3 then return end
-        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        local e = tick() - pressStartTime
+        if e < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (e - 0.3) / longPressSpeed)
         interval = math.max(0.001, interval)
         if tick() - lastInterval >= interval then
             lastInterval = tick()
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                local rootPart = char.HumanoidRootPart
-                rootPart.CFrame = rootPart.CFrame + getMoveVector(1, rootPart)
+                local r = char.HumanoidRootPart
+                r.CFrame = r.CFrame + getMoveVector(1, r)
             end
         end
     end)
@@ -3694,32 +2743,30 @@ do
     local pressStartTime = 0
     local isPressing = false
     local lastInterval = 0
-
     down.MouseButton1Down:Connect(function()
         if isPressing then return end
         isPressing = true; pressStartTime = tick(); lastInterval = tick()
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            local rootPart = char.HumanoidRootPart
-            rootPart.CFrame = rootPart.CFrame + getMoveVector(-1, rootPart)
+            local r = char.HumanoidRootPart
+            r.CFrame = r.CFrame + getMoveVector(-1, r)
         end
     end)
     down.MouseButton1Up:Connect(function() isPressing = false end)
     down.MouseLeave:Connect(function() isPressing = false end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
         if tick() - pressStartTime > 10 then isPressing = false; return end
-        local elapsed = tick() - pressStartTime
-        if elapsed < 0.3 then return end
-        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        local e = tick() - pressStartTime
+        if e < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (e - 0.3) / longPressSpeed)
         interval = math.max(0.001, interval)
         if tick() - lastInterval >= interval then
             lastInterval = tick()
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                local rootPart = char.HumanoidRootPart
-                rootPart.CFrame = rootPart.CFrame + getMoveVector(-1, rootPart)
+                local r = char.HumanoidRootPart
+                r.CFrame = r.CFrame + getMoveVector(-1, r)
             end
         end
     end)
@@ -3730,7 +2777,6 @@ do
     local pressStartTime = 0
     local isPressing = false
     local lastInterval = 0
-
     plus.MouseButton1Down:Connect(function()
         if isPressing then return end
         if modeIndex == 1 and not speedModeEnabled then return end
@@ -3748,13 +2794,12 @@ do
     end)
     plus.MouseButton1Up:Connect(function() isPressing = false end)
     plus.MouseLeave:Connect(function() isPressing = false end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
         if tick() - pressStartTime > 10 then isPressing = false; return end
-        local elapsed = tick() - pressStartTime
-        if elapsed < 0.3 then return end
-        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        local e = tick() - pressStartTime
+        if e < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (e - 0.3) / longPressSpeed)
         interval = math.max(0.001, interval)
         if tick() - lastInterval >= interval then
             lastInterval = tick()
@@ -3776,24 +2821,20 @@ do
     local pressStartTime = 0
     local isPressing = false
     local lastInterval = 0
-    local MIN_SPEED = 0.1
-    local MIN_LOCKED = 0.1
-    local MIN_PHYS = 10
-
+    local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
     local function getMinLocked()
         return isPhysMode() and MIN_PHYS or MIN_LOCKED
     end
-
     local function decreaseOnce()
         if modeIndex == 0 then
-            local current = tonumber(speeds) or 0
-            if current > incStep then speeds = current - incStep
-            elseif current > MIN_SPEED then speeds = MIN_SPEED end
+            local c = tonumber(speeds) or 0
+            if c > incStep then speeds = c - incStep
+            elseif c > MIN_SPEED then speeds = MIN_SPEED end
             speed.Text = tostring(speeds)
         elseif modeIndex == 1 and speedModeEnabled then
-            local minLock = getMinLocked()
+            local ml = getMinLocked()
             if lockedSpeed > incStep then lockedSpeed = lockedSpeed - incStep
-            elseif lockedSpeed > minLock then lockedSpeed = minLock end
+            elseif lockedSpeed > ml then lockedSpeed = ml end
             updateSpeedButtonText()
         elseif modeIndex == 4 then
             nightVisionBrightness = clamp(nightVisionBrightness - 0.05, 0.01, 100)
@@ -3802,7 +2843,6 @@ do
             updateSpeedButtonText()
         end
     end
-
     mine.MouseButton1Down:Connect(function()
         if isPressing then return end
         if modeIndex == 1 and not speedModeEnabled then return end
@@ -3811,13 +2851,12 @@ do
     end)
     mine.MouseButton1Up:Connect(function() isPressing = false end)
     mine.MouseLeave:Connect(function() isPressing = false end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
         if tick() - pressStartTime > 10 then isPressing = false; return end
-        local elapsed = tick() - pressStartTime
-        if elapsed < 0.3 then return end
-        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        local e = tick() - pressStartTime
+        if e < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (e - 0.3) / longPressSpeed)
         interval = math.max(0.001, interval)
         if tick() - lastInterval >= interval then
             lastInterval = tick()
@@ -3835,7 +2874,7 @@ do
 
     local function doLongPressAction()
         if modeIndex == 3 then
-            -- 【新】长按 speed 打开智能透视模式菜单
+            -- 【修改模式】长按 → 智能透视子菜单
             showSmartSubMenu()
         else
             showInputDialog("设置移动步长", tostring(moveStep),
@@ -3882,7 +2921,7 @@ do
                         updateSpeedButtonText()
                     end) end })
         elseif modeIndex == 3 then
-            -- 【新】短按 speed 打开透明度设置对话框（同步 CONFIG.transparency）
+            -- 【修改模式】短按 → 设置透明度
             showInputDialog("输入透明度 (0-1)", string.format("%.2f", SmartBuilding.getAlpha()),
                 function(val)
                     local num = tonumber(val)
@@ -3899,29 +2938,24 @@ do
 
     speed.MouseButton1Down:Connect(function()
         if isPressing then return end
-        isPressing = true
-        longPressTriggered = false
-        pressStartTime = tick()
+        isPressing = true; longPressTriggered = false; pressStartTime = tick()
     end)
-
     speed.MouseButton1Up:Connect(function()
         if not isPressing then return end
         isPressing = false
-        local elapsed = tick() - pressStartTime
-        if elapsed >= longPressDelay then
-        else doShortPressAction() end
+        local e = tick() - pressStartTime
+        if e < longPressDelay then doShortPressAction() end
     end)
     speed.MouseLeave:Connect(function()
         if isPressing then isPressing = false end
     end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
         if tick() - pressStartTime > 10 then
             isPressing = false; longPressTriggered = false; return
         end
-        local elapsed = tick() - pressStartTime
-        if elapsed >= longPressDelay then
+        local e = tick() - pressStartTime
+        if e >= longPressDelay then
             longPressTriggered = true
             doLongPressAction()
         end
@@ -3937,9 +2971,7 @@ do
 
     local function doLongPressAction()
         modeIndex = (modeIndex + 1) % 5
-        updateMainButtonText()
-        updateSpeedButtonText()
-        updateSpeedDisplayLoop()
+        updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
         tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1], "模式")
     end
 
@@ -3951,15 +2983,32 @@ do
         elseif modeIndex == 2 then
             if noclipEnabled then disableNoclip() else enableNoclip() end
         elseif modeIndex == 3 then
-            -- 【新】修改模式：短按开启/关闭智能透视
-            if SmartBuilding.isActive() then
-                -- 关闭：先恢复所有贴图，再关闭悬浮窗
-                SmartBuilding.deactivate()
-                tanchuangxiaoxi("已关闭智能透视", "修改模式")
-            else
-                -- 开启：打开智能透视 UI
-                SmartBuilding.activate()
-                tanchuangxiaoxi("已开启智能透视", "修改模式")
+            -- 【修改模式】短按 → 按当前子模式执行
+            if smartSubMode == "smart" then
+                -- 智能识别：直接跑扫描，无 UI
+                if SmartBuilding.isActive() then
+                    -- 关闭：恢复
+                    SmartBuilding.restoreAll()
+                    SmartBuilding.setActive(false)
+                    tanchuangxiaoxi("已恢复贴图", "修改模式")
+                else
+                    -- 开启：直接跑智能扫描
+                    SmartBuilding.setActive(true)
+                    SmartBuilding.smartScan()
+                    tanchuangxiaoxi("已启动智能识别", "修改模式")
+                end
+            elseif smartSubMode == "picker" then
+                -- 添加目标：打开/关闭 picker
+                if SmartBuilding.isActive() then
+                    SmartBuilding.restoreAll()
+                    SmartBuilding.closePicker()
+                    SmartBuilding.setActive(false)
+                    tanchuangxiaoxi("已关闭拾取", "修改模式")
+                else
+                    SmartBuilding.setActive(true)
+                    SmartBuilding.openPicker()
+                    tanchuangxiaoxi("已打开拾取窗口", "修改模式")
+                end
             end
             updateMainButtonText()
         elseif modeIndex == 4 then
@@ -3969,28 +3018,24 @@ do
 
     onof.MouseButton1Down:Connect(function()
         if isPressing then return end
-        isPressing = true
-        longPressTriggered = false
-        pressStartTime = tick()
+        isPressing = true; longPressTriggered = false; pressStartTime = tick()
     end)
-
     onof.MouseButton1Up:Connect(function()
         if not isPressing then return end
         isPressing = false
-        local elapsed = tick() - pressStartTime
-        if elapsed < longPressDelay then doShortPressAction() end
+        local e = tick() - pressStartTime
+        if e < longPressDelay then doShortPressAction() end
     end)
     onof.MouseLeave:Connect(function()
         if isPressing then isPressing = false end
     end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
         if tick() - pressStartTime > 10 then
             isPressing = false; longPressTriggered = false; return
         end
-        local elapsed = tick() - pressStartTime
-        if elapsed >= longPressDelay then
+        local e = tick() - pressStartTime
+        if e >= longPressDelay then
             longPressTriggered = true
             doLongPressAction()
         end
@@ -4004,9 +3049,7 @@ do
     local longPressTriggered = false
     local longPressDelay = 0.3
 
-    local function doLongPressAction()
-        showMainMenu()
-    end
+    local function doLongPressAction() showMainMenu() end
 
     local function doShortPressAction()
         Frame.Visible = false
@@ -4014,23 +3057,18 @@ do
         local miniX = clamp(frameX + 132, 0, vp.X - 58)
         local miniY = clamp(frameY, 0, vp.Y - 28)
         local mini = Instance.new("Frame")
-        mini.Name = "MiniUI"
-        mini.Parent = main
+        mini.Name = "MiniUI"; mini.Parent = main
         mini.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
         mini.BorderColor3 = Color3.fromRGB(103, 221, 213)
         mini.Size = UDim2.new(0, 58, 0, 28)
-        mini.Position = UDim2.fromOffset(miniX, miniY)
-        mini.Active = true
+        mini.Position = UDim2.fromOffset(miniX, miniY); mini.Active = true
 
         local miniBtn = Instance.new("TextButton")
-        miniBtn.Name = "MiniButton"
-        miniBtn.Parent = mini
+        miniBtn.Name = "MiniButton"; miniBtn.Parent = mini
         miniBtn.Size = UDim2.new(1, 0, 1, 0)
         miniBtn.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
-        miniBtn.Text = "UI"
-        miniBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-        miniBtn.TextScaled = true
-        miniBtn.Font = Enum.Font.SourceSans
+        miniBtn.Text = "UI"; miniBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+        miniBtn.TextScaled = true; miniBtn.Font = Enum.Font.SourceSans
         miniBtn.Active = true
 
         local miniX_var, miniY_var = miniX, miniY
@@ -4044,10 +3082,8 @@ do
             return input.UserInputType == Enum.UserInputType.Touch
                 or input.UserInputType == Enum.UserInputType.MouseButton1
         end
-
         local function beginMiniDrag(input)
-            miniIsDragging = true
-            miniDragInput = input
+            miniIsDragging = true; miniDragInput = input
         end
 
         UserInputService.InputBegan:Connect(function(input, _gpe)
@@ -4059,7 +3095,6 @@ do
             miniTotalDelta = 0
             miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
         end)
-
         UserInputService.InputChanged:Connect(function(input)
             if not miniIsDragging then return end
             local matched = (input == miniDragInput)
@@ -4072,17 +3107,15 @@ do
             local d = Vector2.new(input.Delta.X, input.Delta.Y)
             miniTotalDelta = miniTotalDelta + d.Magnitude
             if d.Magnitude == 0 then return end
-            local camera = workspace.CurrentCamera
-            if not camera then return end
-            local vp3 = camera.ViewportSize
-            local miniW = mini.Size.X.Offset
-            local miniH = mini.Size.Y.Offset
-            local newX = clamp(miniX_var + d.X, 0, vp3.X - miniW)
-            local newY = clamp(miniY_var + d.Y, 0, vp3.Y - miniH)
-            miniX_var = newX; miniY_var = newY
-            mini.Position = UDim2.fromOffset(newX, newY)
+            local cam = workspace.CurrentCamera
+            if not cam then return end
+            local vp3 = cam.ViewportSize
+            local mw = mini.Size.X.Offset
+            local mh = mini.Size.Y.Offset
+            miniX_var = clamp(miniX_var + d.X, 0, vp3.X - mw)
+            miniY_var = clamp(miniY_var + d.Y, 0, vp3.Y - mh)
+            mini.Position = UDim2.fromOffset(miniX_var, miniY_var)
         end)
-
         UserInputService.InputEnded:Connect(function(input)
             if miniHandleTouches[input] then miniHandleTouches[input] = nil end
             if not miniIsDragging or input ~= miniDragInput then return end
@@ -4094,45 +3127,39 @@ do
             local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
             if straightDist < 10 and miniTotalDelta < 15 then
                 local vp2 = getScreenSize()
-                local frameW = Frame.Size.X.Offset
-                local frameH = Frame.Size.Y.Offset
-                local newX = clamp(miniX_var - 132, 0, vp2.X - frameW)
-                local newY = clamp(miniY_var, 0, vp2.Y - frameH)
-                setFramePos(newX, newY)
+                local fw = Frame.Size.X.Offset
+                local fh = Frame.Size.Y.Offset
+                local nx = clamp(miniX_var - 132, 0, vp2.X - fw)
+                local ny = clamp(miniY_var, 0, vp2.Y - fh)
+                setFramePos(nx, ny)
                 Frame.Visible = true
-                mini:Destroy()
-                miniWindow = nil
+                mini:Destroy(); miniWindow = nil
             end
             miniIsDragging = false; miniDragInput = nil; miniPressStartPos = nil
         end)
-
         miniWindow = mini
     end
 
     hide.MouseButton1Down:Connect(function()
         if isPressing then return end
-        isPressing = true
-        longPressTriggered = false
-        pressStartTime = tick()
+        isPressing = true; longPressTriggered = false; pressStartTime = tick()
     end)
-
     hide.MouseButton1Up:Connect(function()
         if not isPressing then return end
         isPressing = false
-        local elapsed = tick() - pressStartTime
-        if elapsed < longPressDelay then doShortPressAction() end
+        local e = tick() - pressStartTime
+        if e < longPressDelay then doShortPressAction() end
     end)
     hide.MouseLeave:Connect(function()
         if isPressing then isPressing = false end
     end)
-
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
         if tick() - pressStartTime > 10 then
             isPressing = false; longPressTriggered = false; return
         end
-        local elapsed = tick() - pressStartTime
-        if elapsed >= longPressDelay then
+        local e = tick() - pressStartTime
+        if e >= longPressDelay then
             longPressTriggered = true
             doLongPressAction()
         end
@@ -4145,30 +3172,21 @@ function showBrightnessDialog()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
     local dialogHeight = 250
     local dialog = Instance.new("ScreenGui")
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
+    dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
     bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    local corner = Instance.new("UICorner")
-    corner.Parent = bg
-    corner.CornerRadius = UDim.new(0, 8)
+    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0; bg.Active = true
+    local corner = Instance.new("UICorner"); corner.Parent = bg; corner.CornerRadius = UDim.new(0, 8)
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Parent = bg
     titleLabel.Size = UDim2.new(1, -20, 0, 30)
     titleLabel.Position = UDim2.new(0, 10, 0, 10)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text = "设置透视亮度"
-    titleLabel.TextColor3 = Color3.new(1, 1, 1)
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.TextSize = 16
-    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+    titleLabel.BackgroundTransparency = 1; titleLabel.Text = "设置透视亮度"
+    titleLabel.TextColor3 = Color3.new(1, 1, 1); titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 16; titleLabel.TextXAlignment = Enum.TextXAlignment.Center
     local textBox = Instance.new("TextBox")
     textBox.Parent = bg
     textBox.Size = UDim2.new(0.6, 0, 0, 40)
@@ -4177,49 +3195,45 @@ function showBrightnessDialog()
     textBox.TextColor3 = Color3.new(1, 1, 1)
     textBox.PlaceholderText = "亮度 (0.01~100)"
     textBox.Text = string.format("%.2f", nightVisionBrightness)
-    textBox.Font = Enum.Font.Gotham
-    textBox.TextSize = 14
+    textBox.Font = Enum.Font.Gotham; textBox.TextSize = 14
     textBox.ClearTextOnFocus = false
     local sliderBg = Instance.new("Frame")
     sliderBg.Parent = bg
     sliderBg.Size = UDim2.new(0.8, 0, 0, 4)
     sliderBg.Position = UDim2.new(0.1, 0, 0, 120)
     sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-    local sliderCorner = Instance.new("UICorner")
-    sliderCorner.CornerRadius = UDim.new(0, 2)
-    sliderCorner.Parent = sliderBg
+    local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0, 2); sc.Parent = sliderBg
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 20, 0, 20)
-    local minBright = 0.01
-    local maxBright = 100
+    local minBright, maxBright = 0.01, 100
     local percent = (nightVisionBrightness - minBright) / (maxBright - minBright)
     knob.Position = UDim2.new(percent, -10, 0, -8)
-    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-    knob.Text = ""
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200); knob.Text = ""
     knob.Parent = sliderBg
-    local knobCorner = Instance.new("UICorner")
-    knobCorner.CornerRadius = UDim.new(1, 0)
-    knobCorner.Parent = knob
+    local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = knob
     local dragging = false
     knob.MouseButton1Down:Connect(function() dragging = true end)
     local inputEndConn = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
     local conn
     conn = RunService.RenderStepped:Connect(function()
         if dragging then
-            local mousePos = UserInputService:GetMouseLocation()
-            local absPos = sliderBg.AbsolutePosition
-            local absSize = sliderBg.AbsoluteSize.X
-            local relX = clamp(mousePos.X - absPos.X, 0, absSize)
-            local currentPercent = relX / absSize
-            local newBrightness = minBright + currentPercent * (maxBright - minBright)
-            newBrightness = math.floor(newBrightness * 100) / 100
-            nightVisionBrightness = newBrightness
+            local mp = UserInputService:GetMouseLocation()
+            local ap = sliderBg.AbsolutePosition
+            local as = sliderBg.AbsoluteSize.X
+            local relX = clamp(mp.X - ap.X, 0, as)
+            local cp = relX / as
+            local nb = minBright + cp * (maxBright - minBright)
+            nb = math.floor(nb * 100) / 100
+            nightVisionBrightness = nb
         end
-        local syncPercent = (nightVisionBrightness - minBright) / (maxBright - minBright)
-        knob.Position = UDim2.new(syncPercent, -10, 0, -8)
-        if not textBox:IsFocused() then textBox.Text = string.format("%.2f", nightVisionBrightness) end
+        local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
+        knob.Position = UDim2.new(sp, -10, 0, -8)
+        if not textBox:IsFocused() then
+            textBox.Text = string.format("%.2f", nightVisionBrightness)
+        end
         if modeIndex == 4 then updateSpeedButtonText() end
     end)
     textBox.FocusLost:Connect(function()
@@ -4242,25 +3256,17 @@ function showBrightnessDialog()
     cancelBtn.Size = UDim2.new(0.4, -5, 1, 0)
     cancelBtn.Position = UDim2.new(0.1, 0, 0, 0)
     cancelBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-    cancelBtn.Text = "取消"
-    cancelBtn.TextColor3 = Color3.new(1, 1, 1)
-    cancelBtn.Font = Enum.Font.GothamBold
-    cancelBtn.TextSize = 14
-    local cancelCorner = Instance.new("UICorner")
-    cancelCorner.CornerRadius = UDim.new(0, 6)
-    cancelCorner.Parent = cancelBtn
+    cancelBtn.Text = "取消"; cancelBtn.TextColor3 = Color3.new(1, 1, 1)
+    cancelBtn.Font = Enum.Font.GothamBold; cancelBtn.TextSize = 14
+    local cc1 = Instance.new("UICorner"); cc1.CornerRadius = UDim.new(0, 6); cc1.Parent = cancelBtn
     local confirmBtn = Instance.new("TextButton")
     confirmBtn.Parent = buttonFrame
     confirmBtn.Size = UDim2.new(0.4, -5, 1, 0)
     confirmBtn.Position = UDim2.new(0.5, 5, 0, 0)
     confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-    confirmBtn.Text = "确认"
-    confirmBtn.TextColor3 = Color3.new(1, 1, 1)
-    confirmBtn.Font = Enum.Font.GothamBold
-    confirmBtn.TextSize = 14
-    local confirmCorner = Instance.new("UICorner")
-    confirmCorner.CornerRadius = UDim.new(0, 6)
-    confirmCorner.Parent = confirmBtn
+    confirmBtn.Text = "确认"; confirmBtn.TextColor3 = Color3.new(1, 1, 1)
+    confirmBtn.Font = Enum.Font.GothamBold; confirmBtn.TextSize = 14
+    local cc2 = Instance.new("UICorner"); cc2.CornerRadius = UDim.new(0, 6); cc2.Parent = confirmBtn
     cancelBtn.MouseButton1Click:Connect(function()
         if conn then conn:Disconnect() end
         if inputEndConn then inputEndConn:Disconnect() end
@@ -4285,14 +3291,11 @@ end
 main.Destroying:Connect(function()
     if speedModeConnection then speedModeConnection:Disconnect() end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
-    removeFly()
-    stopPhysAccel()
-    disableNoclip()
+    removeFly(); stopPhysAccel(); disableNoclip()
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
     if nightVisionEnabled then restoreLighting() end
-    stopCamFreeze()
-    disableCamNoClip()
-    pcall(function() SmartBuilding.deactivate() end)
+    stopCamFreeze(); disableCamNoClip()
+    pcall(function() SmartBuilding.shutdown() end)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
