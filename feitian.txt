@@ -3073,8 +3073,8 @@ local function showFlyModeSelection(currentMode, callback)
     local function refreshFaceToggleBtn()
         if not faceToggleBtn or not faceToggleBtn.Parent then return end
         faceToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        if flyFaceMode == "全局" then faceToggleBtn.Text = "🔀 朝向: 全局 (点击切换)"
-        else faceToggleBtn.Text = "🔀 朝向: 水平 (点击切换)" end
+        if flyFaceMode == "全局" then faceToggleBtn.Text = "角色朝向: 全局"
+        else faceToggleBtn.Text = "角色朝向: 水平" end
     end
     for _, mode in ipairs(FLY_MODES) do
         local isCurrent = (mode == currentMode)
@@ -3095,7 +3095,7 @@ local function showFlyModeSelection(currentMode, callback)
             ftBtn.Size = UDim2.new(1, -10, 0, btnHeight)
             ftBtn.Position = UDim2.new(0, 0, 0, yPos)
             ftBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-            ftBtn.Text = "🔀 朝向: 全局 (点击切换)"
+            ftBtn.Text = "角色朝向: 全局"
             ftBtn.TextColor3 = Color3.new(1, 1, 1); ftBtn.Font = Enum.Font.GothamBold
             ftBtn.TextSize = 14; ftBtn.AutoButtonColor = false
             local fc = Instance.new("UICorner"); fc.Parent = ftBtn; fc.CornerRadius = UDim.new(0, 4)
