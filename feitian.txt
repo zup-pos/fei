@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.12（保护按钮长按清空 + 控制窗紧凑 + 保护扩展）
+-- Version 8.3.13（保护系统重构：硬保护 + 用户关键词保护）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -149,8 +149,13 @@ local noclipSaved = {}
 local smartSubMode = "smart"
 
 local protectedList = {}
+local userProtectKeywords = {}
 
 local tanchuangxiaoxi
+
+-- 前向声明（供模块内引用）
+local showProtectMenu
+local showKeywordManageMenu
 
 local SmartBuilding = (function()
     local SB = {}
@@ -186,22 +191,22 @@ local SmartBuilding = (function()
         strongIgnore = { "terrain", "sky", "clouds", "atmosphere", "baseplate" },
         exactIgnore = { "ground", "floor", "road", "grass", "dirt", "sand",
                         "water", "platform", "tile" },
+        -- 【重构】硬保护关键词（NPC/宝箱/交互/空气墙，用户无法关闭）
         protectKeywords = {
+            -- NPC / 怪物
             "npc", "mob", "monster", "entity", "creature", "enemy",
-            "chest", "loot", "reward", "interactive", "trigger", "portal",
-            "spawn", "respawn", "waypoint", "checkpoint", "teleport",
-            "item", "drop", "pickup", "collectible",
-            "bag", "shovel", "knife", "sword", "gun", "weapon", "tool",
-            "potion", "coin", "gem", "apple", "food", "drink",
-            "arrow", "ammo", "bullet", "grenade", "bomb", "torch",
-            "key", "crystal", "scroll",
+            "怪物", "敌人", "守卫", "僵尸",
+            -- 宝箱 / 奖励
+            "chest", "loot", "reward",
+            "宝箱", "奖励", "战利品",
+            -- 交互物 / 传送门
+            "interactive", "trigger", "portal",
+            "传送门", "触发器",
+            -- 玩家
             "player", "character", "humanoid",
-            "怪物", "宝箱", "空气墙", "边界", "刷新", "出生", "重生", "传送", "复活",
-            "物品", "道具", "奖励",
-            "袋子", "铲子", "刀", "剑", "枪", "药水", "金币", "宝石",
-            "苹果", "食物", "箭", "弹药", "子弹", "手雷", "炸弹",
-            "火把", "工具", "武器", "钥匙", "水晶", "卷轴",
+            -- 空气墙
             "invisible", "barrier", "boundary", "blocker", "airwall", "air_wall",
+            "空气墙", "围墙", "边界墙", "阻断", "阻挡",
         },
         buildingKeywords = {
             "wall", "floor", "roof", "house", "building", "rock", "stone", "brick",
@@ -261,6 +266,21 @@ local SmartBuilding = (function()
         return false
     end
 
+    -- 【新增】检查祖先链是否命中用户关键词
+    local function ancestorsMatchUserKw(inst)
+        if not inst then return false end
+        if #userProtectKeywords == 0 then return false end
+        local cur, depth = inst, 0
+        while cur and cur ~= workspace and depth < 15 do
+            local n = string.lower(cur.Name)
+            for _, kw in ipairs(userProtectKeywords) do
+                if string.find(n, kw, 1, true) then return true end
+            end
+            cur = cur.Parent; depth = depth + 1
+        end
+        return false
+    end
+
     local function ancestorsHavePrompt(inst)
         local cur, depth = inst, 0
         while cur and cur ~= workspace and depth < 15 do
@@ -295,19 +315,23 @@ local SmartBuilding = (function()
     local function checkIgnored(part)
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
+        -- 单目标保护
         do
             local cur, depth = part, 0
             while cur and cur ~= workspace and depth < 15 do
-                if protectedList[cur] then return true, "用户保护" end
+                if protectedList[cur] then return true, "单目标保护" end
                 cur = cur.Parent; depth = depth + 1
             end
         end
+        -- 用户关键词保护
+        if ancestorsMatchUserKw(part) then return true, "用户关键词" end
+
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
         if nameMatches(part, CONFIG.invisibleWallKeywords)
             and not nameMatches(part, CONFIG.buildingKeywords) then return true, "空气墙名" end
         if nameMatches(part, CONFIG.strongIgnore) then return true, "强忽略词" end
         if exactMatchAny(part.Name, CONFIG.exactIgnore) then return true, "忽略词" end
-        if ancestorsMatch(part, CONFIG.protectKeywords) then return true, "祖先含保护词" end
+        if ancestorsMatch(part, CONFIG.protectKeywords) then return true, "硬保护词" end
         if ancestorsMatch(part, CONFIG.spawnKeywords) then return true, "刷新点/出生点" end
         for _, cls in ipairs(CONFIG.protectClasses) do
             if part:IsA(cls) then return true, "保护类 " .. cls end
@@ -724,7 +748,7 @@ local SmartBuilding = (function()
             tanchuangxiaoxi(string.format("已恢复 %d 个部件", n), "修改模式")
         end)
 
-        -- 【新增】保护按钮：短按切换保护 / 长按清空全部保护
+        -- 保护按钮：短按切换单目标 / 长按弹菜单
         do
             local pressStart = 0
             local pressing = false
@@ -742,7 +766,6 @@ local SmartBuilding = (function()
                 if not pressing then return end
                 pressing = false
                 if longTriggered then return end
-                -- 短按：切换准心目标的保护状态
                 if not SB.getTargetInCenter or not SB.toggleProtect then return end
                 local t = SB.getTargetInCenter()
                 if not t then showNotification("未对准目标"); return end
@@ -753,20 +776,14 @@ local SmartBuilding = (function()
                 pressing = false
             end)
 
-            -- 长按检测循环
             task.spawn(function()
                 while ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent do
                     task.wait(0.08)
                     if not (ui.control and ui.control.protectBtn) then break end
                     if pressing and not longTriggered then
-                        local elapsed = tick() - pressStart
-                        if elapsed >= longDelay then
+                        if tick() - pressStart >= longDelay then
                             longTriggered = true
-                            -- 清空所有保护
-                            local count = 0
-                            for _ in pairs(protectedList) do count = count + 1 end
-                            protectedList = {}
-                            tanchuangxiaoxi(string.format("已清空 %d 个保护目标", count), "保护")
+                            if showProtectMenu then showProtectMenu() end
                         end
                     end
                 end
@@ -2242,7 +2259,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
     textBox.Position = UDim2.new(0, 20, 0, 50)
     textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     textBox.TextColor3 = Color3.new(1, 1, 1)
-    textBox.PlaceholderText = "请输入数字"; textBox.Text = defaultText
+    textBox.PlaceholderText = "请输入"; textBox.Text = defaultText
     textBox.Font = Enum.Font.Gotham; textBox.TextSize = 14
     textBox.ClearTextOnFocus = false
     local buttonFrame = Instance.new("Frame")
@@ -2297,7 +2314,12 @@ function showInputDialog(title, defaultText, callback, extraButton)
         if btn.Text == "确认" then
             btn.MouseButton1Click:Connect(function()
                 local input = textBox.Text
-                if title == "输入透明度 (0-1)" then callback(input) close() return end
+                -- 文本输入模式（关键词/名称/透明度）
+                if title == "输入透明度 (0-1)"
+                    or string.find(title, "关键词")
+                    or string.find(title, "名称") then
+                    callback(input) close() return
+                end
                 local num = tonumber(input)
                 if extraButton then callback(input) close()
                 else
@@ -2382,6 +2404,77 @@ function createMenu(title, buttons, parentMenu)
         if parentMenu then parentMenu() end
     end)
     return dialog
+end
+
+-- ==================== 保护菜单 ====================
+showProtectMenu = function()
+    local buttons = {}
+    table.insert(buttons, {
+        text = "➕ 添加保护关键词",
+        bgColor = Color3.fromRGB(50, 130, 200),
+        callback = function(menu)
+            menu:Destroy()
+            showInputDialog("输入保护关键词（子串匹配）", "", function(val)
+                if not val or val == "" then return end
+                val = string.lower(val)
+                for _, kw in ipairs(userProtectKeywords) do
+                    if kw == val then
+                        tanchuangxiaoxi("关键词已存在: " .. val, "保护")
+                        return
+                    end
+                end
+                table.insert(userProtectKeywords, val)
+                tanchuangxiaoxi("已添加关键词: " .. val, "保护")
+            end)
+        end
+    })
+    table.insert(buttons, {
+        text = "📋 管理保护关键词 (" .. #userProtectKeywords .. ")",
+        bgColor = Color3.fromRGB(150, 100, 200),
+        callback = function(menu)
+            menu:Destroy()
+            if showKeywordManageMenu then showKeywordManageMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "🗑 清空单目标保护",
+        bgColor = Color3.fromRGB(178, 34, 34),
+        callback = function(menu)
+            menu:Destroy()
+            local count = 0
+            for _ in pairs(protectedList) do count = count + 1 end
+            protectedList = {}
+            tanchuangxiaoxi(string.format("已清空 %d 个单目标保护", count), "保护")
+        end
+    })
+    createMenu("🛡 保护设置", buttons, nil)
+end
+
+showKeywordManageMenu = function()
+    local buttons = {}
+    if #userProtectKeywords == 0 then
+        table.insert(buttons, {
+            text = "（暂无关键词）",
+            bgColor = Color3.fromRGB(60, 60, 60),
+            callback = function() end
+        })
+    else
+        for i, kw in ipairs(userProtectKeywords) do
+            local kwCopy = kw
+            local idxCopy = i
+            table.insert(buttons, {
+                text = "❌ " .. kwCopy .. "（点击删除）",
+                bgColor = Color3.fromRGB(120, 60, 60),
+                callback = function(menu)
+                    table.remove(userProtectKeywords, idxCopy)
+                    menu:Destroy()
+                    showKeywordManageMenu()
+                    tanchuangxiaoxi("已删除: " .. kwCopy, "保护")
+                end
+            })
+        end
+    end
+    createMenu("管理关键词", buttons, showProtectMenu)
 end
 
 local function setUIVisible(visible)
@@ -2582,12 +2675,16 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.12 更新内容：",
+                    "版本 8.3.13 更新内容：",
                     "",
-                    "1-59. (略，历史更新)",
-                    "60. 【新增】长按「🛡 保护目标」= 清空所有保护",
-                    "    - 用于解决被保护物品消失后无法取消",
-                    "61. 短按仍是切换单个目标保护",
+                    "1-60. (略，历史更新)",
+                    "61. 【保护系统重构】",
+                    "    - 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
+                    "    - 物品类（袋子/铲子/刀等）改为用户自定义关键词",
+                    "    - 长按保护按钮 → 管理菜单",
+                    "        + 添加保护关键词",
+                    "        + 管理保护关键词",
+                    "        + 清空单目标保护",
                     "",
                     "感谢使用！"
                 }
@@ -2656,12 +2753,14 @@ function showMainMenu()
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
                     "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
                     "🔹 【保护按钮】短按 = 切换单目标保护",
-                    "🔹 【保护按钮】长按 = 清空所有保护",
-                    "🔹 保护后的目标不会被扫描透明化",
+                    "🔹 【保护按钮】长按 = 保护设置菜单",
+                    "   - 添加关键词（例：bag/shovel/箭/刀）",
+                    "   - 管理已添加的关键词（可删除）",
+                    "   - 清空单目标保护",
+                    "🔹 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
                     "🔹 透明度可用输入框或滑动条调整",
                     "🔹 名单窗默认隐藏，点「📋 名单」开关",
                     "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
-                    "🔹 穿墙关闭后会完整恢复原碰撞",
                     "🔹 结束脚本会完整还原所有状态",
                 }
                 local cc = Instance.new("Frame")
