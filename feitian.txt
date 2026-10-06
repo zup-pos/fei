@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.0.2 (自由模式重写 + 朝向切换按钮)
+-- Version 8.1.1 (UI 拖动修复 + 开关修复 + 拾取整合 + 长按时间戳)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -45,6 +45,7 @@ up.Text = "上升"
 up.TextColor3 = Color3.fromRGB(0, 0, 0)
 up.TextScaled = true
 up.TextSize = 14
+up.Active = true
 
 plus.Name = "plus"
 plus.Parent = Frame
@@ -56,6 +57,7 @@ plus.Text = "加速"
 plus.TextColor3 = Color3.fromRGB(0, 0, 0)
 plus.TextScaled = true
 plus.TextSize = 14
+plus.Active = true
 
 uiLabel.Name = "uiLabel"
 uiLabel.Parent = Frame
@@ -67,6 +69,7 @@ uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
+uiLabel.Active = true
 
 hide.Name = "hide"
 hide.Parent = Frame
@@ -78,6 +81,7 @@ hide.Text = "隐藏/设置"
 hide.TextColor3 = Color3.fromRGB(0, 0, 0)
 hide.TextScaled = true
 hide.TextSize = 14
+hide.Active = true
 
 down.Name = "down"
 down.Parent = Frame
@@ -89,6 +93,7 @@ down.Text = "下降"
 down.TextColor3 = Color3.fromRGB(0, 0, 0)
 down.TextScaled = true
 down.TextSize = 14
+down.Active = true
 
 mine.Name = "mine"
 mine.Parent = Frame
@@ -100,6 +105,7 @@ mine.Text = "减速"
 mine.TextColor3 = Color3.fromRGB(0, 0, 0)
 mine.TextScaled = true
 mine.TextSize = 14
+mine.Active = true
 
 speed.Name = "speed"
 speed.Parent = Frame
@@ -112,6 +118,7 @@ speed.TextColor3 = Color3.fromRGB(0, 0, 0)
 speed.TextScaled = true
 speed.TextSize = 14
 speed.AutoButtonColor = false
+speed.Active = true
 
 onof.Name = "onof"
 onof.Parent = Frame
@@ -123,6 +130,7 @@ onof.Text = "飞天(关闭)"
 onof.TextColor3 = Color3.fromRGB(0, 0, 0)
 onof.TextScaled = true
 onof.TextSize = 14
+onof.Active = true
 
 -- ==================== 服务与玩家 ====================
 local player = game:GetService("Players").LocalPlayer
@@ -151,43 +159,32 @@ local miniWindow = nil
 local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
-
--- 【新增】朝向模式："全局" 或 "水平"
--- 在自由模式下，切换到"水平"可消除低头抖动
 local flyFaceMode = "全局"
 
--- 移速子模式
 local speedSubMode = "修改"
 
--- 物理加速
 local accelObj = nil
 local accelAttach = nil
 local accelConn = nil
 local accelForceScale = 100
 local accelLastMethod = nil
 
--- 相机相关
 local camSnapshot = nil
 local camFreezeEnabled = false
 local camNoClipEnabled = false
 local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
 local camFreezeBound = false
-
--- 相机偏移
 local camOffsetX = 0
 local camOffsetY = 0
 local camOffsetZ = 0
 local camOffsetBaseline = { x = 0, y = 0, z = 0 }
 
--- 主窗口独立坐标
 local frameX = initX
 local frameY = initY
 
--- 悬浮窗变量
 local noclipWindow = nil
 local nightVisionWindow = nil
 
--- 模式切换
 local modeIndex = 0
 local modeNames = { "fly", "speed", "noclip", "building", "nightvision" }
 local modeDisplayNames = { "飞天", "移速", "穿墙", "删除", "透视" }
@@ -198,16 +195,13 @@ local lockedSpeed = 16
 local originalWalkSpeed = 16
 local speedUpdateConnection = nil
 
--- ==================== 死亡重生管理变量 ====================
 local deathMode = 1
 local savedFeatureStates = { fly = false, speed = false, noclip = false, building = false }
 
--- ==================== 穿墙相关变量 ====================
 local noclipEnabled = false
 local noclipConnection = nil
 local noclipStateConnection = nil
 
--- ==================== 建筑移除相关变量 ====================
 local buildingRemovalEnabled = false
 local buildingRemovalMode = 1
 local buildingTransparency = 0.8
@@ -215,7 +209,13 @@ local modifiedBuildingParts = {}
 local IGNORED_NAMES = { "baseplate", "ground", "floor", "terrain", "platform", "road" }
 local IGNORE_PLAYER = true
 
--- ==================== 透视相关变量 ====================
+local buildingManualList = {}
+if not _G._buildingManualList then
+    _G._buildingManualList = buildingManualList
+else
+    buildingManualList = _G._buildingManualList
+end
+
 local nightVisionEnabled = false
 local nightVisionBrightness = 2.5
 local originalLighting = {}
@@ -257,7 +257,6 @@ local MOVE_MODES = {
     "水平上下", "水平前后(屏幕)", "水平左右(屏幕)"
 }
 
--- 【保持5项不变】朝向切换作为列表里的特殊按钮动态生成
 local FLY_MODES = { "泳姿", "自由", "屏幕", "悬空", "绝对锁高" }
 
 local SPEED_SUB_MODES = { "修改", "持续力", "物理速度", "强制位移" }
@@ -266,6 +265,14 @@ local SPEED_SUB_DESC = {
     ["持续力"] = "VectorForce 持续施加力（物理碰撞完整）",
     ["物理速度"] = "BodyVelocity 恒定速度（老牌稳定）",
     ["强制位移"] = "CFrame 强制位移（可能穿模，慎用高速）",
+}
+
+local BUILDING_MODES = {
+    "移除墙体 (不移除贴图)",
+    "移除墙体 + 移除贴图",
+    "仅移除墙体贴图",
+    "🔆 调整贴图透明度",
+    "🎯 添加目标 (准星拾取)",
 }
 
 -- ==================== 提前声明 ====================
@@ -293,73 +300,48 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 主窗口拖拽（修复按钮冲突） ====================
+-- ==================== 主窗口拖拽 ====================
 local isDragging = false
-local dragTouch = nil
-local lastTouchPos = nil
-local latestTouchPos = nil
+local dragStartPos = nil
+local dragStartFrame = nil
 
-local mainButtons = { up, plus, uiLabel, hide, down, mine, speed, onof }
-
-local function isPointInAnyButton(pos)
-    for _, btn in ipairs(mainButtons) do
-        if btn and btn.Parent then
-            local p = btn.AbsolutePosition
-            local s = btn.AbsoluteSize
-            if pos.X >= p.X and pos.X <= p.X + s.X
-               and pos.Y >= p.Y and pos.Y <= p.Y + s.Y then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-Frame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch then
-        if isPointInAnyButton(input.Position) then
-            return
-        end
-        isDragging = true
-        dragTouch = input
-        lastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
-        latestTouchPos = lastTouchPos
-    end
+Frame.MouseButton1Down:Connect(function()
+    isDragging = true
+    dragStartPos = UserInputService:GetMouseLocation()
+    dragStartFrame = Vector2.new(frameX, frameY)
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if isDragging and input == dragTouch and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-        latestTouchPos = Vector2.new(input.Position.X, input.Position.Y)
+    if not isDragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local currentPos = UserInputService:GetMouseLocation()
+        if input.UserInputType == Enum.UserInputType.Touch then
+            currentPos = Vector2.new(input.Position.X, input.Position.Y)
+        end
+        local delta = currentPos - dragStartPos
+
+        local newX = dragStartFrame.X + delta.X
+        local newY = dragStartFrame.Y + delta.Y
+
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local vp = camera.ViewportSize
+        local frameW = Frame.Size.X.Offset
+        local frameH = Frame.Size.Y.Offset
+
+        newX = clamp(newX, 0, vp.X - frameW)
+        newY = clamp(newY, 0, vp.Y - frameH)
+
+        setFramePos(newX, newY)
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input == dragTouch then
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseButton1 then
         isDragging = false
-        dragTouch = nil
-        lastTouchPos = nil
-        latestTouchPos = nil
     end
-end)
-
-RunService.RenderStepped:Connect(function()
-    if not isDragging or not lastTouchPos or not latestTouchPos then return end
-    local delta = latestTouchPos - lastTouchPos
-    lastTouchPos = latestTouchPos
-
-    local newX = frameX + delta.X
-    local newY = frameY + delta.Y
-
-    local camera = workspace.CurrentCamera
-    if not camera then return end
-    local vp = camera.ViewportSize
-    local frameW = Frame.Size.X.Offset
-    local frameH = Frame.Size.Y.Offset
-
-    newX = clamp(newX, 0, vp.X - frameW)
-    newY = clamp(newY, 0, vp.Y - frameH)
-
-    setFramePos(newX, newY)
 end)
 
 -- ==================== 辅助函数（续） ====================
@@ -387,11 +369,9 @@ local function updateMainButtonText()
     onof.Text = modeName .. (state and "(开启)" or "(关闭)")
 
     if modeIndex == 4 then
-        plus.Text = "增加"
-        mine.Text = "减少"
+        plus.Text = "增加"; mine.Text = "减少"
     else
-        plus.Text = "加速"
-        mine.Text = "减速"
+        plus.Text = "加速"; mine.Text = "减速"
     end
 end
 
@@ -498,7 +478,7 @@ end
 -- ==================== TP Walk ====================
 local function stopTpwalking() tpwalking = false end
 
--- ==================== 飞天辅助函数 ====================
+-- ==================== 飞天辅助 ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -507,12 +487,6 @@ local function removeFly()
     end
 end
 
--- ==================== 【完整替换】applyFly ====================
--- 【关键改动】
---   1. BodyGyro 挂在 HRP（不再用 UpperTorso / Torso）→ 消除低头抖动
---   2. 朝向 CFrame 显式锚定 CFrame.new(hrp.Position) → 位置固定
---   3. 自由模式根据 flyFaceMode 决定跟随"全局"或"水平"
---   4. 其他模式不受影响，仍用相机全姿态
 local function applyFly()
     local char = player.Character
     if not char then return false end
@@ -530,7 +504,6 @@ local function applyFly()
     end
 
     local isFreeMode = (flyMode == "自由")
-
     if isFreeMode then
         hum.PlatformStand = true
         hum.AutoRotate = false
@@ -543,7 +516,6 @@ local function applyFly()
 
     local startY = hrp.Position.Y
 
-    -- 【关键】BodyGyro 挂在 HRP
     local bg = Instance.new("BodyGyro")
     bg.P = 9e4
     bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
@@ -569,7 +541,6 @@ local function applyFly()
                 local anchorPos = curHrp.Position
 
                 if isFreeMode then
-                    -- ============ 自由模式：相机方向驱动 ============
                     local camLook = camera.CFrame.LookVector
                     local camRight = camera.CFrame.RightVector
                     local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
@@ -584,18 +555,14 @@ local function applyFly()
                     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                     bv.Velocity = combined * maxspeed
 
-                    -- 【朝向】根据 flyFaceMode
                     if flyFaceMode == "水平" then
-                        -- 水平：只跟随水平方向，消除低头抖动
                         local look = camera.CFrame.LookVector
                         local yaw = math.atan2(-look.X, -look.Z)
                         bg.CFrame = CFrame.new(anchorPos) * CFrame.Angles(0, yaw, 0)
                     else
-                        -- 全局：完全跟随相机（含俯仰）
                         bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
                     end
                 else
-                    -- ============ 其他模式：保持原样 ============
                     if flyMode == "悬空" then
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         local horizontalDir = Vector3.new(moveDir.X, 0, moveDir.Z)
@@ -609,7 +576,6 @@ local function applyFly()
                         local pos = curHrp.Position
                         curHrp.CFrame = CFrame.new(pos.X, startY, pos.Z) * (curHrp.CFrame - curHrp.Position)
                     else
-                        -- 泳姿 / 屏幕
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
                         bg.CFrame = CFrame.new(anchorPos) * camera.CFrame.Rotation
@@ -622,7 +588,23 @@ local function applyFly()
     return true
 end
 
--- ==================== 物理加速核心函数 ====================
+local function resetHumanoidAfterFly()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+
+    for _, state in ipairs(VALID_HUMANOD_STATES) do
+        pcall(function() hum:SetStateEnabled(state, true) end)
+    end
+    hum.PlatformStand = false
+    hum.AutoRotate = true
+    hum:ChangeState(Enum.HumanoidStateType.Freefall)
+    hum:ChangeState(Enum.HumanoidStateType.Running)
+    if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
+end
+
+-- ==================== 物理加速核心 ====================
 local function stopPhysAccel()
     if accelConn then accelConn:Disconnect() accelConn = nil end
     if accelObj then pcall(function() accelObj:Destroy() end) accelObj = nil end
@@ -735,64 +717,62 @@ end
 
 -- ==================== 关闭辅助函数 ====================
 local function forceDisableSpeedMode()
-    if speedModeEnabled then
-        if isPhysMode() then stopPhysAccel() end
-        if speedModeConnection then
-            speedModeConnection:Disconnect()
-            speedModeConnection = nil
-        end
-        local char = player.Character
-        if char then
-            local hum = char:FindFirstChildWhichIsA("Humanoid")
-            if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
-        end
-        lockedSpeed = originalWalkSpeed
-        speedModeEnabled = false
-        task.wait()
-        return true
+    if not speedModeEnabled then return false end
+    if isPhysMode() then stopPhysAccel() end
+    if speedModeConnection then
+        speedModeConnection:Disconnect()
+        speedModeConnection = nil
     end
-    return false
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        if hum then pcall(function() hum.WalkSpeed = originalWalkSpeed end) end
+    end
+    lockedSpeed = originalWalkSpeed
+    speedModeEnabled = false
+    return true
 end
 
 local function forceDisableFly()
-    if isFlying then
-        removeFly()
-        resetHumanoidAfterFly()
-        stopTpwalking()
-        isFlying = false
-        task.wait()
-        return true
-    end
-    return false
+    if not isFlying then return false end
+    removeFly()
+    resetHumanoidAfterFly()
+    stopTpwalking()
+    isFlying = false
+    return true
 end
 
+-- ==================== toggleFly ====================
 local function toggleFly(enable)
     if enable then
-        local speedWasClosed = forceDisableSpeedMode()
         if isFlying then return end
+        forceDisableSpeedMode()
         isFlying = true
         updateMainButtonText()
+        updateSpeedButtonText()
+        updateSpeedDisplayLoop()
         stopTpwalking()
-        if speedWasClosed then tanchuangxiaoxi("飞天已开启，移速已关闭", "飞天模式")
-        else tanchuangxiaoxi("已开启飞天 (" .. flyMode .. ")", "飞天") end
+        tanchuangxiaoxi("已开启飞天 (" .. flyMode .. ")", "飞天")
         applyFly()
     else
         if not isFlying then return end
         isFlying = false
         updateMainButtonText()
+        updateSpeedButtonText()
+        updateSpeedDisplayLoop()
         stopTpwalking()
         tanchuangxiaoxi("已关闭飞天", "飞天")
         removeFly()
         resetHumanoidAfterFly()
     end
-    updateSpeedButtonText()
-    updateSpeedDisplayLoop()
 end
 
--- ==================== 移速模式 ====================
+-- ==================== applySpeedMode ====================
 local function applySpeedMode(enable)
     if enable then
-        local flyWasClosed = forceDisableFly()
+        if speedModeEnabled then return end
+        forceDisableFly()
+
         local char = player.Character
         local currentWS = 16
         if char then
@@ -820,20 +800,19 @@ local function applySpeedMode(enable)
             local ok = startPhysAccel()
             if not ok then
                 speedModeEnabled = false
-                tanchuangxiaoxi("角色未就绪，无法启动" .. speedSubMode, "移速模式")
                 updateMainButtonText()
                 updateSpeedButtonText()
+                tanchuangxiaoxi("角色未就绪", "移速模式")
                 return
             end
         end
 
-        local label = speedSubMode
-        if flyWasClosed then
-            tanchuangxiaoxi(label .. "已开启，飞天已关闭", "移速模式")
-        else
-            tanchuangxiaoxi("已开启" .. label .. "，基准 " .. string.format("%.1f", originalWalkSpeed), "移速模式")
-        end
+        updateMainButtonText()
+        updateSpeedButtonText()
+        updateSpeedDisplayLoop()
+        tanchuangxiaoxi("已开启" .. speedSubMode, "移速模式")
     else
+        if not speedModeEnabled then return end
         if speedModeConnection then
             speedModeConnection:Disconnect()
             speedModeConnection = nil
@@ -848,11 +827,11 @@ local function applySpeedMode(enable)
 
         lockedSpeed = originalWalkSpeed
         speedModeEnabled = false
-        tanchuangxiaoxi("已关闭移速模式（记录已清除）", "移速模式")
+        updateMainButtonText()
+        updateSpeedButtonText()
+        updateSpeedDisplayLoop()
+        tanchuangxiaoxi("已关闭移速模式", "移速模式")
     end
-    updateMainButtonText()
-    updateSpeedButtonText()
-    updateSpeedDisplayLoop()
 end
 
 -- ==================== 透视基础 ====================
@@ -956,7 +935,7 @@ local function applyNightVision()
     end
 end
 
--- ==================== 相机偏移应用 ====================
+-- ==================== 相机偏移 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
@@ -965,7 +944,7 @@ local function applyCameraOffset()
     hum.CameraOffset = Vector3.new(camOffsetX, camOffsetY, camOffsetZ)
 end
 
--- ==================== 相机核心函数 ====================
+-- ==================== 相机核心 ====================
 local function enforceCameraOnce()
     local cam = workspace.CurrentCamera
     if not cam then return end
@@ -988,15 +967,15 @@ local function takeCamSnapshot()
     local cam = workspace.CurrentCamera
     if not cam then return false end
     camSnapshot = {
-        CameraMode             = player.CameraMode,
-        CameraMinZoomDistance  = player.CameraMinZoomDistance,
-        CameraMaxZoomDistance  = player.CameraMaxZoomDistance,
-        DevEnableMouseLock     = player.DevEnableMouseLock,
+        CameraMode = player.CameraMode,
+        CameraMinZoomDistance = player.CameraMinZoomDistance,
+        CameraMaxZoomDistance = player.CameraMaxZoomDistance,
+        DevEnableMouseLock = player.DevEnableMouseLock,
         DevCameraOcclusionMode = player.DevCameraOcclusionMode,
-        CameraType             = cam.CameraType,
-        CameraSubject          = cam.CameraSubject,
-        FieldOfView            = cam.FieldOfView,
-        takenAt                = os.time(),
+        CameraType = cam.CameraType,
+        CameraSubject = cam.CameraSubject,
+        FieldOfView = cam.FieldOfView,
+        takenAt = os.time(),
     }
     return true
 end
@@ -1013,14 +992,12 @@ local function startCamFreeze(autoSnap)
     if camFreezeEnabled then return end
     camFreezeEnabled = true
     enforceCameraOnce()
-
     pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
     RunService:BindToRenderStep(camFreezeConnName, Enum.RenderPriority.Last.Value, function()
         if not camFreezeEnabled then return end
         enforceCameraOnce()
     end)
     camFreezeBound = true
-
     local cam = workspace.CurrentCamera
     if cam then
         cam:GetPropertyChangedSignal("CameraType"):Connect(function()
@@ -1042,7 +1019,6 @@ local function startCamFreeze(autoSnap)
             pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
         end
     end)
-
     tanchuangxiaoxi("冻结解锁已开启", "自由相机")
 end
 
@@ -1086,18 +1062,16 @@ end
 
 local function restoreFromCamSnapshot()
     if not camSnapshot then
-        tanchuangxiaoxi("尚无快照，先点『重新拍摄快照』", "自由相机")
+        tanchuangxiaoxi("尚无快照", "自由相机")
         return
     end
     stopCamFreeze()
     camNoClipEnabled = false
-
     pcall(function() player.CameraMode = camSnapshot.CameraMode end)
     pcall(function() player.CameraMinZoomDistance = camSnapshot.CameraMinZoomDistance end)
     pcall(function() player.CameraMaxZoomDistance = camSnapshot.CameraMaxZoomDistance end)
     pcall(function() player.DevEnableMouseLock = camSnapshot.DevEnableMouseLock end)
     pcall(function() player.DevCameraOcclusionMode = camSnapshot.DevCameraOcclusionMode end)
-
     local cam = workspace.CurrentCamera
     if cam then
         pcall(function() cam.CameraType = camSnapshot.CameraType end)
@@ -1113,7 +1087,7 @@ local function manualResnap()
     if takeCamSnapshot() then
         tanchuangxiaoxi("已重新拍摄快照", "自由相机")
     else
-        tanchuangxiaoxi("快照失败：相机未就绪", "自由相机")
+        tanchuangxiaoxi("快照失败", "自由相机")
     end
 end
 
@@ -1236,7 +1210,7 @@ local function createNoclipWindow()
         if not char then return end
         local rootPart = char:FindFirstChild("HumanoidRootPart")
         if not rootPart then return end
-        if not isFlying then toggleFly(true) task.wait(0.1) end
+        if not isFlying then toggleFly(true) end
         local startTime = tick()
         local connection
         connection = RunService.Heartbeat:Connect(function()
@@ -1245,9 +1219,10 @@ local function createNoclipWindow()
                 rootPart.CFrame = rootPart.CFrame + Vector3.new(0, moveStep, 0)
             else connection:Disconnect() end
         end)
-        task.wait(5)
-        if noclipEnabled then disableNoclip() end
-        if isFlying then toggleFly(false) end
+        task.delay(5, function()
+            if noclipEnabled then disableNoclip() end
+            if isFlying then toggleFly(false) end
+        end)
     end)
 
     return sg
@@ -1500,11 +1475,12 @@ local function disableAffectedFeatures()
     if buildingRemovalEnabled then disableBuildingRemoval() end
 end
 
+-- 【修复 3】去掉 task.wait(0.1)，纯同步恢复
 local function restoreFeatureStates()
     task.spawn(function()
-        if savedFeatureStates.fly then toggleFly(true) task.wait(0.1) end
-        if savedFeatureStates.speed then applySpeedMode(true) task.wait(0.1) end
-        if savedFeatureStates.noclip then enableNoclip() task.wait(0.1) end
+        if savedFeatureStates.fly then toggleFly(true) end
+        if savedFeatureStates.speed then applySpeedMode(true) end
+        if savedFeatureStates.noclip then enableNoclip() end
         if savedFeatureStates.building then enableBuildingRemoval() end
     end)
 end
@@ -1545,7 +1521,7 @@ end)
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
--- ==================== 弹窗系统 ====================
+-- ==================== 弹窗 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -1592,7 +1568,6 @@ function tanchuangxiaoxi(msg, title)
     local msgFont = Enum.Font.Gotham
     local titleSize = 14
     local msgSize = 12
-    local bgTransparency = popupTransparency
 
     local titleSizeVec = TextService:GetTextSize(title, titleSize, titleFont, Vector2.new(1000, 1000))
     local msgSizeVec = TextService:GetTextSize(msg, msgSize, msgFont, Vector2.new(1000, 1000))
@@ -1610,7 +1585,7 @@ function tanchuangxiaoxi(msg, title)
     f.Size = UDim2.new(0, frameWidth, 0, frameHeight)
     f.Position = UDim2.new(1, -frameWidth - 10, 0, -frameHeight)
     f.BackgroundColor3 = Color3.fromRGB(30,30,30)
-    f.BackgroundTransparency = bgTransparency
+    f.BackgroundTransparency = popupTransparency
     f.BorderSizePixel = 0
     f.ClipsDescendants = true
 
@@ -1841,7 +1816,7 @@ function showCamOffsetDialog()
     hint.Size = UDim2.new(1, -20, 0, 16)
     hint.Position = UDim2.new(0, 10, 0, 34)
     hint.BackgroundTransparency = 1
-    hint.Text = "0 = 默认，正数往右/上/前，负相反"
+    hint.Text = "0 = 默认，正数往右/上/前"
     hint.TextColor3 = Color3.fromRGB(180, 180, 220)
     hint.Font = Enum.Font.Gotham
     hint.TextSize = 10
@@ -1938,33 +1913,12 @@ function showCamOffsetDialog()
     rc.CornerRadius = UDim.new(0, 6)
     rc.Parent = btnRestore
 
-    local tipLabel = Instance.new("TextLabel")
-    tipLabel.Parent = bg
-    tipLabel.Size = UDim2.new(1, -20, 0, 30)
-    tipLabel.Position = UDim2.new(0, 10, 0, 208)
-    tipLabel.BackgroundTransparency = 1
-    tipLabel.Text = "建议值: Y = 2~4 (相机稍微抬高)\nX / Z 通常保持 0"
-    tipLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
-    tipLabel.Font = Enum.Font.Gotham
-    tipLabel.TextSize = 10
-    tipLabel.TextAlignment = Enum.TextAlignment.Center
-    tipLabel.TextWrapped = true
-
     local function close() dialog:Destroy() end
-
-    local function updateBaselineLabel()
-        baselineLabel.Text = "已记录: (" ..
-            string.format("%.2f", camOffsetBaseline.x) .. ", " ..
-            string.format("%.2f", camOffsetBaseline.y) .. ", " ..
-            string.format("%.2f", camOffsetBaseline.z) .. ")"
-    end
 
     btnCancel.MouseButton1Click:Connect(close)
 
     btnReset.MouseButton1Click:Connect(function()
-        boxX.Text = "0.00"
-        boxY.Text = "0.00"
-        boxZ.Text = "0.00"
+        boxX.Text = "0.00"; boxY.Text = "0.00"; boxZ.Text = "0.00"
     end)
 
     btnRecord.MouseButton1Click:Connect(function()
@@ -1972,25 +1926,20 @@ function showCamOffsetDialog()
         local ny = tonumber(boxY.Text) or 0
         local nz = tonumber(boxZ.Text) or 0
         camOffsetBaseline = { x = nx, y = ny, z = nz }
-        updateBaselineLabel()
-        tanchuangxiaoxi("已记录相机偏移基准: (" ..
-            string.format("%.1f", nx) .. ", " ..
-            string.format("%.1f", ny) .. ", " ..
-            string.format("%.1f", nz) .. ")", "相机偏移")
+        baselineLabel.Text = "已记录: (" ..
+            string.format("%.2f", nx) .. ", " ..
+            string.format("%.2f", ny) .. ", " ..
+            string.format("%.2f", nz) .. ")"
+        tanchuangxiaoxi("已记录", "相机偏移")
     end)
 
     btnConfirm.MouseButton1Click:Connect(function()
         local nx = tonumber(boxX.Text) or 0
         local ny = tonumber(boxY.Text) or 0
         local nz = tonumber(boxZ.Text) or 0
-        camOffsetX = nx
-        camOffsetY = ny
-        camOffsetZ = nz
+        camOffsetX = nx; camOffsetY = ny; camOffsetZ = nz
         applyCameraOffset()
-        tanchuangxiaoxi("相机偏移已应用: (" ..
-            string.format("%.1f", nx) .. ", " ..
-            string.format("%.1f", ny) .. ", " ..
-            string.format("%.1f", nz) .. ")", "相机偏移")
+        tanchuangxiaoxi("已应用", "相机偏移")
         close()
     end)
 
@@ -2002,7 +1951,7 @@ function showCamOffsetDialog()
         camOffsetY = camOffsetBaseline.y
         camOffsetZ = camOffsetBaseline.z
         applyCameraOffset()
-        tanchuangxiaoxi("已还原到记录的相机偏移", "相机偏移")
+        tanchuangxiaoxi("已还原", "相机偏移")
     end)
 
     return dialog
@@ -2133,7 +2082,7 @@ local function enableVolumeKey()
     local hasVolumeDown = pcall(function() return Enum.KeyCode.VolumeDown end)
     local hasVolumeUp = pcall(function() return Enum.KeyCode.VolumeUp end)
     if not hasVolumeDown or not hasVolumeUp then
-        tanchuangxiaoxi("您的设备不支持音量键控制", "提示")
+        tanchuangxiaoxi("您的设备不支持音量键", "提示")
         return
     end
     if volumeKeyEnabled then return end
@@ -2142,19 +2091,17 @@ local function enableVolumeKey()
         elseif input.KeyCode == Enum.KeyCode.VolumeUp then setUIVisible(true) end
     end)
     volumeKeyEnabled = true
-    tanchuangxiaoxi("音量键控制已启用：减隐藏，加显示", "设置")
+    tanchuangxiaoxi("音量键已启用", "设置")
 end
 
 local function disableVolumeKey()
     if not volumeKeyEnabled then return end
     if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
     volumeKeyEnabled = false
-    tanchuangxiaoxi("音量键控制已禁用", "设置")
+    tanchuangxiaoxi("音量键已禁用", "设置")
 end
 
--- ==================== 【核心改动】飞行模式选择菜单 ====================
--- 在"自由"和"屏幕"之间插入一个【朝向切换】按钮
--- 点击切换 flyFaceMode，不关闭菜单，只更新自己的文字
+-- ==================== 快捷选择 ====================
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
@@ -2163,7 +2110,6 @@ local function showFlyModeSelection(currentMode, callback)
     local padding = 10
     local titleHeight = 40
     local closeBtnHeight = 40
-    -- 按钮数 = 飞行模式数(5) + 朝向切换按钮(1) = 6
     local totalButtons = #FLY_MODES + 1
     local contentHeight = totalButtons * btnHeight + (totalButtons - 1) * spacing
     local totalHeight = padding + titleHeight + contentHeight + padding + closeBtnHeight + padding
@@ -2214,7 +2160,6 @@ local function showFlyModeSelection(currentMode, callback)
     scrollingFrame.BackgroundTransparency = 1
     scrollingFrame.BorderSizePixel = 0
     scrollingFrame.ScrollingEnabled = needsScrolling
-    scrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150)
 
     local buttonContainer = Instance.new("Frame")
     buttonContainer.Parent = scrollingFrame
@@ -2222,23 +2167,18 @@ local function showFlyModeSelection(currentMode, callback)
     buttonContainer.BackgroundTransparency = 1
 
     local yPos = 0
-
-    -- 【重要变量】朝向切换按钮引用（用于后面更新文字）
     local faceToggleBtn = nil
 
-    -- 更新朝向按钮 UI 的函数
     local function refreshFaceToggleBtn()
         if not faceToggleBtn or not faceToggleBtn.Parent then return end
+        faceToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
         if flyFaceMode == "全局" then
             faceToggleBtn.Text = "🔀 朝向: 全局 (点击切换)"
-            faceToggleBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
         else
             faceToggleBtn.Text = "🔀 朝向: 水平 (点击切换)"
-            faceToggleBtn.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
         end
     end
 
-    -- 遍历插入
     for _, mode in ipairs(FLY_MODES) do
         local isCurrent = (mode == currentMode)
         local button = Instance.new("TextButton")
@@ -2263,13 +2203,12 @@ local function showFlyModeSelection(currentMode, callback)
 
         yPos = yPos + btnHeight + spacing
 
-        -- 【关键】在"自由"按钮之后插入朝向切换按钮
         if mode == "自由" then
             local ftBtn = Instance.new("TextButton")
             ftBtn.Parent = buttonContainer
             ftBtn.Size = UDim2.new(1, -10, 0, btnHeight)
             ftBtn.Position = UDim2.new(0, 0, 0, yPos)
-            ftBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
+            ftBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
             ftBtn.Text = "🔀 朝向: 全局 (点击切换)"
             ftBtn.TextColor3 = Color3.new(1, 1, 1)
             ftBtn.Font = Enum.Font.GothamBold
@@ -2280,7 +2219,6 @@ local function showFlyModeSelection(currentMode, callback)
             ftCorner.Parent = ftBtn
             ftCorner.CornerRadius = UDim.new(0, 4)
 
-            -- 【关键】点击切换，不关闭菜单
             ftBtn.MouseButton1Click:Connect(function()
                 if flyFaceMode == "全局" then
                     flyFaceMode = "水平"
@@ -2288,11 +2226,7 @@ local function showFlyModeSelection(currentMode, callback)
                     flyFaceMode = "全局"
                 end
                 refreshFaceToggleBtn()
-                if isFlying and flyMode == "自由" then
-                    tanchuangxiaoxi("朝向已切换: " .. flyFaceMode .. " (立即生效)", "飞行朝向")
-                else
-                    tanchuangxiaoxi("朝向已切换: " .. flyFaceMode .. " (自由模式下生效)", "飞行朝向")
-                end
+                tanchuangxiaoxi("朝向: " .. flyFaceMode, "飞行朝向")
             end)
 
             faceToggleBtn = ftBtn
@@ -2342,63 +2276,582 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
--- ==================== 自由相机子菜单 ====================
+-- ==================== 准星拾取悬浮窗 ====================
+local pickerGUI = nil
+local pickerBuildingList = {}
+local pickerProtectList = {}
+local pickerSavedTrans = {}
+
+-- 【修复 2】关闭时恢复透明度
+local function closePicker()
+    if not pickerGUI then return end
+    -- 先恢复所有透明度
+    for inst, data in pairs(pickerSavedTrans) do
+        if inst and inst.Parent then
+            if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") then
+                pcall(function() inst.Enabled = data end)
+            else
+                pcall(function() inst.Transparency = data end)
+            end
+        end
+    end
+    -- 如果这些部件在 modifiedBuildingParts 里也同步移除
+    for inst, _ in pairs(pickerBuildingList) do
+        if inst then modifiedBuildingParts[inst] = nil end
+    end
+    pickerSavedTrans = {}
+    pickerBuildingList = {}
+    pickerProtectList = {}
+
+    if pickerGUI and pickerGUI.Parent then
+        pickerGUI:Destroy()
+    end
+    pickerGUI = nil
+    print("[Picker] 已关闭并恢复透明度")
+end
+
+local function refreshPickerList()
+    if not pickerGUI then return end
+    local listContainer = pickerGUI:FindFirstChild("ListContainer", true)
+    if not listContainer then return end
+
+    for _, child in ipairs(listContainer:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+
+    local yPos = 0
+    local rowH = 22
+
+    local grouped = {}
+    for inst, _ in pairs(pickerBuildingList) do
+        if inst and inst.Parent then
+            grouped[inst.Name] = (grouped[inst.Name] or 0) + 1
+        end
+    end
+
+    for name, count in pairs(grouped) do
+        local row = Instance.new("TextButton")
+        row.Size = UDim2.new(1, 0, 0, rowH)
+        row.Position = UDim2.new(0, 0, 0, yPos)
+        row.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
+        row.Text = "🏗 " .. name .. " x" .. count
+        row.TextColor3 = Color3.fromRGB(255, 200, 200)
+        row.Font = Enum.Font.Gotham
+        row.TextSize = 10
+        row.TextXAlignment = Enum.TextXAlignment.Left
+        row.AutoButtonColor = false
+        row.Parent = listContainer
+
+        local rc = Instance.new("UICorner")
+        rc.CornerRadius = UDim.new(0, 4)
+        rc.Parent = row
+
+        row.MouseButton1Down:Connect(function()
+            local toRemove = {}
+            for inst, _ in pairs(pickerBuildingList) do
+                if inst and inst.Parent and inst.Name == name then
+                    table.insert(toRemove, inst)
+                end
+            end
+            for _, inst in ipairs(toRemove) do
+                if pickerSavedTrans[inst] ~= nil then
+                    if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") then
+                        pcall(function() inst.Enabled = pickerSavedTrans[inst] end)
+                    else
+                        pcall(function() inst.Transparency = pickerSavedTrans[inst] end)
+                    end
+                    pickerSavedTrans[inst] = nil
+                end
+                pickerBuildingList[inst] = nil
+                modifiedBuildingParts[inst] = nil
+            end
+            refreshPickerList()
+        end)
+
+        yPos = yPos + rowH + 2
+    end
+
+    for inst, _ in pairs(pickerProtectList) do
+        if inst and inst.Parent then
+            local row = Instance.new("TextButton")
+            row.Size = UDim2.new(1, 0, 0, rowH)
+            row.Position = UDim2.new(0, 0, 0, yPos)
+            row.BackgroundColor3 = Color3.fromRGB(30, 60, 90)
+            row.Text = "🛡 " .. inst.Name
+            row.TextColor3 = Color3.fromRGB(200, 220, 255)
+            row.Font = Enum.Font.Gotham
+            row.TextSize = 10
+            row.TextXAlignment = Enum.TextXAlignment.Left
+            row.AutoButtonColor = false
+            row.Parent = listContainer
+
+            local rc = Instance.new("UICorner")
+            rc.CornerRadius = UDim.new(0, 4)
+            rc.Parent = row
+
+            row.MouseButton1Down:Connect(function()
+                pickerProtectList[inst] = nil
+                refreshPickerList()
+            end)
+
+            yPos = yPos + rowH + 2
+        end
+    end
+
+    listContainer.Size = UDim2.new(1, -8, 0, yPos + 4)
+end
+
+local function createPickerWindow()
+    if pickerGUI and pickerGUI.Parent then return end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "Picker_" .. tostring(math.random(100000, 999999))
+    sg.ResetOnSpawn = false
+    sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 9998
+    sg.Parent = playerGui
+    pickerGUI = sg
+
+    local crosshair = Instance.new("Frame")
+    crosshair.Size = UDim2.new(0, 30, 0, 30)
+    crosshair.Position = UDim2.new(0.5, -15, 0.5, -15)
+    crosshair.BackgroundTransparency = 1
+    crosshair.ZIndex = 100
+    crosshair.Parent = sg
+
+    for _, data in ipairs({{0, 0.5, 10, 2}, {1, 0.5, -10, 2}, {0.5, 0, 2, 10}, {0.5, 1, 2, -10}}) do
+        local l = Instance.new("Frame")
+        l.Size = UDim2.new(0, data[3], 0, data[4])
+        l.Position = UDim2.new(data[1], data[1] == 0.5 and -1 or 0, data[2], data[2] == 0.5 and -1 or 0)
+        l.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+        l.BorderSizePixel = 0
+        l.ZIndex = 101
+        l.Parent = crosshair
+    end
+
+    local dot = Instance.new("Frame")
+    dot.Size = UDim2.new(0, 3, 0, 3)
+    dot.Position = UDim2.new(0.5, -1.5, 0.5, -1.5)
+    dot.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
+    dot.BorderSizePixel = 0
+    dot.ZIndex = 102
+    dot.Parent = crosshair
+
+    local targetBar = Instance.new("Frame")
+    targetBar.Size = UDim2.new(0, 300, 0, 28)
+    targetBar.Position = UDim2.new(0.5, -150, 0.5, 25)
+    targetBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    targetBar.BackgroundTransparency = 0.35
+    targetBar.BorderSizePixel = 0
+    targetBar.ZIndex = 90
+    targetBar.Parent = sg
+
+    local tbCorner = Instance.new("UICorner")
+    tbCorner.CornerRadius = UDim.new(0, 6)
+    tbCorner.Parent = targetBar
+
+    local targetLabel = Instance.new("TextLabel")
+    targetLabel.Name = "TargetLabel"
+    targetLabel.Size = UDim2.new(1, -10, 1, 0)
+    targetLabel.Position = UDim2.new(0, 5, 0, 0)
+    targetLabel.BackgroundTransparency = 1
+    targetLabel.Text = "瞄准中..."
+    targetLabel.TextColor3 = Color3.fromRGB(255, 255, 200)
+    targetLabel.Font = Enum.Font.Code
+    targetLabel.TextSize = 11
+    targetLabel.ZIndex = 91
+    targetLabel.Parent = targetBar
+
+    local cam = workspace.CurrentCamera
+    local SW = cam and cam.ViewportSize.X or 1920
+    local SH = cam and cam.ViewportSize.Y or 1080
+    local PW = math.min(300, math.floor(SW * 0.42))
+    local PH = 320
+
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(0, PW, 0, PH)
+    panel.Position = UDim2.new(1, -PW - 10, 1, -PH - 10)
+    panel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    panel.BackgroundTransparency = 0.15
+    panel.BorderSizePixel = 0
+    panel.ZIndex = 50
+    panel.Parent = sg
+
+    local pc = Instance.new("UICorner")
+    pc.CornerRadius = UDim.new(0, 10)
+    pc.Parent = panel
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 22)
+    title.Position = UDim2.new(0, 10, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "🎯 添加目标"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 13
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 51
+    title.Parent = panel
+
+    local function makeBtn(text, x, y, w, h, bg)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, w, 0, h)
+        b.Position = UDim2.new(0, x, 0, y)
+        b.BackgroundColor3 = bg
+        b.Text = text
+        b.TextColor3 = Color3.fromRGB(255, 255, 255)
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 11
+        b.AutoButtonColor = false
+        b.Active = true
+        b.ZIndex = 60
+        b.Parent = panel
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = b
+        return b
+    end
+
+    local halfW = math.floor((PW - 30) / 2)
+    local btnAddBuilding = makeBtn("➕ 建筑", 10, 32, halfW, 30, Color3.fromRGB(200, 60, 60))
+    local btnAddProtect  = makeBtn("🛡 保护", 20 + halfW, 32, halfW, 30, Color3.fromRGB(60, 140, 200))
+    local btnUndoLast    = makeBtn("↩️ 移除上一个", 10, 68, halfW, 28, Color3.fromRGB(120, 80, 40))
+    local btnClearAll    = makeBtn("🗑 移除全部", 20 + halfW, 68, halfW, 28, Color3.fromRGB(80, 80, 80))
+
+    local listBox = Instance.new("Frame")
+    listBox.Size = UDim2.new(1, -20, 0, PH - 155)
+    listBox.Position = UDim2.new(0, 10, 0, 104)
+    listBox.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+    listBox.BorderSizePixel = 0
+    listBox.ClipsDescendants = true
+    listBox.Active = true
+    listBox.ZIndex = 55
+    listBox.Parent = panel
+
+    local lc = Instance.new("UICorner")
+    lc.CornerRadius = UDim.new(0, 5)
+    lc.Parent = listBox
+
+    local listContainer = Instance.new("Frame")
+    listContainer.Name = "ListContainer"
+    listContainer.Size = UDim2.new(1, -8, 0, 20)
+    listContainer.Position = UDim2.new(0, 4, 0, 4)
+    listContainer.BackgroundTransparency = 1
+    listContainer.ZIndex = 56
+    listContainer.Parent = listBox
+
+    local btnClose = makeBtn("🛑 关闭", 10, PH - 38, PW - 20, 30, Color3.fromRGB(180, 40, 40))
+
+    local currentTarget = nil
+    local lastBuildingAdded = nil
+
+    RunService.RenderStepped:Connect(function()
+        if not sg.Parent then return end
+        local cam2 = workspace.CurrentCamera
+        if not cam2 then return end
+        local vp = cam2.ViewportSize
+        local center = Vector2.new(vp.X / 2, vp.Y / 2)
+        local ray = cam2:ViewportPointToRay(center.X, center.Y)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = { player.Character }
+        params.IgnoreWater = true
+        local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+        currentTarget = result and result.Instance or nil
+    end)
+
+    task.spawn(function()
+        while sg.Parent do
+            if currentTarget then
+                local t = "-"
+                if currentTarget:IsA("BasePart") then
+                    t = string.format("%.2f", currentTarget.Transparency)
+                end
+                targetLabel.Text = currentTarget.Name .. " (" .. currentTarget.ClassName .. ") T=" .. t
+            else
+                targetLabel.Text = "瞄准中..."
+            end
+            task.wait(0.1)
+        end
+    end)
+
+    local function applyBuildingTo(inst)
+        if not inst or not inst.Parent then return 0 end
+        local count = 0
+        local function handle(obj)
+            if obj:IsA("BasePart") then
+                if not pickerBuildingList[obj] and not pickerProtectList[obj] then
+                    pickerBuildingList[obj] = true
+                    pickerSavedTrans[obj] = obj.Transparency
+                    -- 【修复 1】同步到 modifiedBuildingParts，便于 disableBuildingRemoval 恢复
+                    if not modifiedBuildingParts[obj] then
+                        modifiedBuildingParts[obj] = { CanCollide = obj.CanCollide, Transparency = obj.Transparency }
+                    end
+                    pcall(function() obj.Transparency = 0.7 end)
+                    count = count + 1
+                end
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                if not pickerBuildingList[obj] then
+                    pickerBuildingList[obj] = true
+                    pickerSavedTrans[obj] = obj.Transparency
+                    pcall(function() obj.Transparency = 0.7 end)
+                    count = count + 1
+                end
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail")
+                or obj:IsA("Beam") or obj:IsA("Fire") or obj:IsA("Smoke") then
+                if not pickerBuildingList[obj] then
+                    pickerBuildingList[obj] = true
+                    pickerSavedTrans[obj] = obj.Enabled
+                    pcall(function() obj.Enabled = false end)
+                    count = count + 1
+                end
+            end
+        end
+        handle(inst)
+        for _, d in ipairs(inst:GetDescendants()) do
+            handle(d)
+        end
+        return count
+    end
+
+    btnAddBuilding.MouseButton1Down:Connect(function()
+        if not currentTarget then return end
+        local model = currentTarget:FindFirstAncestorOfClass("Model")
+        local target = model or currentTarget
+        applyBuildingTo(target)
+        lastBuildingAdded = target
+        refreshPickerList()
+    end)
+
+    btnAddProtect.MouseButton1Down:Connect(function()
+        if not currentTarget then return end
+        pickerProtectList[currentTarget] = true
+        refreshPickerList()
+    end)
+
+    btnUndoLast.MouseButton1Down:Connect(function()
+        if not lastBuildingAdded then return end
+        local toRemove = {}
+        local function collect(obj)
+            if pickerBuildingList[obj] then
+                table.insert(toRemove, obj)
+            end
+        end
+        collect(lastBuildingAdded)
+        for _, d in ipairs(lastBuildingAdded:GetDescendants()) do
+            collect(d)
+        end
+        for _, obj in ipairs(toRemove) do
+            if pickerSavedTrans[obj] ~= nil then
+                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Fire") or obj:IsA("Smoke") then
+                    pcall(function() obj.Enabled = pickerSavedTrans[obj] end)
+                else
+                    pcall(function() obj.Transparency = pickerSavedTrans[obj] end)
+                end
+            end
+            pickerBuildingList[obj] = nil
+            pickerSavedTrans[obj] = nil
+            modifiedBuildingParts[obj] = nil
+        end
+        lastBuildingAdded = nil
+        refreshPickerList()
+        tanchuangxiaoxi("已移除上一组", "添加目标")
+    end)
+
+    btnClearAll.MouseButton1Down:Connect(function()
+        for inst, data in pairs(pickerSavedTrans) do
+            if inst and inst.Parent then
+                if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") then
+                    pcall(function() inst.Enabled = data end)
+                else
+                    pcall(function() inst.Transparency = data end)
+                end
+            end
+        end
+        for inst, _ in pairs(pickerBuildingList) do
+            if inst then modifiedBuildingParts[inst] = nil end
+        end
+        pickerBuildingList = {}
+        pickerProtectList = {}
+        pickerSavedTrans = {}
+        lastBuildingAdded = nil
+        refreshPickerList()
+        tanchuangxiaoxi("已清空全部", "添加目标")
+    end)
+
+    btnClose.MouseButton1Down:Connect(function()
+        closePicker()
+    end)
+
+    refreshPickerList()
+    print("[Picker] 拾取悬浮窗已创建")
+end
+
+-- ==================== 智能扫描 ====================
+local SMART_PROTECT_PARENT = {
+    "npc", "mob", "monster", "entity", "creature", "chest", "loot", "reward",
+    "spawn", "item", "pickup", "player", "character", "interactive", "trigger",
+    "portal", "ui", "gui", "hud", "camera", "effect", "怪物", "宝箱",
+}
+local SMART_PROTECT_NAME = {
+    "chest", "宝箱", "box", "spawn", "mob", "npc", "entity",
+    "item", "loot", "button", "portal", "trigger", "dummy", "target",
+    "invisible", "barrier", "boundary", "空气墙",
+}
+local SMART_EXCLUDE_CLASS = {
+    ["SpawnLocation"] = true, ["Tool"] = true, ["Seat"] = true,
+    ["VehicleSeat"] = true, ["Accessory"] = true,
+}
+
+local function smartClassify(part)
+    if part:IsA("Terrain") then return false end
+    if part.Transparency >= 0.5 then return false end
+    if SMART_EXCLUDE_CLASS[part.ClassName] then return false end
+
+    local top = part
+    while top and top.Parent and top.Parent ~= workspace do top = top.Parent end
+    if top then
+        local n = string.lower(top.Name)
+        for _, kw in ipairs(SMART_PROTECT_PARENT) do
+            if string.find(n, kw, 1, true) then return false end
+        end
+    end
+
+    local n = string.lower(part.Name)
+    for _, kw in ipairs(SMART_PROTECT_NAME) do
+        if string.find(n, kw, 1, true) then return false end
+    end
+
+    for _, child in ipairs(part:GetChildren()) do
+        if child:IsA("ProximityPrompt") or child:IsA("ClickDetector") then return false end
+        if child:IsA("SurfaceGui") or child:IsA("BillboardGui") then
+            for _, sub in ipairs(child:GetDescendants()) do
+                if sub:IsA("TextButton") or sub:IsA("ImageButton") then return false end
+            end
+        end
+    end
+
+    local model = part:FindFirstAncestorOfClass("Model")
+    if model and model:FindFirstChildOfClass("Humanoid") then return false end
+
+    for _, child in ipairs(part:GetChildren()) do
+        if child:IsA("Script") or child:IsA("LocalScript") then return false end
+    end
+
+    return true
+end
+
+-- 【修复 1】智能扫描同步写入 modifiedBuildingParts
+local function runSmartScan()
+    local count = 0
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and not obj:IsA("Terrain") then
+            local ok, isBuilding = pcall(smartClassify, obj)
+            if ok and isBuilding then
+                if not pickerBuildingList[obj] and not pickerProtectList[obj] then
+                    pickerBuildingList[obj] = true
+                    pickerSavedTrans[obj] = obj.Transparency
+                    -- 【关键】同步写入 modifiedBuildingParts
+                    if not modifiedBuildingParts[obj] then
+                        modifiedBuildingParts[obj] = { CanCollide = obj.CanCollide, Transparency = obj.Transparency }
+                    end
+                    pcall(function() obj.Transparency = 0.7 end)
+                    count = count + 1
+                end
+            end
+        end
+    end
+    print("[SmartScan] 智能扫描处理 " .. count .. " 个部件")
+    return count
+end
+
+-- ==================== 建筑模式菜单 ====================
+local function showBuildingModeMenu(parentMenu)
+    local buttons = {}
+    table.insert(buttons, {
+        text = BUILDING_MODES[1] .. (buildingRemovalMode == 1 and " ✓" or ""),
+        callback = function(menu)
+            buildingRemovalMode = 1
+            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
+            updateSpeedButtonText()
+            tanchuangxiaoxi("已切换: 移除墙体", "设置")
+            menu:Destroy()
+        end
+    })
+    table.insert(buttons, {
+        text = BUILDING_MODES[2] .. (buildingRemovalMode == 2 and " ✓" or ""),
+        callback = function(menu)
+            buildingRemovalMode = 2
+            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
+            updateSpeedButtonText()
+            tanchuangxiaoxi("已切换: 移除墙体+贴图", "设置")
+            menu:Destroy()
+        end
+    })
+    table.insert(buttons, {
+        text = BUILDING_MODES[3] .. (buildingRemovalMode == 3 and " ✓" or ""),
+        callback = function(menu)
+            buildingRemovalMode = 3
+            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
+            updateSpeedButtonText()
+            tanchuangxiaoxi("已切换: 仅移除贴图", "设置")
+            menu:Destroy()
+        end
+    })
+    table.insert(buttons, {
+        text = BUILDING_MODES[4] .. " (当前: " .. buildingTransparency .. ")",
+        callback = function(menu)
+            menu:Destroy()
+            showInputDialog("输入透明度 (0-1)", tostring(buildingTransparency), function(val)
+                local num = tonumber(val)
+                if num and num >= 0 and num <= 1 then
+                    buildingTransparency = num
+                    if buildingRemovalEnabled and (buildingRemovalMode == 2 or buildingRemovalMode == 3) then
+                        disableBuildingRemoval()
+                        enableBuildingRemoval()
+                    end
+                    updateSpeedButtonText()
+                    tanchuangxiaoxi("透明度已设为 " .. num, "设置")
+                else tanchuangxiaoxi("请输入0到1", "错误") end
+            end)
+        end
+    })
+    table.insert(buttons, {
+        text = "🎯 " .. BUILDING_MODES[5],
+        callback = function(menu)
+            menu:Destroy()
+            createPickerWindow()
+        end
+    })
+    createMenu("选择移除模式", buttons, parentMenu)
+end
+
+-- ==================== 自由相机菜单 ====================
 local function showCameraMenu(parentMenu)
     local function buildCamMenu()
-        local freezeText = camFreezeEnabled
-            and "🧊 冻结解锁: 开启中 (点击关闭)"
-            or  "🧊 冻结解锁: 关闭"
-        local noClipText = camNoClipEnabled
-            and "👻 相机穿墙: 开启 (点击关闭)"
-            or  "👻 相机穿墙: 关闭"
-        local snapText = camSnapshot
-            and ("📸 重新拍摄快照 (上次 " .. os.date("%H:%M:%S", camSnapshot.takenAt) .. ")")
-            or  "📸 重新拍摄快照 (尚未记录)"
-        local restoreText = camSnapshot
-            and "↩️ 恢复到快照"
-            or  "↩️ 恢复到快照 (无快照)"
+        local freezeText = camFreezeEnabled and "🧊 冻结解锁: 开启中" or "🧊 冻结解锁: 关闭"
+        local noClipText = camNoClipEnabled and "👻 相机穿墙: 开启" or "👻 相机穿墙: 关闭"
+        local snapText = camSnapshot and ("📸 重新拍摄 (上次 " .. os.date("%H:%M:%S", camSnapshot.takenAt) .. ")") or "📸 重新拍摄快照"
+        local restoreText = camSnapshot and "↩️ 恢复到快照" or "↩️ 恢复到快照 (无)"
 
         createMenu("🎥 自由相机", {
-            {
-                text = freezeText,
-                callback = function(subMenu)
-                    if camFreezeEnabled then stopCamFreeze() else startCamFreeze(true) end
-                    subMenu:Destroy()
-                    buildCamMenu()
-                end
-            },
-            {
-                text = "🔓 单次解锁 (仅改一次)",
-                callback = function(subMenu)
-                    doCamSingleUnlock(true)
-                    subMenu:Destroy()
-                    buildCamMenu()
-                end
-            },
-            {
-                text = noClipText,
-                callback = function(subMenu)
-                    if camNoClipEnabled then disableCamNoClip() else enableCamNoClip() end
-                    subMenu:Destroy()
-                    buildCamMenu()
-                end
-            },
-            {
-                text = snapText,
-                callback = function(subMenu)
-                    manualResnap()
-                    subMenu:Destroy()
-                    buildCamMenu()
-                end
-            },
-            {
-                text = restoreText,
-                callback = function(subMenu)
-                    restoreFromCamSnapshot()
-                    subMenu:Destroy()
-                    buildCamMenu()
-                end
-            },
+            { text = freezeText, callback = function(sm)
+                if camFreezeEnabled then stopCamFreeze() else startCamFreeze(true) end
+                sm:Destroy(); buildCamMenu()
+            end },
+            { text = "🔓 单次解锁", callback = function(sm)
+                doCamSingleUnlock(true); sm:Destroy(); buildCamMenu()
+            end },
+            { text = noClipText, callback = function(sm)
+                if camNoClipEnabled then disableCamNoClip() else enableCamNoClip() end
+                sm:Destroy(); buildCamMenu()
+            end },
+            { text = snapText, callback = function(sm)
+                manualResnap(); sm:Destroy(); buildCamMenu()
+            end },
+            { text = restoreText, callback = function(sm)
+                restoreFromCamSnapshot(); sm:Destroy(); buildCamMenu()
+            end },
         }, parentMenu)
     end
     buildCamMenu()
@@ -2455,36 +2908,20 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.0.2 更新内容：",
+                    "版本 8.1.1 更新内容：",
                     "",
-                    "1. 完美整合建筑移除功能，不摧毁地图",
-                    "2. 建筑贴图透明度完全支持0~1手动调节",
-                    "3. 增加循环模式扩充，共5个状态",
-                    "4. 加入5项死亡与重生状态管理逻辑 (透视独立)",
-                    "5. 透视模式下，支持使用增加/减少按钮微调亮度",
-                    "6. 穿墙逻辑改为动态防回弹，支持跳跃保护",
-                    "7. 死亡模式1死亡瞬间关闭失效Bug已修复",
-                    "8. 透视模式拖拽进度条时主UI数值不更新Bug已修复",
-                    "9. 透视悬浮窗集成6项渲染控制（含冻结机制）",
-                    "10. 渲染开关恢复逻辑与重置UI不同步问题已修复",
-                    "11. 移速模式下，界面实时更新角色当前速度",
-                    "12. 飞天模式增加泳姿(旧版)与自由(新版)，默认泳姿",
-                    "13. 死亡处理模式默认值改为模式1",
-                    "14. 主UI与迷你UI使用独立变量追踪坐标，零漂移零延迟",
-                    "15. 默认生成在屏幕正中央",
-                    "16. 多点触控防冲突（左手摇杆 + 右手拖拽UI互不干扰）",
-                    "17. 迷你窗口展开时位置跟随小UI当前位置",
-                    "18. 快速拖动被误判为点击问题已修复（双指标判定）",
-                    "19. 移速记忆逻辑重写：开启读当前值，关闭即清空",
-                    "20. 移速新增3种物理加速方案：持续力/物理速度/强制位移",
-                    "21. 设置里新增『自由相机』模块",
-                    "22. 设置新增『相机偏移 X/Y/Z』，可自定义俯视角度",
-                    "23. 【本次】UI标签恢复，主面板宽190，拖动不再冲突",
-                    "24. 【本次】飞行模式下新增『朝向: 全局/水平』切换按钮",
-                    "      · 位置：泳姿、自由之下，屏幕之上",
-                    "      · 点击切换，不关闭菜单",
-                    "      · 水平模式消除自由飞行的低头抖动",
-                    "25. 【本次】自由模式 BodyGyro 挂载点改为 HRP，消除抖动",
+                    "1-21. (略，历史更新)",
+                    "22. UI 拖动改为 Frame.MouseButton1Down",
+                    "23. 飞天/移速开关异常修复（去掉 task.wait 竞争）",
+                    "24. 朝向按钮改为灰色（不显示颜色）",
+                    "25. 建筑移除模式新增第 5 个: 添加目标",
+                    "26. 长按速度按钮 → 5 个移除模式",
+                    "27. 添加目标 → 创建准星拾取悬浮窗",
+                    "28. 建筑移除开启时自动智能扫描",
+                    "29. 【本次修复】智能扫描同步写入 modifiedBuildingParts",
+                    "30. 【本次修复】closePicker 关闭时恢复透明度",
+                    "31. 【本次修复】restoreFeatureStates 去掉 task.wait",
+                    "32. 【本次修复】speed/onof/hide 改用时间戳判定长按",
                     "",
                     "感谢使用！"
                 }
@@ -2582,23 +3019,18 @@ function showMainMenu()
 
                 local lines = {
                     "🔹 主按钮循环：飞天 ➔ 移速 ➔ 穿墙 ➔ 删除 ➔ 透视",
-                    "🔹 删除模式下单点速度标签直接输入透明度",
-                    "🔹 穿透与夜视依然是独立的，且重生后完美继承",
-                    "🔹 透视模式下，加速/减速按钮自动切换为增加/减少",
-                    "🔹 穿墙开启后，跳跃瞬间自动防护，不会被墙体弹开",
-                    "🔹 透视悬浮窗支持独立开关阴影、遮蔽、迷雾、大气、亮光",
-                    "🔹 移速记忆逻辑：开启时以当前真实速度为准，关闭时清空",
-                    "🔹 移速子模式『修改』：直接改 WalkSpeed，脚踩地面最稳",
-                    "🔹 移速子模式『持续力/物理速度/强制位移』：3种物理加速",
-                    "🔹 设置 - 自由相机：解决部分游戏强制第一人称问题",
-                    "🔹 冻结解锁：每帧对抗，游戏抢不走你的视角",
-                    "🔹 相机穿墙：使用官方 Invisicam 模式，防被墙挤",
-                    "🔹 设置 - 相机偏移：可自定义相机相对于身体的位置",
-                    "🔹 【本次】长按速度标签 → 飞行模式菜单 → 在「自由」之下有朝向切换按钮",
-                    "      · 全局：身体完全跟随相机（含俯仰）",
-                    "      · 水平：身体只跟随水平朝向（Yaw Only，消除低头抖动）",
-                    "      · 点击切换，不关闭菜单，方便连续选择",
-                    "🔹 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
+                    "🔹 长按主按钮切换模式",
+                    "🔹 移速子模式: 修改/持续力/物理速度/强制位移",
+                    "🔹 长按速度标签 → 各模式细节设置",
+                    "🔹 建筑模式长按 → 5 个模式（含添加目标）",
+                    "🔹 添加目标 → 准星拾取悬浮窗",
+                    "      · 瞄准物体点『建筑』→ 变半透明",
+                    "      · 点『保护』→ 不动",
+                    "      · 递归处理 Model 下所有部件+贴图+粒子",
+                    "      · 关闭时自动恢复透明度",
+                    "🔹 设置 - 自由相机：冻结/单次/穿墙/快照",
+                    "🔹 设置 - 相机偏移：自定义相机相对身体位置",
+                    "🔹 音量键隐藏：按音量减隐藏 UI，加显示",
                 }
 
                 local contentContainer = Instance.new("Frame")
@@ -2658,58 +3090,55 @@ function showMainMenu()
                                 showInputDialog("输入透明度 (0-1)", tostring(popupTransparency), function(val)
                                     if tonumber(val) >= 0 and tonumber(val) <= 1 then
                                         popupTransparency = tonumber(val)
-                                        tanchuangxiaoxi("弹窗透明度已设为 " .. val, "设置")
-                                    else tanchuangxiaoxi("请输入0到1之间的数字", "错误") end
+                                        tanchuangxiaoxi("透明度已设为 " .. val, "设置")
+                                    else tanchuangxiaoxi("请输入0到1", "错误") end
                                 end)
                             end
                         },
                         {
-                            text = volumeKeyEnabled and "🔊 音量键隐藏: 开启" or "🔊 音量键隐藏: 关闭",
+                            text = volumeKeyEnabled and "🔊 音量键: 开启" or "🔊 音量键: 关闭",
                             callback = function(subMenu)
                                 if volumeKeyEnabled then disableVolumeKey() else enableVolumeKey() end
-                                subMenu:Destroy()
-                                createSettingMenu()
+                                subMenu:Destroy(); createSettingMenu()
                             end
                         },
                         {
                             text = "⚡ 长按速度",
                             callback = function(subMenu)
-                                showInputDialog("输入长按初始间隔 (秒，大于0)", tostring(longPressSpeed), function(val)
+                                showInputDialog("输入长按初始间隔 (秒)", tostring(longPressSpeed), function(val)
                                     if val and val > 0 then
                                         longPressSpeed = val
-                                        tanchuangxiaoxi("长按速度已设为 " .. val .. " 秒", "设置")
-                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
+                                        tanchuangxiaoxi("已设为 " .. val, "设置")
+                                    else tanchuangxiaoxi("请输入大于0", "错误") end
                                 end)
                             end
                         },
                         {
-                            text = "📈 调整增长量 (当前: " .. incStep .. ")",
+                            text = "📈 增长量 (当前: " .. incStep .. ")",
                             callback = function(subMenu)
-                                showInputDialog("输入增长量（加速/减速步长）", tostring(incStep), function(val)
+                                showInputDialog("输入增长量", tostring(incStep), function(val)
                                     if val and val > 0 then
                                         incStep = val
-                                        tanchuangxiaoxi("增长量已设为 " .. val, "设置")
-                                        subMenu:Destroy()
-                                        createSettingMenu()
-                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
+                                        tanchuangxiaoxi("已设为 " .. val, "设置")
+                                        subMenu:Destroy(); createSettingMenu()
+                                    else tanchuangxiaoxi("请输入大于0", "错误") end
                                 end)
                             end
                         },
                         {
-                            text = "💪 加速力度系数 (当前: " .. accelForceScale .. ")",
+                            text = "💪 加速力度 (当前: " .. accelForceScale .. ")",
                             callback = function(subMenu)
-                                showInputDialog("输入加速力度系数（越大越猛）", tostring(accelForceScale), function(val)
+                                showInputDialog("输入加速力度系数", tostring(accelForceScale), function(val)
                                     if val and val > 0 then
                                         accelForceScale = val
-                                        tanchuangxiaoxi("加速力度系数已设为 " .. val, "加速设置")
-                                        subMenu:Destroy()
-                                        createSettingMenu()
-                                    else tanchuangxiaoxi("请输入大于0的数字", "错误") end
+                                        tanchuangxiaoxi("已设为 " .. val, "设置")
+                                        subMenu:Destroy(); createSettingMenu()
+                                    else tanchuangxiaoxi("请输入大于0", "错误") end
                                 end)
                             end
                         },
                         {
-                            text = "📷 相机偏移 (X/Y/Z) 当前: (" ..
+                            text = "📷 相机偏移 当前: (" ..
                                 string.format("%.1f", camOffsetX) .. ", " ..
                                 string.format("%.1f", camOffsetY) .. ", " ..
                                 string.format("%.1f", camOffsetZ) .. ")",
@@ -2742,13 +3171,13 @@ function showMainMenu()
                                         text = modeName .. (deathMode == i and " ✓" or ""),
                                         callback = function(subMenu)
                                             deathMode = i
-                                            tanchuangxiaoxi("已切换至: 模式 " .. i, "死亡设置")
+                                            tanchuangxiaoxi("已切换: 模式 " .. i, "死亡设置")
                                             subMenu:Destroy()
                                             createSettingMenu()
                                         end
                                     })
                                 end
-                                createMenu("选择死亡处理模式\n(透视独立，不受此控制)", buttons, createSettingMenu)
+                                createMenu("选择死亡处理模式", buttons, createSettingMenu)
                             end
                         },
                     }, showMainMenu)
@@ -2777,6 +3206,7 @@ function showMainMenu()
                             disableNightVision()
                             stopCamFreeze()
                             disableCamNoClip()
+                            closePicker()
                             if main and main.Parent then main:Destroy() end
                             if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
                             for _, notif in ipairs(notifs) do
@@ -2836,90 +3266,113 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 上升按钮 ====================
+-- ==================== 上升/下降按钮 ====================
 do
-    local holding = false
-    local longPressTask = nil
-    local function startLongPress()
-        if not holding then return end
-        local interval = longPressSpeed
-        while holding do
-            local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                local rootPart = char.HumanoidRootPart
-                rootPart.CFrame = rootPart.CFrame + getMoveVector(1, rootPart)
-            end
-            task.wait(interval)
-            interval = math.max(0.001, interval * 0.9)
-        end
-    end
+    local pressStartTime = 0
+    local isPressing = false
+    local lastInterval = 0
+
     up.MouseButton1Down:Connect(function()
-        if holding then return end
-        holding = true
+        if isPressing then return end
+        isPressing = true
+        pressStartTime = tick()
+        lastInterval = tick()
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local rootPart = char.HumanoidRootPart
             rootPart.CFrame = rootPart.CFrame + getMoveVector(1, rootPart)
         end
-        longPressTask = task.delay(0.3, function() if holding then startLongPress() end end)
     end)
-    local function stopPress()
-        if holding then holding = false
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
-        end
-    end
-    up.MouseButton1Up:Connect(stopPress)
-    up.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then stopPress() end
-    end)
-end
+    up.MouseButton1Up:Connect(function() isPressing = false end)
+    up.MouseLeave:Connect(function() isPressing = false end)
 
--- ==================== 下降按钮 ====================
-do
-    local holding = false
-    local longPressTask = nil
-    local function startLongPress()
-        if not holding then return end
-        local interval = longPressSpeed
-        while holding do
+    RunService.Heartbeat:Connect(function()
+        if not isPressing then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        interval = math.max(0.001, interval)
+        if tick() - lastInterval >= interval then
+            lastInterval = tick()
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
                 local rootPart = char.HumanoidRootPart
-                rootPart.CFrame = rootPart.CFrame + getMoveVector(-1, rootPart)
+                rootPart.CFrame = rootPart.CFrame + getMoveVector(1, rootPart)
             end
-            task.wait(interval)
-            interval = math.max(0.001, interval * 0.9)
         end
-    end
+    end)
+end
+
+do
+    local pressStartTime = 0
+    local isPressing = false
+    local lastInterval = 0
+
     down.MouseButton1Down:Connect(function()
-        if holding then return end
-        holding = true
+        if isPressing then return end
+        isPressing = true
+        pressStartTime = tick()
+        lastInterval = tick()
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local rootPart = char.HumanoidRootPart
             rootPart.CFrame = rootPart.CFrame + getMoveVector(-1, rootPart)
         end
-        longPressTask = task.delay(0.3, function() if holding then startLongPress() end end)
     end)
-    local function stopPress()
-        if holding then holding = false
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
+    down.MouseButton1Up:Connect(function() isPressing = false end)
+    down.MouseLeave:Connect(function() isPressing = false end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        interval = math.max(0.001, interval)
+        if tick() - lastInterval >= interval then
+            lastInterval = tick()
+            local char = player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local rootPart = char.HumanoidRootPart
+                rootPart.CFrame = rootPart.CFrame + getMoveVector(-1, rootPart)
+            end
         end
-    end
-    down.MouseButton1Up:Connect(stopPress)
-    down.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then stopPress() end
     end)
 end
 
--- ==================== 加速按钮 ====================
+-- ==================== 加速/减速按钮 ====================
 do
-    local holding = false
-    local longPressTask = nil
-    local function startLongPress()
-        if not holding then return end
-        local interval = longPressSpeed
-        while holding do
+    local pressStartTime = 0
+    local isPressing = false
+    local lastInterval = 0
+
+    plus.MouseButton1Down:Connect(function()
+        if isPressing then return end
+        if modeIndex == 1 and not speedModeEnabled then return end
+        isPressing = true
+        pressStartTime = tick()
+        lastInterval = tick()
+        if modeIndex == 0 then
+            speeds = speeds + incStep; speed.Text = tostring(speeds)
+        elseif modeIndex == 1 then
+            lockedSpeed = lockedSpeed + incStep; updateSpeedButtonText()
+        elseif modeIndex == 4 then
+            nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
+            nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
+            if nightVisionEnabled then applyNightVision() end
+            updateSpeedButtonText()
+        end
+    end)
+    plus.MouseButton1Up:Connect(function() isPressing = false end)
+    plus.MouseLeave:Connect(function() isPressing = false end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        interval = math.max(0.001, interval)
+        if tick() - lastInterval >= interval then
+            lastInterval = tick()
             if modeIndex == 0 then
                 speeds = speeds + incStep; speed.Text = tostring(speeds)
             elseif modeIndex == 1 and speedModeEnabled then
@@ -2930,370 +3383,383 @@ do
                 if nightVisionEnabled then applyNightVision() end
                 updateSpeedButtonText()
             end
-            task.wait(interval)
-            interval = math.max(0.001, interval * 0.9)
         end
+    end)
+end
+
+do
+    local pressStartTime = 0
+    local isPressing = false
+    local lastInterval = 0
+    local MIN_SPEED = 0.1
+    local MIN_LOCKED = 0.1
+    local MIN_PHYS = 10
+
+    local function getMinLocked()
+        return isPhysMode() and MIN_PHYS or MIN_LOCKED
     end
-    plus.MouseButton1Down:Connect(function()
-        if holding then return end
-        if modeIndex == 1 and not speedModeEnabled then return end
-        holding = true
-        if modeIndex == 0 then speeds = speeds + incStep; speed.Text = tostring(speeds)
-        elseif modeIndex == 1 then lockedSpeed = lockedSpeed + incStep; updateSpeedButtonText()
+
+    local function decreaseOnce()
+        if modeIndex == 0 then
+            local current = tonumber(speeds) or 0
+            if current > incStep then speeds = current - incStep
+            elseif current > MIN_SPEED then speeds = MIN_SPEED end
+            speed.Text = tostring(speeds)
+        elseif modeIndex == 1 and speedModeEnabled then
+            local minLock = getMinLocked()
+            if lockedSpeed > incStep then lockedSpeed = lockedSpeed - incStep
+            elseif lockedSpeed > minLock then lockedSpeed = minLock end
+            updateSpeedButtonText()
         elseif modeIndex == 4 then
-            nightVisionBrightness = clamp(nightVisionBrightness + 0.05, 0.01, 100)
+            nightVisionBrightness = clamp(nightVisionBrightness - 0.05, 0.01, 100)
             nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
             if nightVisionEnabled then applyNightVision() end
             updateSpeedButtonText()
         end
-        longPressTask = task.delay(0.3, function() if holding then startLongPress() end end)
-    end)
-    local function stopPress()
-        if holding then holding = false
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
-        end
     end
-    plus.MouseButton1Up:Connect(stopPress)
-    plus.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then stopPress() end
-    end)
-end
 
--- ==================== 减速按钮 ====================
-do
-    local holding = false
-    local longPressTask = nil
-    local MIN_SPEED = 0.1
-    local MIN_LOCKED = 0.1
-    local MIN_PHYS = 10
-    local function getMinLocked()
-        return isPhysMode() and MIN_PHYS or MIN_LOCKED
-    end
-    local function decreaseFlySpeed()
-        local current = tonumber(speeds) or 0
-        if current > incStep then current = current - incStep
-        elseif current > MIN_SPEED then current = MIN_SPEED
-        else
-            speed.Text = "已达最小速度"; task.wait(1); speed.Text = tostring(speeds); return false
-        end
-        speeds = current; speed.Text = tostring(speeds); return true
-    end
-    local function decreaseLockedSpeed()
-        local minLock = getMinLocked()
-        if lockedSpeed > incStep then lockedSpeed = lockedSpeed - incStep
-        elseif lockedSpeed > minLock then lockedSpeed = minLock
-        else
-            speed.Text = "已达最小速度"; task.wait(1); updateSpeedButtonText(); return false
-        end
-        return true
-    end
-    local function decreaseNightVision()
-        nightVisionBrightness = clamp(nightVisionBrightness - 0.05, 0.01, 100)
-        nightVisionBrightness = math.floor(nightVisionBrightness * 100 + 0.5) / 100
-        if nightVisionEnabled then applyNightVision() end
-        updateSpeedButtonText()
-        return true
-    end
-    local function startLongPress()
-        if not holding then return end
-        local interval = longPressSpeed
-        while holding do
-            local success = false
-            if modeIndex == 0 then success = decreaseFlySpeed()
-            elseif modeIndex == 1 and speedModeEnabled then
-                success = decreaseLockedSpeed(); if success then updateSpeedButtonText() end
-            elseif modeIndex == 4 then success = decreaseNightVision() end
-            if not success then break end
-            task.wait(interval)
-            interval = math.max(0.001, interval * 0.9)
-        end
-    end
     mine.MouseButton1Down:Connect(function()
-        if holding then return end
+        if isPressing then return end
         if modeIndex == 1 and not speedModeEnabled then return end
-        holding = true
-        if modeIndex == 0 then decreaseFlySpeed()
-        elseif modeIndex == 1 then decreaseLockedSpeed(); updateSpeedButtonText()
-        elseif modeIndex == 4 then decreaseNightVision() end
-        longPressTask = task.delay(0.3, function() if holding then startLongPress() end end)
+        isPressing = true
+        pressStartTime = tick()
+        lastInterval = tick()
+        decreaseOnce()
     end)
-    local function stopPress()
-        if holding then holding = false
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
+    mine.MouseButton1Up:Connect(function() isPressing = false end)
+    mine.MouseLeave:Connect(function() isPressing = false end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed < 0.3 then return end
+        local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
+        interval = math.max(0.001, interval)
+        if tick() - lastInterval >= interval then
+            lastInterval = tick()
+            decreaseOnce()
         end
-    end
-    mine.MouseButton1Up:Connect(stopPress)
-    mine.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then stopPress() end
     end)
 end
 
--- ==================== 速度标签 ====================
+-- ==================== 【修复 4】速度标签：Heartbeat + 时间戳 ====================
 do
-    local holding = false
-    local longPressTask = nil
-    speed.MouseButton1Down:Connect(function()
-        if holding then return end
-        holding = true
-        longPressTask = task.delay(0.3, function()
-            if holding then
-                if modeIndex == 3 then
-                    createMenu("选择移除模式", {
-                        { text = "移除墙体 (不移除贴图)" .. (buildingRemovalMode == 1 and " ✓" or ""),
-                          callback = function(menu) buildingRemovalMode = 1
-                            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
-                            updateSpeedButtonText(); tanchuangxiaoxi("已切换至: 移除墙体", "设置"); menu:Destroy() end },
-                        { text = "移除墙体 + 移除贴图" .. (buildingRemovalMode == 2 and " ✓" or ""),
-                          callback = function(menu) buildingRemovalMode = 2
-                            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
-                            updateSpeedButtonText(); tanchuangxiaoxi("已切换至: 移除墙体+贴图", "设置"); menu:Destroy() end },
-                        { text = "仅移除墙体贴图" .. (buildingRemovalMode == 3 and " ✓" or ""),
-                          callback = function(menu) buildingRemovalMode = 3
-                            if buildingRemovalEnabled then disableBuildingRemoval() enableBuildingRemoval() end
-                            updateSpeedButtonText(); tanchuangxiaoxi("已切换至: 仅移除贴图", "设置"); menu:Destroy() end },
-                        { text = "🔆 调整贴图透明度 (当前: " .. buildingTransparency .. ")",
-                          callback = function(menu) menu:Destroy()
-                            showInputDialog("输入透明度 (0-1)", tostring(buildingTransparency), function(val)
-                                local num = tonumber(val)
-                                if num and num >= 0 and num <= 1 then
-                                    buildingTransparency = num
-                                    if buildingRemovalEnabled and (buildingRemovalMode == 2 or buildingRemovalMode == 3) then
-                                        disableBuildingRemoval(); enableBuildingRemoval()
-                                    end
-                                    updateSpeedButtonText(); tanchuangxiaoxi("建筑透明度已设为 " .. num, "设置")
-                                else tanchuangxiaoxi("请输入0到1之间的数字", "错误") end
-                            end) end }
-                    }, nil)
-                else
-                    showInputDialog("设置移动步长（上升/下降距离）", tostring(moveStep),
-                        function(input)
-                            local num = tonumber(input)
-                            if num and num > 0 then moveStep = num; tanchuangxiaoxi("移动步长已设为 " .. tostring(num), "步长设置")
-                            else tanchuangxiaoxi("请输入大于0的数字", "错误") end
-                        end,
-                        { text = "移动模式: " .. moveMode, callback = function(btn)
-                            showMoveModeSelection(moveMode, function(newMode)
-                                moveMode = newMode; btn.Text = "移动模式: " .. moveMode
-                                updateButtonText(); tanchuangxiaoxi("移动模式已切换至: " .. newMode, "快捷设置")
-                            end) end })
-                end
-                holding = false; longPressTask = nil
-            end
-        end)
-    end)
+    local pressStartTime = 0
+    local isPressing = false
+    local longPressTriggered = false
+    local longPressDelay = 0.3
 
-    local function onRelease()
-        if holding then
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
-            if modeIndex == 0 then
-                showInputDialog("设置速度倍率", tostring(speeds),
-                    function(input)
-                        local num = tonumber(input)
-                        if num and num > 0 then speeds = num; speed.Text = tostring(speeds)
-                            tanchuangxiaoxi("速度倍率已设为 " .. tostring(num), "速度设置")
-                        else tanchuangxiaoxi("请输入大于0的数字", "错误") end
-                    end,
-                    { text = "飞行模式: " .. flyMode, callback = function(btn)
-                        showFlyModeSelection(flyMode, function(newMode)
-                            flyMode = newMode; btn.Text = "飞行模式: " .. flyMode
-                            tanchuangxiaoxi("飞行模式已切换至: " .. flyMode, "快捷设置")
-                        end) end })
-            elseif modeIndex == 1 then
-                local subLabel = (speedSubMode == "修改") and "锁定速度" or "目标速度"
-                showInputDialog("设置" .. subLabel .. "（" .. speedSubMode .. "）",
-                    string.format("%.1f", lockedSpeed),
-                    function(input)
-                        if not speedModeEnabled then tanchuangxiaoxi("关闭状态下不能修改", "移速模式") return end
-                        local num = tonumber(input)
-                        if num and num > 0 then lockedSpeed = num; updateSpeedButtonText()
-                            tanchuangxiaoxi(subLabel .. "已设为 " .. tostring(num), "速度设置")
-                        else tanchuangxiaoxi("请输入大于0的数字", "错误") end
-                    end,
-                    { text = "移速模式: " .. speedSubMode, callback = function(btn)
-                        showSpeedSubModeSelection(speedSubMode, function(newMode)
-                            if newMode == speedSubMode then return end
-                            local wasEnabled = speedModeEnabled
-                            if wasEnabled then applySpeedMode(false) end
-                            speedSubMode = newMode; btn.Text = "移速模式: " .. speedSubMode
-                            if wasEnabled then applySpeedMode(true) end
-                            updateSpeedButtonText()
-                            tanchuangxiaoxi("移速子模式已切换至: " .. speedSubMode, "移速模式")
-                        end) end })
-            elseif modeIndex == 3 then
-                showInputDialog("输入透明度 (0-1)", tostring(buildingTransparency),
-                    function(val)
-                        local num = tonumber(val)
-                        if num and num >= 0 and num <= 1 then
-                            buildingTransparency = num
-                            if buildingRemovalEnabled and (buildingRemovalMode == 2 or buildingRemovalMode == 3) then
-                                disableBuildingRemoval(); enableBuildingRemoval()
-                            end
-                            updateSpeedButtonText()
-                            tanchuangxiaoxi("贴图透明度快捷调整为 " .. num, "透明度设置")
-                        else tanchuangxiaoxi("请输入0到1之间的数字", "错误") end
-                    end)
-            elseif modeIndex == 4 then
-                showBrightnessDialog()
-            end
-            holding = false
+    local function doLongPressAction()
+        if modeIndex == 3 then
+            showBuildingModeMenu(nil)
+        else
+            showInputDialog("设置移动步长", tostring(moveStep),
+                function(input)
+                    local num = tonumber(input)
+                    if num and num > 0 then moveStep = num; tanchuangxiaoxi("步长已设为 " .. num, "设置")
+                    else tanchuangxiaoxi("请输入大于0", "错误") end
+                end,
+                { text = "移动模式: " .. moveMode, callback = function(btn)
+                    showMoveModeSelection(moveMode, function(newMode)
+                        moveMode = newMode; btn.Text = "移动模式: " .. moveMode
+                        updateButtonText()
+                    end) end })
         end
     end
-    speed.MouseButton1Up:Connect(onRelease)
-    speed.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onRelease() end
-    end)
-end
 
--- ==================== 主按钮 ====================
-do
-    local holding = false
-    local longPressTask = nil
-    local isLongPress = false
-    onof.MouseButton1Down:Connect(function()
-        if holding then return end
-        holding = true; isLongPress = false
-        longPressTask = task.delay(0.3, function()
-            if holding then
-                isLongPress = true
-                modeIndex = (modeIndex + 1) % 5
-                updateMainButtonText(); updateSpeedButtonText(); updateSpeedDisplayLoop()
-                tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1] .. "模式", "模式切换")
-                holding = false; longPressTask = nil
-            end
-        end)
-    end)
-    local function onUp()
-        if holding then
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
-            if not isLongPress then
-                if modeIndex == 0 then toggleFly(not isFlying)
-                elseif modeIndex == 1 then speedModeEnabled = not speedModeEnabled; applySpeedMode(speedModeEnabled)
-                elseif modeIndex == 2 then if noclipEnabled then disableNoclip() else enableNoclip() end
-                elseif modeIndex == 3 then if buildingRemovalEnabled then disableBuildingRemoval() else enableBuildingRemoval() end
-                elseif modeIndex == 4 then if nightVisionEnabled then disableNightVision() else enableNightVision() end
-                end
-            end
-            holding = false
-        end
-    end
-    onof.MouseButton1Up:Connect(onUp)
-    onof.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onUp() end
-    end)
-end
-
--- ==================== 隐藏按钮 ====================
-do
-    local holding = false
-    local longPressTask = nil
-    local isLongPress = false
-    hide.MouseButton1Down:Connect(function()
-        if holding then return end
-        holding = true; isLongPress = false
-        longPressTask = task.delay(0.3, function()
-            if holding then isLongPress = true; showMainMenu(); holding = false; longPressTask = nil end
-        end)
-    end)
-    local function onUp()
-        if holding then
-            if longPressTask then task.cancel(longPressTask) longPressTask = nil end
-            if not isLongPress then
-                Frame.Visible = false
-                local vp = getScreenSize()
-                local miniX = clamp(frameX + 132, 0, vp.X - 58)
-                local miniY = clamp(frameY, 0, vp.Y - 28)
-                local mini = Instance.new("Frame")
-                mini.Name = "MiniUI"
-                mini.Parent = main
-                mini.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
-                mini.BorderColor3 = Color3.fromRGB(103, 221, 213)
-                mini.Size = UDim2.new(0, 58, 0, 28)
-                mini.Position = UDim2.fromOffset(miniX, miniY)
-                mini.Active = true
-                local miniBtn = Instance.new("TextButton")
-                miniBtn.Name = "MiniButton"
-                miniBtn.Parent = mini
-                miniBtn.Size = UDim2.new(1, 0, 1, 0)
-                miniBtn.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
-                miniBtn.Text = "UI"
-                miniBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-                miniBtn.TextScaled = true
-                miniBtn.Font = Enum.Font.SourceSans
-                miniBtn.Active = true
-                local miniX_var, miniY_var = miniX, miniY
-                local miniIsDragging = false
-                local miniDragTouch = nil
-                local miniLastTouchPos = nil
-                local miniLatestTouchPos = nil
-                local miniTotalDelta = 0
-                local miniPressStartPos = nil
-                miniBtn.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.Touch then
-                        miniIsDragging = true; miniDragTouch = input
-                        miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
-                        miniLatestTouchPos = miniLastTouchPos
-                        miniTotalDelta = 0
-                        miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
-                    end
-                end)
-                UserInputService.InputChanged:Connect(function(input)
-                    if miniIsDragging and input == miniDragTouch and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-                        local newPos = Vector2.new(input.Position.X, input.Position.Y)
-                        miniTotalDelta = miniTotalDelta + (newPos - miniLatestTouchPos).Magnitude
-                        miniLatestTouchPos = newPos
-                    end
-                end)
-                UserInputService.InputEnded:Connect(function(input)
-                    if input == miniDragTouch then
-                        local endPos = Vector2.new(input.Position.X, input.Position.Y)
-                        local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
-                        if straightDist < 10 and miniTotalDelta < 15 then
-                            local vp2 = getScreenSize()
-                            local frameW = Frame.Size.X.Offset
-                            local frameH = Frame.Size.Y.Offset
-                            local miniW = mini.Size.X.Offset
-                            local miniH = mini.Size.Y.Offset
-                            local newX = miniX_var - (frameW - miniW) / 2
-                            local newY = miniY_var - (frameH - miniH) / 2
-                            newX = clamp(newX, 0, vp2.X - frameW)
-                            newY = clamp(newY, 0, vp2.Y - frameH)
-                            setFramePos(newX, newY)
-                            Frame.Visible = true
-                            mini:Destroy(); miniWindow = nil
+    local function doShortPressAction()
+        if modeIndex == 0 then
+            showInputDialog("设置速度倍率", tostring(speeds),
+                function(input)
+                    local num = tonumber(input)
+                    if num and num > 0 then speeds = num; speed.Text = tostring(speeds) end
+                end,
+                { text = "飞行模式: " .. flyMode, callback = function(btn)
+                    showFlyModeSelection(flyMode, function(newMode)
+                        flyMode = newMode; btn.Text = "飞行模式: " .. flyMode
+                    end) end })
+        elseif modeIndex == 1 then
+            local subLabel = (speedSubMode == "修改") and "锁定速度" or "目标速度"
+            showInputDialog("设置" .. subLabel, string.format("%.1f", lockedSpeed),
+                function(input)
+                    if not speedModeEnabled then tanchuangxiaoxi("关闭状态下不能修改", "移速") return end
+                    local num = tonumber(input)
+                    if num and num > 0 then lockedSpeed = num; updateSpeedButtonText() end
+                end,
+                { text = "移速模式: " .. speedSubMode, callback = function(btn)
+                    showSpeedSubModeSelection(speedSubMode, function(newMode)
+                        if newMode == speedSubMode then return end
+                        local wasEnabled = speedModeEnabled
+                        if wasEnabled then applySpeedMode(false) end
+                        speedSubMode = newMode
+                        btn.Text = "移速模式: " .. speedSubMode
+                        if wasEnabled then applySpeedMode(true) end
+                        updateSpeedButtonText()
+                    end) end })
+        elseif modeIndex == 3 then
+            showInputDialog("输入透明度 (0-1)", tostring(buildingTransparency),
+                function(val)
+                    local num = tonumber(val)
+                    if num and num >= 0 and num <= 1 then
+                        buildingTransparency = num
+                        if buildingRemovalEnabled and (buildingRemovalMode == 2 or buildingRemovalMode == 3) then
+                            disableBuildingRemoval(); enableBuildingRemoval()
                         end
-                        miniIsDragging = false; miniDragTouch = nil
-                        miniLastTouchPos = nil; miniLatestTouchPos = nil; miniPressStartPos = nil
+                        updateSpeedButtonText()
                     end
                 end)
-                local miniRenderConn
-                miniRenderConn = RunService.RenderStepped:Connect(function()
-                    if not mini or not mini.Parent then
-                        if miniRenderConn then miniRenderConn:Disconnect() miniRenderConn = nil end
-                        return
+        elseif modeIndex == 4 then
+            showBrightnessDialog()
+        end
+    end
+
+    speed.MouseButton1Down:Connect(function()
+        if isPressing then return end
+        isPressing = true
+        longPressTriggered = false
+        pressStartTime = tick()
+    end)
+
+    speed.MouseButton1Up:Connect(function()
+        if not isPressing then return end
+        isPressing = false
+        local elapsed = tick() - pressStartTime
+        if elapsed >= longPressDelay then
+            -- 长按已经通过 Heartbeat 触发过，什么都不做
+        else
+            doShortPressAction()
+        end
+    end)
+    speed.MouseLeave:Connect(function()
+        if isPressing then
+            isPressing = false
+        end
+    end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing or longPressTriggered then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed >= longPressDelay then
+            longPressTriggered = true
+            doLongPressAction()
+        end
+    end)
+end
+
+-- ==================== 【修复 4】主按钮：Heartbeat + 时间戳 ====================
+do
+    local pressStartTime = 0
+    local isPressing = false
+    local longPressTriggered = false
+    local longPressDelay = 0.3
+
+    local function doLongPressAction()
+        modeIndex = (modeIndex + 1) % 5
+        updateMainButtonText()
+        updateSpeedButtonText()
+        updateSpeedDisplayLoop()
+        tanchuangxiaoxi("已切换至" .. modeDisplayNames[modeIndex + 1], "模式")
+    end
+
+    local function doShortPressAction()
+        if modeIndex == 0 then
+            toggleFly(not isFlying)
+        elseif modeIndex == 1 then
+            if speedModeEnabled then applySpeedMode(false) else applySpeedMode(true) end
+        elseif modeIndex == 2 then
+            if noclipEnabled then disableNoclip() else enableNoclip() end
+        elseif modeIndex == 3 then
+            if buildingRemovalEnabled then
+                disableBuildingRemoval()
+            else
+                enableBuildingRemoval()
+                task.defer(function()
+                    if buildingRemovalEnabled then
+                        local count = runSmartScan()
+                        tanchuangxiaoxi("智能扫描 " .. count .. " 个", "建筑移除")
                     end
-                    if not miniIsDragging or not miniLastTouchPos or not miniLatestTouchPos then return end
-                    local delta = miniLatestTouchPos - miniLastTouchPos
-                    miniLastTouchPos = miniLatestTouchPos
-                    local newX = miniX_var + delta.X
-                    local newY = miniY_var + delta.Y
-                    local camera = workspace.CurrentCamera
-                    if not camera then return end
-                    local vp3 = camera.ViewportSize
+                end)
+            end
+        elseif modeIndex == 4 then
+            if nightVisionEnabled then disableNightVision() else enableNightVision() end
+        end
+    end
+
+    onof.MouseButton1Down:Connect(function()
+        if isPressing then return end
+        isPressing = true
+        longPressTriggered = false
+        pressStartTime = tick()
+    end)
+
+    onof.MouseButton1Up:Connect(function()
+        if not isPressing then return end
+        isPressing = false
+        local elapsed = tick() - pressStartTime
+        if elapsed < longPressDelay then
+            doShortPressAction()
+        end
+    end)
+    onof.MouseLeave:Connect(function()
+        if isPressing then
+            isPressing = false
+        end
+    end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing or longPressTriggered then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed >= longPressDelay then
+            longPressTriggered = true
+            doLongPressAction()
+        end
+    end)
+end
+
+-- ==================== 【修复 4】隐藏按钮：Heartbeat + 时间戳 ====================
+do
+    local pressStartTime = 0
+    local isPressing = false
+    local longPressTriggered = false
+    local longPressDelay = 0.3
+
+    local function doLongPressAction()
+        showMainMenu()
+    end
+
+    local function doShortPressAction()
+        Frame.Visible = false
+        local vp = getScreenSize()
+        local miniX = clamp(frameX + 132, 0, vp.X - 58)
+        local miniY = clamp(frameY, 0, vp.Y - 28)
+        local mini = Instance.new("Frame")
+        mini.Name = "MiniUI"
+        mini.Parent = main
+        mini.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
+        mini.BorderColor3 = Color3.fromRGB(103, 221, 213)
+        mini.Size = UDim2.new(0, 58, 0, 28)
+        mini.Position = UDim2.fromOffset(miniX, miniY)
+        mini.Active = true
+
+        local miniBtn = Instance.new("TextButton")
+        miniBtn.Name = "MiniButton"
+        miniBtn.Parent = mini
+        miniBtn.Size = UDim2.new(1, 0, 1, 0)
+        miniBtn.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
+        miniBtn.Text = "UI"
+        miniBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+        miniBtn.TextScaled = true
+        miniBtn.Font = Enum.Font.SourceSans
+        miniBtn.Active = true
+
+        local miniX_var, miniY_var = miniX, miniY
+        local miniIsDragging = false
+        local miniDragTouch = nil
+        local miniLastTouchPos = nil
+        local miniLatestTouchPos = nil
+        local miniTotalDelta = 0
+        local miniPressStartPos = nil
+
+        miniBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch then
+                miniIsDragging = true
+                miniDragTouch = input
+                miniLastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
+                miniLatestTouchPos = miniLastTouchPos
+                miniTotalDelta = 0
+                miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if miniIsDragging and input == miniDragTouch and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+                local newPos = Vector2.new(input.Position.X, input.Position.Y)
+                miniTotalDelta = miniTotalDelta + (newPos - miniLatestTouchPos).Magnitude
+                miniLatestTouchPos = newPos
+            end
+        end)
+
+        UserInputService.InputEnded:Connect(function(input)
+            if input == miniDragTouch then
+                local endPos = Vector2.new(input.Position.X, input.Position.Y)
+                local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
+                if straightDist < 10 and miniTotalDelta < 15 then
+                    local vp2 = getScreenSize()
+                    local frameW = Frame.Size.X.Offset
+                    local frameH = Frame.Size.Y.Offset
                     local miniW = mini.Size.X.Offset
                     local miniH = mini.Size.Y.Offset
-                    newX = clamp(newX, 0, vp3.X - miniW)
-                    newY = clamp(newY, 0, vp3.Y - miniH)
-                    miniX_var = newX; miniY_var = newY
-                    mini.Position = UDim2.fromOffset(newX, newY)
-                end)
-                miniWindow = mini
+                    local newX = miniX_var - (frameW - miniW) / 2
+                    local newY = miniY_var - (frameH - miniH) / 2
+                    newX = clamp(newX, 0, vp2.X - frameW)
+                    newY = clamp(newY, 0, vp2.Y - frameH)
+                    setFramePos(newX, newY)
+                    Frame.Visible = true
+                    mini:Destroy()
+                    miniWindow = nil
+                end
+                miniIsDragging = false
+                miniDragTouch = nil
+                miniLastTouchPos = nil
+                miniLatestTouchPos = nil
+                miniPressStartPos = nil
             end
-            holding = false
-        end
+        end)
+
+        local miniRenderConn
+        miniRenderConn = RunService.RenderStepped:Connect(function()
+            if not mini or not mini.Parent then
+                if miniRenderConn then miniRenderConn:Disconnect() miniRenderConn = nil end
+                return
+            end
+            if not miniIsDragging or not miniLastTouchPos or not miniLatestTouchPos then return end
+            local delta = miniLatestTouchPos - miniLastTouchPos
+            miniLastTouchPos = miniLatestTouchPos
+            local newX = miniX_var + delta.X
+            local newY = miniY_var + delta.Y
+            local camera = workspace.CurrentCamera
+            if not camera then return end
+            local vp3 = camera.ViewportSize
+            local miniW = mini.Size.X.Offset
+            local miniH = mini.Size.Y.Offset
+            newX = clamp(newX, 0, vp3.X - miniW)
+            newY = clamp(newY, 0, vp3.Y - miniH)
+            miniX_var = newX
+            miniY_var = newY
+            mini.Position = UDim2.fromOffset(newX, newY)
+        end)
+
+        miniWindow = mini
     end
-    hide.MouseButton1Up:Connect(onUp)
-    hide.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then onUp() end
+
+    hide.MouseButton1Down:Connect(function()
+        if isPressing then return end
+        isPressing = true
+        longPressTriggered = false
+        pressStartTime = tick()
+    end)
+
+    hide.MouseButton1Up:Connect(function()
+        if not isPressing then return end
+        isPressing = false
+        local elapsed = tick() - pressStartTime
+        if elapsed < longPressDelay then
+            doShortPressAction()
+        end
+    end)
+    hide.MouseLeave:Connect(function()
+        if isPressing then
+            isPressing = false
+        end
+    end)
+
+    RunService.Heartbeat:Connect(function()
+        if not isPressing or longPressTriggered then return end
+        local elapsed = tick() - pressStartTime
+        if elapsed >= longPressDelay then
+            longPressTriggered = true
+            doLongPressAction()
+        end
     end)
 end
 
@@ -3431,7 +3897,7 @@ function showBrightnessDialog()
             num = math.floor(num * 100) / 100
             nightVisionBrightness = num
             if nightVisionEnabled then applyNightVision() end
-            tanchuangxiaoxi("透视亮度已设为 " .. tostring(num), "亮度设置")
+            tanchuangxiaoxi("亮度已设为 " .. num, "亮度设置")
         end
         if conn then conn:Disconnect() end
         if inputEndConn then inputEndConn:Disconnect() end
@@ -3451,6 +3917,7 @@ main.Destroying:Connect(function()
     if nightVisionEnabled then restoreLighting() end
     stopCamFreeze()
     disableCamNoClip()
+    closePicker()
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
