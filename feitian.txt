@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.2.2 (移动端拖拽修复 - input 对象比较 bug)
+-- Version 8.2.3 (UI 拖拽把柄化 + 多指保护)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -32,7 +32,7 @@ Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
 Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
-Frame.Active = false   -- 【关键】不让 Frame 抢触摸
+Frame.Active = false
 Frame.Draggable = false
 
 up.Name = "up"
@@ -69,7 +69,7 @@ uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
-uiLabel.Active = false   -- 【关键】让触摸穿透到 Frame（作为拖动把手）
+uiLabel.Active = true   -- 【关键】作为拖动把柄，消费触摸让相机不响应
 
 hide.Name = "hide"
 hide.Parent = Frame
@@ -300,38 +300,33 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 【核心修复】主窗口拖拽逻辑 ====================
--- 【根本问题】移动端 Touch 的 InputObject 每次移动都是新实例，
---            不能靠 input == dragTouchInput 来追踪同一次触摸。
--- 【修复】只按 isDragging 状态 + UserInputType 判断。
+-- ==================== 【最终修复】把柄式拖拽逻辑 ====================
+-- 【原理】
+--   1. uiLabel.Active = true → 触摸被它消费 → 相机不接收 → 视角不乱晃
+--   2. 拖动事件绑定在 uiLabel 自己身上 → 只有触摸"UI"标签才触发
+--   3. 用 activeTouches 计数 → 多指按在 uiLabel 上时不会因一根手指抬起就中断
 local isDragging = false
 local dragStartPos = nil
 local dragStartFrame = nil
+local activeTouches = 0
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-
+uiLabel.InputBegan:Connect(function(input)
     if input.UserInputType ~= Enum.UserInputType.Touch
     and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
         return
     end
 
-    local pos = Vector2.new(input.Position.X, input.Position.Y)
-    local fp = Frame.AbsolutePosition
-    local fs = Frame.AbsoluteSize
+    activeTouches = activeTouches + 1
 
-    if pos.X < fp.X or pos.X > fp.X + fs.X
-    or pos.Y < fp.Y or pos.Y > fp.Y + fs.Y then
-        return
-    end
+    -- 已有手指在拖动，忽略新手指，避免 dragStartPos 被覆盖
+    if isDragging then return end
 
     isDragging = true
-    dragStartPos = pos
+    dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
     dragStartFrame = Vector2.new(frameX, frameY)
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    -- 【关键】不比较 input 对象，只看 isDragging 和类型
+uiLabel.InputChanged:Connect(function(input)
     if not isDragging then return end
     if input.UserInputType ~= Enum.UserInputType.Touch
     and input.UserInputType ~= Enum.UserInputType.MouseMovement then
@@ -341,14 +336,14 @@ UserInputService.InputChanged:Connect(function(input)
     local currentPos = Vector2.new(input.Position.X, input.Position.Y)
     local delta = currentPos - dragStartPos
 
-    local newX = dragStartFrame.X + delta.X
-    local newY = dragStartFrame.Y + delta.Y
-
     local camera = workspace.CurrentCamera
     if not camera then return end
     local vp = camera.ViewportSize
     local frameW = Frame.Size.X.Offset
     local frameH = Frame.Size.Y.Offset
+
+    local newX = dragStartFrame.X + delta.X
+    local newY = dragStartFrame.Y + delta.Y
 
     newX = clamp(newX, 0, vp.X - frameW)
     newY = clamp(newY, 0, vp.Y - frameH)
@@ -356,10 +351,16 @@ UserInputService.InputChanged:Connect(function(input)
     setFramePos(newX, newY)
 end)
 
-UserInputService.InputEnded:Connect(function(input)
-    -- 【关键】只按类型判断
-    if input.UserInputType == Enum.UserInputType.Touch
-    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+uiLabel.InputEnded:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+    and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+        return
+    end
+
+    activeTouches = math.max(0, activeTouches - 1)
+
+    -- 只有当按在 uiLabel 上的所有手指都离开时，才结束拖动
+    if activeTouches == 0 then
         isDragging = false
         dragStartPos = nil
         dragStartFrame = nil
@@ -2923,11 +2924,11 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.2.2 更新内容：",
+                    "版本 8.2.3 更新内容：",
                     "",
                     "1-32. (略，历史更新)",
-                    "33. 【本次修复】移动端拖拽失效（去掉 input 对象比较）",
-                    "34. 【本次修复】收起再展开位置往右上偏移",
+                    "33. 【本次修复】拖动 UI 视角乱晃（把柄消费触摸）",
+                    "34. 【本次修复】双指拖动 UI 闪烁（多指计数保护）",
                     "",
                     "感谢使用！"
                 }
@@ -3033,7 +3034,7 @@ function showMainMenu()
                     "🔹 设置 - 自由相机：冻结/单次/穿墙/快照",
                     "🔹 设置 - 相机偏移：自定义相机相对身体位置",
                     "🔹 音量键隐藏：按音量减隐藏 UI，加显示",
-                    "🔹 UI 拖动：触摸『UI』标签即可拖动整个面板",
+                    "🔹 UI 拖动：触摸『UI』标签拖动整个面板，视角不会乱晃",
                 }
 
                 local contentContainer = Instance.new("Frame")
