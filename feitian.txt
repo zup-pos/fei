@@ -32,7 +32,7 @@ Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
 Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
-Frame.Active = true
+Frame.Active = false
 Frame.Draggable = false
 
 up.Name = "up"
@@ -69,7 +69,7 @@ uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
-uiLabel.Active = true
+uiLabel.Active = false
 
 hide.Name = "hide"
 hide.Parent = Frame
