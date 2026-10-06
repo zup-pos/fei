@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.11（控制窗紧凑 + 保护功能 + 结束脚本完整还原）
+-- Version 8.3.12（保护按钮长按清空 + 控制窗紧凑 + 保护扩展）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -148,18 +148,16 @@ local noclipSaved = {}
 
 local smartSubMode = "smart"
 
--- 【新增】全局保护表（存 root：Model 或 Part）
 local protectedList = {}
 
 local tanchuangxiaoxi
 
--- ==================== 智能透视模块 ====================
 local SmartBuilding = (function()
     local SB = {}
 
     local UI = {
         scale = 1.0,
-        ctrlW = 200, ctrlH = 245,   -- 【改动】300 → 245，去掉下半部分空白
+        ctrlW = 200, ctrlH = 245,
         infoW = 200, infoH = 180,
         btnH = 26, btnText = 11, titleText = 12, statusText = 10,
         pad = 6, rowH = 24, titleBarH = 24,
@@ -188,28 +186,21 @@ local SmartBuilding = (function()
         strongIgnore = { "terrain", "sky", "clouds", "atmosphere", "baseplate" },
         exactIgnore = { "ground", "floor", "road", "grass", "dirt", "sand",
                         "water", "platform", "tile" },
-        -- 【扩充】保护关键词（物品 + NPC + 交互物 + 中文）
         protectKeywords = {
-            -- 交互物
             "npc", "mob", "monster", "entity", "creature", "enemy",
             "chest", "loot", "reward", "interactive", "trigger", "portal",
-            -- 刷新点
             "spawn", "respawn", "waypoint", "checkpoint", "teleport",
-            -- 物品（英文）
             "item", "drop", "pickup", "collectible",
             "bag", "shovel", "knife", "sword", "gun", "weapon", "tool",
             "potion", "coin", "gem", "apple", "food", "drink",
             "arrow", "ammo", "bullet", "grenade", "bomb", "torch",
             "key", "crystal", "scroll",
-            -- 玩家
             "player", "character", "humanoid",
-            -- 中文
             "怪物", "宝箱", "空气墙", "边界", "刷新", "出生", "重生", "传送", "复活",
             "物品", "道具", "奖励",
             "袋子", "铲子", "刀", "剑", "枪", "药水", "金币", "宝石",
             "苹果", "食物", "箭", "弹药", "子弹", "手雷", "炸弹",
             "火把", "工具", "武器", "钥匙", "水晶", "卷轴",
-            -- 特殊
             "invisible", "barrier", "boundary", "blocker", "airwall", "air_wall",
         },
         buildingKeywords = {
@@ -301,12 +292,9 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 【改动】checkIgnored 增加用户保护检查
     local function checkIgnored(part)
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
-
-        -- 【新增】沿祖先链检查用户保护表
         do
             local cur, depth = part, 0
             while cur and cur ~= workspace and depth < 15 do
@@ -314,7 +302,6 @@ local SmartBuilding = (function()
                 cur = cur.Parent; depth = depth + 1
             end
         end
-
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
         if nameMatches(part, CONFIG.invisibleWallKeywords)
             and not nameMatches(part, CONFIG.buildingKeywords) then return true, "空气墙名" end
@@ -431,7 +418,7 @@ local SmartBuilding = (function()
         end
         return part
     end
-    SB.getTargetRoot = getTargetRoot  -- 【新增】暴露给控制窗按钮用
+    SB.getTargetRoot = getTargetRoot
 
     local function collectTargetParts(root)
         local list = {}
@@ -619,7 +606,6 @@ local SmartBuilding = (function()
         local y = 4; local gap = btnH + 3
         local scanBtn = makeBtn(y, "🧠 智能扫描", Color3.fromRGB(70, 130, 180)); y = y + gap
         local pickBtn = makeBtn(y, "🎯 准心添加", Color3.fromRGB(46, 139, 87)); y = y + gap
-        -- 【新增】保护按钮
         local protectBtn = makeBtn(y, "🛡 保护目标", Color3.fromRGB(150, 100, 200)); y = y + gap
         local clearBtn = makeBtn(y, "🗑 全部取消", Color3.fromRGB(178, 34, 34)); y = y + gap
 
@@ -731,19 +717,61 @@ local SmartBuilding = (function()
             if not t then showNotification("未对准目标"); return end
             SB.addTarget(t)
         end)
-        -- 【新增】保护按钮回调
-        protectBtn.MouseButton1Click:Connect(function()
-            if not SB.getTargetInCenter or not SB.toggleProtect then return end
-            local t = SB.getTargetInCenter()
-            if not t then showNotification("未对准目标"); return end
-            SB.toggleProtect(t)
-        end)
         clearBtn.MouseButton1Click:Connect(function()
             if not SB.restoreAll then return end
             local n = SB.restoreAll()
             showNotification("已恢复所有对象")
             tanchuangxiaoxi(string.format("已恢复 %d 个部件", n), "修改模式")
         end)
+
+        -- 【新增】保护按钮：短按切换保护 / 长按清空全部保护
+        do
+            local pressStart = 0
+            local pressing = false
+            local longTriggered = false
+            local longDelay = 0.4
+
+            protectBtn.MouseButton1Down:Connect(function()
+                if pressing then return end
+                pressing = true
+                longTriggered = false
+                pressStart = tick()
+            end)
+
+            protectBtn.MouseButton1Up:Connect(function()
+                if not pressing then return end
+                pressing = false
+                if longTriggered then return end
+                -- 短按：切换准心目标的保护状态
+                if not SB.getTargetInCenter or not SB.toggleProtect then return end
+                local t = SB.getTargetInCenter()
+                if not t then showNotification("未对准目标"); return end
+                SB.toggleProtect(t)
+            end)
+
+            protectBtn.MouseLeave:Connect(function()
+                pressing = false
+            end)
+
+            -- 长按检测循环
+            task.spawn(function()
+                while ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent do
+                    task.wait(0.08)
+                    if not (ui.control and ui.control.protectBtn) then break end
+                    if pressing and not longTriggered then
+                        local elapsed = tick() - pressStart
+                        if elapsed >= longDelay then
+                            longTriggered = true
+                            -- 清空所有保护
+                            local count = 0
+                            for _ in pairs(protectedList) do count = count + 1 end
+                            protectedList = {}
+                            tanchuangxiaoxi(string.format("已清空 %d 个保护目标", count), "保护")
+                        end
+                    end
+                end
+            end)
+        end
 
         tBox.FocusLost:Connect(function()
             local num = tonumber(tBox.Text)
@@ -777,7 +805,7 @@ local SmartBuilding = (function()
             end
         end)
 
-        -- 【新增】每 0.15s 检测准心目标，动态更新保护按钮文字
+        -- 动态更新保护按钮颜色/文字
         task.spawn(function()
             while ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent do
                 task.wait(0.15)
@@ -1056,20 +1084,16 @@ local SmartBuilding = (function()
         SB.refreshListUI()
     end
 
-    -- 【新增】切换目标保护状态
     SB.toggleProtect = function(target)
         if not target then return end
         local root = getTargetRoot(target)
         if not root then return end
 
         if protectedList[root] then
-            -- 取消保护
             protectedList[root] = nil
             tanchuangxiaoxi("已取消保护: " .. root.Name, "保护")
         else
-            -- 开启保护：加入保护表
             protectedList[root] = true
-            -- 若已透明化，立即恢复原样
             local parts = collectTargetParts(root)
             local restored = 0
             for _, p in ipairs(parts) do
@@ -1195,7 +1219,6 @@ local function isPointInGui(g, x, y)
     return x >= tl.X and x <= tl.X + sz.X and y >= tl.Y and y <= tl.Y + sz.Y
 end
 
--- ==================== UI 拖动 ====================
 local isDragging = false
 local dragInput = nil
 local handleTouches = {}
@@ -1239,7 +1262,6 @@ UserInputService.InputEnded:Connect(function(input)
     else isDragging = false; dragInput = nil end
 end)
 
--- ==================== 文本更新 ====================
 local function updateButtonText()
     if moveMode == "角色上下" or moveMode == "屏幕上下" or moveMode == "水平上下" then
         up.Text = "上升"; down.Text = "下降"
@@ -1294,7 +1316,6 @@ end
 
 local function stopTpwalking() tpwalking = false end
 
--- ==================== 飞天 ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -1403,7 +1424,6 @@ local function resetHumanoidAfterFly()
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
 end
 
--- ==================== 物理加速 ====================
 local function stopPhysAccel()
     if accelConn then accelConn:Disconnect() accelConn = nil end
     if accelObj then pcall(function() accelObj:Destroy() end) accelObj = nil end
@@ -1488,7 +1508,6 @@ local function startPhysAccel()
     return false
 end
 
--- ==================== 关闭辅助 ====================
 local function forceDisableSpeedMode()
     if not speedModeEnabled then return false end
     if isPhysMode() then stopPhysAccel() end
@@ -1507,7 +1526,6 @@ local function forceDisableFly()
     return true
 end
 
--- ==================== toggleFly ====================
 local function toggleFly(enable)
     if enable then
         if isFlying then return end
@@ -1527,7 +1545,6 @@ local function toggleFly(enable)
     end
 end
 
--- ==================== applySpeedMode ====================
 local function applySpeedMode(enable)
     if enable then
         if speedModeEnabled then return end
@@ -1578,7 +1595,6 @@ local function applySpeedMode(enable)
     end
 end
 
--- ==================== 透视 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -1685,7 +1701,6 @@ local function disableNightVision()
     end
 end
 
--- ==================== 相机偏移 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
@@ -1706,7 +1721,6 @@ local function applyCameraOffset()
     end
 end
 
--- ==================== 相机核心 ====================
 local function enforceCameraOnce()
     local cam = workspace.CurrentCamera
     if not cam then return end
@@ -1826,7 +1840,6 @@ local function manualResnap()
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
 
--- ==================== 穿墙 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -1866,7 +1879,6 @@ local function disableNoclip()
     updateMainButtonText(); updateSpeedButtonText()
 end
 
--- ==================== 穿墙悬浮窗 ====================
 local function createNoclipWindow()
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"; sg.Parent = playerGui
@@ -1922,7 +1934,6 @@ local function createNoclipWindow()
     return sg
 end
 
--- ==================== 透视悬浮窗 ====================
 local function createNightVisionWindow()
     local sg = Instance.new("ScreenGui")
     sg.Name = "NightVisionWindow"; sg.Parent = playerGui
@@ -2042,7 +2053,6 @@ local function createNightVisionWindow()
     return sg
 end
 
--- ==================== 开启穿墙/透视 ====================
 local function enableNoclip()
     if not player.Character then return end
     if noclipEnabled then return end
@@ -2084,7 +2094,6 @@ local function enableNightVision()
     updateMainButtonText(); updateSpeedButtonText()
 end
 
--- ==================== 死亡与重生 ====================
 local function saveFeatureStates()
     savedFeatureStates.fly = isFlying
     savedFeatureStates.speed = speedModeEnabled
@@ -2130,7 +2139,6 @@ end)
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
--- ==================== 弹窗 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -2210,7 +2218,6 @@ function tanchuangxiaoxi(msg, title)
     end)
 end
 
--- ==================== 输入对话框 ====================
 function showInputDialog(title, defaultText, callback, extraButton)
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -2303,7 +2310,6 @@ function showInputDialog(title, defaultText, callback, extraButton)
     return dialog
 end
 
--- ==================== 通用菜单 ====================
 function createMenu(title, buttons, parentMenu)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
@@ -2378,7 +2384,6 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 音量键 ====================
 local function setUIVisible(visible)
     uiVisible = visible
     Frame.Visible = uiVisible
@@ -2404,7 +2409,6 @@ local function disableVolumeKey()
     tanchuangxiaoxi("音量键已禁用", "设置")
 end
 
--- ==================== 快捷选择 ====================
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
@@ -2519,7 +2523,6 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
--- ==================== 智能透视子菜单 ====================
 local function showSmartSubMenu()
     local buttons = {}
     table.insert(buttons, {
@@ -2547,7 +2550,6 @@ local function showSmartSubMenu()
     createMenu("修改模式", buttons, nil)
 end
 
--- ==================== 主菜单 ====================
 function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -2580,14 +2582,12 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.11 更新内容：",
+                    "版本 8.3.12 更新内容：",
                     "",
-                    "1-58. (略，历史更新)",
-                    "59. 【新增】控制窗加「保护目标」按钮",
-                    "    - 点击切换保护状态",
-                    "    - 保护后不会被透明",
-                    "60. 控制窗高度 300 → 245（更紧凑）",
-                    "61. 扩充物品保护关键词（袋子/铲子/刀/箭等）",
+                    "1-59. (略，历史更新)",
+                    "60. 【新增】长按「🛡 保护目标」= 清空所有保护",
+                    "    - 用于解决被保护物品消失后无法取消",
+                    "61. 短按仍是切换单个目标保护",
                     "",
                     "感谢使用！"
                 }
@@ -2655,15 +2655,14 @@ function showMainMenu()
                     "   - 智能识别（默认）：静默扫描，无 UI",
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
                     "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
-                    "🔹 保护按钮：准心瞄准目标后点击切换保护状态",
+                    "🔹 【保护按钮】短按 = 切换单目标保护",
+                    "🔹 【保护按钮】长按 = 清空所有保护",
                     "🔹 保护后的目标不会被扫描透明化",
                     "🔹 透明度可用输入框或滑动条调整",
                     "🔹 名单窗默认隐藏，点「📋 名单」开关",
-                    "🔹 缩放 50%~150% 生效重建 UI",
                     "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
                     "🔹 穿墙关闭后会完整恢复原碰撞",
                     "🔹 结束脚本会完整还原所有状态",
-                    "🔹 音量键隐藏：音量减隐藏，加显示",
                 }
                 local cc = Instance.new("Frame")
                 cc.Parent = sf; cc.Size = UDim2.new(1, -10, 0, 0)
@@ -2799,7 +2798,6 @@ function showMainMenu()
     }, nil)
 end
 
--- ==================== 相机菜单 ====================
 showCameraMenu = function(parentMenu)
     local function buildCamMenu()
         local freezeText = camFreezeEnabled and "🧊 冻结解锁: 开启中" or "🧊 冻结解锁: 关闭"
@@ -2829,7 +2827,6 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- ==================== 相机偏移对话框 ====================
 function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
@@ -3020,7 +3017,6 @@ function showCamOffsetDialog()
     return dialog
 end
 
--- ==================== 移动向量 ====================
 local function getMoveVector(dir, rootPart)
     local step = dir * moveStep
     if moveMode == "角色上下" then return rootPart.CFrame.UpVector * step
@@ -3054,7 +3050,6 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 上升/下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -3116,7 +3111,6 @@ do
     end)
 end
 
--- ==================== 加速/减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -3198,7 +3192,6 @@ do
     end)
 end
 
--- ==================== 速度标签 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3285,7 +3278,6 @@ do
     end)
 end
 
--- ==================== 主按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3349,7 +3341,6 @@ do
     end)
 end
 
--- ==================== 隐藏按钮（迷你 UI） ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3455,7 +3446,6 @@ do
     end)
 end
 
--- ==================== 亮度对话框 ====================
 function showBrightnessDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
@@ -3574,7 +3564,6 @@ function showBrightnessDialog()
     end)
 end
 
--- ==================== 统一完整关闭 ====================
 local function fullShutdown()
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
@@ -3598,7 +3587,6 @@ local function fullShutdown()
     tpwalking = false
 end
 
--- ==================== 清理 ====================
 main.Destroying:Connect(function()
     pcall(fullShutdown)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
@@ -3606,7 +3594,6 @@ main.Destroying:Connect(function()
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
 end)
 
--- ==================== 初始化 ====================
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
