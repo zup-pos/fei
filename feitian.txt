@@ -1,12 +1,12 @@
 -- Gui to Lua
--- Version 8.0.0 (泳姿优化 + 朝向切换 + 待处理后50%)
+-- Version 8.0.1 (修复 UI 宽度 + 按钮拖动冲突)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
 local up = Instance.new("TextButton")
 local plus = Instance.new("TextButton")
-local faceBtn = Instance.new("TextButton")   -- 【替换 uiLabel】朝向切换
+local faceBtn = Instance.new("TextButton")
 local hide = Instance.new("TextButton")
 local down = Instance.new("TextButton")
 local mine = Instance.new("TextButton")
@@ -22,7 +22,8 @@ main.IgnoreGuiInset = true
 
 local initCamera = workspace.CurrentCamera
 local initVp = initCamera and initCamera.ViewportSize or Vector2.new(1920, 1080)
-local UI_W = 232   -- 【从190扩到232】为新按钮腾位置
+-- 【修复】改回 190，与按钮布局一致
+local UI_W = 190
 local UI_H = 56
 local initX = (initVp.X - UI_W) / 2
 local initY = (initVp.Y - UI_H) / 2
@@ -57,10 +58,10 @@ plus.TextColor3 = Color3.fromRGB(0, 0, 0)
 plus.TextScaled = true
 plus.TextSize = 14
 
--- 【替换 uiLabel】新的朝向切换按钮
+-- 替换 uiLabel 为 faceBtn
 faceBtn.Name = "faceBtn"
 faceBtn.Parent = Frame
-faceBtn.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
 faceBtn.Position = UDim2.new(0, 88, 0, 0)
 faceBtn.Size = UDim2.new(0, 44, 0, 28)
 faceBtn.Font = Enum.Font.SourceSans
@@ -154,27 +155,31 @@ local longPressSpeed = 0.01
 local moveMode = "角色上下"
 local flyMode = "泳姿"
 
--- 【新增】朝向模式："全局" 或 "水平"
---   "全局"：身体完全跟随相机（含俯仰）—— 原版行为
---   "水平"：身体只跟随水平朝向（Yaw Only）—— 消除低头抖动
+-- 【朝向模式】"全局" 或 "水平"
 local flyFaceMode = "全局"
 
 -- 移速子模式
 local speedSubMode = "修改"
 
--- 物理加速相关
+-- 物理加速
 local accelObj = nil
 local accelAttach = nil
 local accelConn = nil
 local accelForceScale = 100
 local accelLastMethod = nil
 
--- 相机相关（保留）
+-- 相机相关
 local camSnapshot = nil
 local camFreezeEnabled = false
 local camNoClipEnabled = false
 local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
 local camFreezeBound = false
+
+-- 【相机偏移】X / Y / Z + 记录基准
+local camOffsetX = 0
+local camOffsetY = 0
+local camOffsetZ = 0
+local camOffsetBaseline = { x = 0, y = 0, z = 0 }
 
 -- 主窗口独立坐标
 local frameX = initX
@@ -289,14 +294,35 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 主窗口拖拽 ====================
+-- ==================== 【修复】主窗口拖拽逻辑 ====================
 local isDragging = false
 local dragTouch = nil
 local lastTouchPos = nil
 local latestTouchPos = nil
 
+-- 【关键】按钮列表，用于判断触摸是否落在按钮上
+local mainButtons = { up, plus, faceBtn, hide, down, mine, speed, onof }
+
+local function isPointInAnyButton(pos)
+    for _, btn in ipairs(mainButtons) do
+        if btn and btn.Parent then
+            local p = btn.AbsolutePosition
+            local s = btn.AbsoluteSize
+            if pos.X >= p.X and pos.X <= p.X + s.X
+               and pos.Y >= p.Y and pos.Y <= p.Y + s.Y then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 Frame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.Touch then
+        -- 【关键修复】如果触摸落在按钮上，不启动拖动，让按钮自己处理
+        if isPointInAnyButton(input.Position) then
+            return
+        end
         isDragging = true
         dragTouch = input
         lastTouchPos = Vector2.new(input.Position.X, input.Position.Y)
@@ -475,7 +501,7 @@ end
 -- ==================== TP Walk ====================
 local function stopTpwalking() tpwalking = false end
 
--- ==================== 【核心】飞天辅助函数 ====================
+-- ==================== 飞天辅助函数 ====================
 local function removeFly()
     if _G._flyData then
         pcall(function() _G._flyData.bg:Destroy() end)
@@ -484,9 +510,6 @@ local function removeFly()
     end
 end
 
--- 【新增】统一的朝向计算函数
---   flyFaceMode == "全局" → 完全跟随相机（含俯仰）
---   flyFaceMode == "水平" → 只跟随水平方向（Yaw Only，消除抖动）
 local function getFlyTargetCFrame(camera, torso)
     if flyFaceMode == "全局" then
         return camera.CFrame
@@ -547,9 +570,7 @@ local function applyFly()
                 local moveDir = hum.MoveDirection
                 local maxspeed = 50 * speeds
 
-                -- 【核心改动】所有模式统一调用 getFlyTargetCFrame
                 if isFreeMode then
-                    -- 自由模式：保留相机方向速度控制 + 统一朝向
                     local camLook = camera.CFrame.LookVector
                     local camRight = camera.CFrame.RightVector
                     local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
@@ -578,7 +599,6 @@ local function applyFly()
                         local pos = torso.Position
                         torso.CFrame = CFrame.new(pos.X, startY, pos.Z) * (torso.CFrame - torso.Position)
                     else
-                        -- 泳姿 / 屏幕 模式：moveDir 直接作为速度方向
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
                         bg.CFrame = getFlyTargetCFrame(camera, torso)
@@ -938,6 +958,167 @@ local function applyNightVision()
             if originalAtmosphere.Density then freezeLightingProperty(atmosphereInstance, "Density", originalAtmosphere.Density, false) end
             if originalAtmosphere.Haze then freezeLightingProperty(atmosphereInstance, "Haze", originalAtmosphere.Haze, false) end
         end
+    end
+end
+
+-- ==================== 相机偏移应用 ====================
+local function applyCameraOffset()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+    hum.CameraOffset = Vector3.new(camOffsetX, camOffsetY, camOffsetZ)
+end
+
+-- ==================== 相机核心函数 ====================
+local function enforceCameraOnce()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    if cam.CameraType ~= Enum.CameraType.Custom then
+        pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+    end
+    if player.CameraMode ~= Enum.CameraMode.Classic then
+        pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+    end
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and cam.CameraSubject ~= hum then
+            pcall(function() cam.CameraSubject = hum end)
+        end
+    end
+end
+
+local function takeCamSnapshot()
+    local cam = workspace.CurrentCamera
+    if not cam then return false end
+    camSnapshot = {
+        CameraMode             = player.CameraMode,
+        CameraMinZoomDistance  = player.CameraMinZoomDistance,
+        CameraMaxZoomDistance  = player.CameraMaxZoomDistance,
+        DevEnableMouseLock     = player.DevEnableMouseLock,
+        DevCameraOcclusionMode = player.DevCameraOcclusionMode,
+        CameraType             = cam.CameraType,
+        CameraSubject          = cam.CameraSubject,
+        FieldOfView            = cam.FieldOfView,
+        takenAt                = os.time(),
+    }
+    return true
+end
+
+local function ensureCamSnapshot()
+    if not camSnapshot then
+        takeCamSnapshot()
+        tanchuangxiaoxi("已自动记录相机快照", "自由相机")
+    end
+end
+
+local function startCamFreeze(autoSnap)
+    if autoSnap then ensureCamSnapshot() end
+    if camFreezeEnabled then return end
+    camFreezeEnabled = true
+    enforceCameraOnce()
+
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    RunService:BindToRenderStep(camFreezeConnName, Enum.RenderPriority.Last.Value, function()
+        if not camFreezeEnabled then return end
+        enforceCameraOnce()
+    end)
+    camFreezeBound = true
+
+    local cam = workspace.CurrentCamera
+    if cam then
+        cam:GetPropertyChangedSignal("CameraType"):Connect(function()
+            if camFreezeEnabled and cam.CameraType ~= Enum.CameraType.Custom then
+                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+            end
+        end)
+        cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
+            if not camFreezeEnabled then return end
+            local c = player.Character
+            local h = c and c:FindFirstChildOfClass("Humanoid")
+            if h and cam.CameraSubject ~= h then
+                pcall(function() cam.CameraSubject = h end)
+            end
+        end)
+    end
+    player:GetPropertyChangedSignal("CameraMode"):Connect(function()
+        if camFreezeEnabled and player.CameraMode ~= Enum.CameraMode.Classic then
+            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+        end
+    end)
+
+    tanchuangxiaoxi("冻结解锁已开启", "自由相机")
+end
+
+local function stopCamFreeze()
+    if not camFreezeEnabled and not camFreezeBound then return end
+    camFreezeEnabled = false
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    camFreezeBound = false
+    tanchuangxiaoxi("冻结解锁已关闭", "自由相机")
+end
+
+local function doCamSingleUnlock(autoSnap)
+    if autoSnap then ensureCamSnapshot() end
+    enforceCameraOnce()
+    tanchuangxiaoxi("已单次解锁视角", "自由相机")
+end
+
+local function enableCamNoClip()
+    if camNoClipEnabled then return end
+    camNoClipEnabled = true
+    pcall(function()
+        player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam
+    end)
+    tanchuangxiaoxi("相机穿墙已开启", "自由相机")
+end
+
+local function disableCamNoClip()
+    if not camNoClipEnabled then return end
+    camNoClipEnabled = false
+    if camSnapshot and camSnapshot.DevCameraOcclusionMode then
+        pcall(function()
+            player.DevCameraOcclusionMode = camSnapshot.DevCameraOcclusionMode
+        end)
+    else
+        pcall(function()
+            player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Zoom
+        end)
+    end
+    tanchuangxiaoxi("相机穿墙已关闭", "自由相机")
+end
+
+local function restoreFromCamSnapshot()
+    if not camSnapshot then
+        tanchuangxiaoxi("尚无快照，先点『重新拍摄快照』", "自由相机")
+        return
+    end
+    stopCamFreeze()
+    camNoClipEnabled = false
+
+    pcall(function() player.CameraMode = camSnapshot.CameraMode end)
+    pcall(function() player.CameraMinZoomDistance = camSnapshot.CameraMinZoomDistance end)
+    pcall(function() player.CameraMaxZoomDistance = camSnapshot.CameraMaxZoomDistance end)
+    pcall(function() player.DevEnableMouseLock = camSnapshot.DevEnableMouseLock end)
+    pcall(function() player.DevCameraOcclusionMode = camSnapshot.DevCameraOcclusionMode end)
+
+    local cam = workspace.CurrentCamera
+    if cam then
+        pcall(function() cam.CameraType = camSnapshot.CameraType end)
+        pcall(function() cam.FieldOfView = camSnapshot.FieldOfView end)
+        if camSnapshot.CameraSubject and camSnapshot.CameraSubject.Parent then
+            pcall(function() cam.CameraSubject = camSnapshot.CameraSubject end)
+        end
+    end
+    tanchuangxiaoxi("已恢复到快照值", "自由相机")
+end
+
+local function manualResnap()
+    if takeCamSnapshot() then
+        tanchuangxiaoxi("已重新拍摄快照", "自由相机")
+    else
+        tanchuangxiaoxi("快照失败：相机未就绪", "自由相机")
     end
 end
 
@@ -1347,7 +1528,6 @@ local function onCharacterAdded(char)
     updateMainButtonText()
     updateSpeedDisplayLoop()
 
-    -- 【新增】重生后重新应用相机偏移
     task.wait(0.2)
     applyCameraOffset()
 
@@ -1626,8 +1806,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
     return dialog
 end
 
--- ==================== 【新增】相机偏移 XYZ 输入对话框 ====================
--- 三输入框 + 4 按钮：取消、重置、记录、确认
+-- ==================== 相机偏移对话框 ====================
 function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
@@ -1673,7 +1852,6 @@ function showCamOffsetDialog()
     hint.TextSize = 10
     hint.TextXAlignment = Enum.TextXAlignment.Center
 
-    -- 三输入框工厂
     local function makeInputBox(labelText, defaultVal, xPos)
         local lbl = Instance.new("TextLabel")
         lbl.Parent = bg
@@ -1708,7 +1886,6 @@ function showCamOffsetDialog()
     local boxY = makeInputBox("Y:", string.format("%.2f", camOffsetY), 130)
     local boxZ = makeInputBox("Z:", string.format("%.2f", camOffsetZ), 240)
 
-    -- 当前记录状态显示
     local baselineLabel = Instance.new("TextLabel")
     baselineLabel.Parent = bg
     baselineLabel.Size = UDim2.new(1, -20, 0, 16)
@@ -1723,14 +1900,12 @@ function showCamOffsetDialog()
     baselineLabel.TextSize = 11
     baselineLabel.TextXAlignment = Enum.TextXAlignment.Center
 
-    -- 4 按钮行
     local buttonFrame = Instance.new("Frame")
     buttonFrame.Parent = bg
     buttonFrame.Size = UDim2.new(1, -20, 0, 40)
     buttonFrame.Position = UDim2.new(0, 10, 0, 120)
     buttonFrame.BackgroundTransparency = 1
 
-    -- 取消 / 重置 / 记录 / 确认 = 4 个，每个 0.25 宽
     local function makeBtn4(text, idx, bgColor)
         local b = Instance.new("TextButton")
         b.Parent = buttonFrame
@@ -1754,7 +1929,6 @@ function showCamOffsetDialog()
     local btnRecord  = makeBtn4("📌 记录", 3, Color3.fromRGB(80, 120, 200))
     local btnConfirm = makeBtn4("确认", 4, Color3.fromRGB(0, 150, 0))
 
-    -- 还原按钮（独立行）
     local btnRestore = Instance.new("TextButton")
     btnRestore.Parent = bg
     btnRestore.Size = UDim2.new(1, -20, 0, 32)
@@ -1769,7 +1943,6 @@ function showCamOffsetDialog()
     rc.CornerRadius = UDim.new(0, 6)
     rc.Parent = btnRestore
 
-    -- 提示
     local tipLabel = Instance.new("TextLabel")
     tipLabel.Parent = bg
     tipLabel.Size = UDim2.new(1, -20, 0, 30)
@@ -2125,7 +2298,7 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.0.0 更新内容：",
+                    "版本 8.0.1 更新内容：",
                     "",
                     "1. 完美整合建筑移除功能，不摧毁地图",
                     "2. 建筑贴图透明度完全支持0~1手动调节",
@@ -2148,11 +2321,11 @@ function showMainMenu()
                     "19. 移速记忆逻辑重写：开启读当前值，关闭即清空",
                     "20. 移速新增3种物理加速方案：持续力/物理速度/强制位移",
                     "21. 设置里新增『自由相机』模块",
-                    "22. 【本次】UI面板宽度从190扩到232，容纳新按钮",
-                    "23. 【本次】原UI标签替换为『全局/水平』朝向切换按钮",
-                    "24. 【本次】泳姿与自由统一使用 Yaw Only 修复相机抖动",
-                    "25. 【本次】设置新增『相机偏移 X/Y/Z』，可自定义俯视角度",
-                    "26. 【本次】相机偏移支持 重置 / 记录 / 还原",
+                    "22. 泳姿与自由统一使用 Yaw Only 修复相机抖动",
+                    "23. 设置新增『相机偏移 X/Y/Z』，可自定义俯视角度",
+                    "24. 【本次修复】UI 宽度改回190，消除右侧空白",
+                    "25. 【本次修复】拖动逻辑：触摸按钮时不再拖动整个面板",
+                    "26. 【本次修复】按钮全部失效问题（拖动/点击冲突）",
                     "",
                     "感谢使用！"
                 }
@@ -2262,12 +2435,11 @@ function showMainMenu()
                     "🔹 冻结解锁：每帧对抗，游戏抢不走你的视角",
                     "🔹 单次解锁：只改一次，适合只锁一次的游戏",
                     "🔹 相机穿墙：使用官方 Invisicam 模式，防被墙挤",
-                    "🔹 【本次】主界面的『全局/水平』按钮：切换飞天时的身体朝向",
+                    "🔹 主界面的『全局/水平』按钮：切换飞天时的身体朝向",
                     "      · 全局：身体完全跟随相机（含俯仰）",
                     "      · 水平：身体只跟随水平朝向（Yaw Only，消除低头抖动）",
-                    "🔹 【本次】设置 - 相机偏移：可自定义相机相对于身体的位置",
+                    "🔹 设置 - 相机偏移：可自定义相机相对于身体的位置",
                     "      · 通常 Y = 2~4 抬高相机，X / Z 保持 0",
-                    "      · 支持 重置 / 记录 / 还原",
                     "🔹 音量键隐藏：启用后，按音量减隐藏UI，音量加显示"
                 }
 
@@ -2378,7 +2550,6 @@ function showMainMenu()
                                 end)
                             end
                         },
-                        -- 【本次新增】相机偏移入口
                         {
                             text = "📷 相机偏移 (X/Y/Z) 当前: (" ..
                                 string.format("%.1f", camOffsetX) .. ", " ..
@@ -2699,7 +2870,7 @@ do
     end)
 end
 
--- ==================== 【新增】faceBtn 朝向切换 ====================
+-- ==================== faceBtn 朝向切换 ====================
 do
     local lastFaceClick = 0
     faceBtn.MouseButton1Down:Connect(function()
@@ -2707,7 +2878,6 @@ do
         if now - lastFaceClick < 0.25 then return end
         lastFaceClick = now
 
-        -- 切换模式
         if flyFaceMode == "全局" then
             flyFaceMode = "水平"
             faceBtn.Text = "水平"
@@ -2725,7 +2895,6 @@ do
         end
     end)
 
-    -- 初始化文字
     if flyFaceMode == "全局" then
         faceBtn.Text = "全局"
         faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
@@ -3168,11 +3337,9 @@ updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
 
--- 初始化朝向按钮（默认"全局"，橙色）
 faceBtn.Text = "全局"
 faceBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 60)
 
--- 加载后 1 秒自动拍一次相机快照
 task.spawn(function()
     task.wait(1)
     takeCamSnapshot()
