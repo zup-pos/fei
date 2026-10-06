@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.1.1 (UI 拖动修复 + 开关修复 + 拾取整合 + 长按时间戳)
+-- Version 8.2.0 (移动端 UI 重构版 - 拖拽与按钮分离)
 
 -- ==================== 实例创建 ====================
 local main = Instance.new("ScreenGui")
@@ -15,7 +15,7 @@ local onof = Instance.new("TextButton")
 
 -- ==================== 属性设置 ====================
 main.Name = "main"
-main.Parent = game.CoreGui
+main.Parent = game:GetService("CoreGui") -- 移动端优先使用 CoreGui
 main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 main.ResetOnSpawn = false
 main.IgnoreGuiInset = true
@@ -32,49 +32,46 @@ Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
 Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
-Frame.Active = true
+Frame.Active = false -- 【关键】设为 false，防止 Frame 抢触摸
 Frame.Draggable = false
 
-up.Name = "up"
-up.Parent = Frame
-up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
-up.Position = UDim2.new(0, 0, 0, 0)
-up.Size = UDim2.new(0, 44, 0, 28)
-up.Font = Enum.Font.SourceSans
-up.Text = "上升"
-up.TextColor3 = Color3.fromRGB(0, 0, 0)
-up.TextScaled = true
-up.TextSize = 14
-up.Active = true
+-- 按钮通用配置
+local function setupButton(btn, text, color, x, y)
+    btn.Parent = Frame
+    btn.BackgroundColor3 = color
+    btn.Position = UDim2.fromOffset(x, y)
+    btn.Size = UDim2.new(0, 44, 0, 28)
+    btn.Font = Enum.Font.SourceSans
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(0, 0, 0)
+    btn.TextScaled = true
+    btn.TextSize = 14
+    btn.Active = true -- 按钮自身激活
+    btn.AutoButtonColor = false
+    return btn
+end
 
-plus.Name = "plus"
-plus.Parent = Frame
-plus.BackgroundColor3 = Color3.fromRGB(133, 145, 255)
-plus.Position = UDim2.new(0, 44, 0, 0)
-plus.Size = UDim2.new(0, 44, 0, 28)
-plus.Font = Enum.Font.SourceSans
-plus.Text = "加速"
-plus.TextColor3 = Color3.fromRGB(0, 0, 0)
-plus.TextScaled = true
-plus.TextSize = 14
-plus.Active = true
+setupButton(up, "上升", Color3.fromRGB(79, 255, 152), 0, 0)
+setupButton(plus, "加速", Color3.fromRGB(133, 145, 255), 44, 0)
+setupButton(down, "下降", Color3.fromRGB(215, 255, 121), 0, 28)
+setupButton(mine, "减速", Color3.fromRGB(123, 255, 247), 44, 28)
 
 uiLabel.Name = "uiLabel"
 uiLabel.Parent = Frame
 uiLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
-uiLabel.Position = UDim2.new(0, 88, 0, 0)
+uiLabel.Position = UDim2.fromOffset(88, 0)
 uiLabel.Size = UDim2.new(0, 44, 0, 28)
 uiLabel.Font = Enum.Font.SourceSans
 uiLabel.Text = "UI"
 uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
 uiLabel.TextScaled = true
 uiLabel.TextSize = 14
-uiLabel.Active = true
+uiLabel.Active = true -- 【关键】标签也需要激活以阻止拖拽穿透
 
 hide.Name = "hide"
 hide.Parent = Frame
 hide.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-hide.Position = UDim2.new(0, 132, 0, 0)
+hide.Position = UDim2.fromOffset(132, 0)
 hide.Size = UDim2.new(0, 58, 0, 28)
 hide.Font = Enum.Font.SourceSans
 hide.Text = "隐藏/设置"
@@ -83,47 +80,22 @@ hide.TextScaled = true
 hide.TextSize = 14
 hide.Active = true
 
-down.Name = "down"
-down.Parent = Frame
-down.BackgroundColor3 = Color3.fromRGB(215, 255, 121)
-down.Position = UDim2.new(0, 0, 0, 28)
-down.Size = UDim2.new(0, 44, 0, 28)
-down.Font = Enum.Font.SourceSans
-down.Text = "下降"
-down.TextColor3 = Color3.fromRGB(0, 0, 0)
-down.TextScaled = true
-down.TextSize = 14
-down.Active = true
-
-mine.Name = "mine"
-mine.Parent = Frame
-mine.BackgroundColor3 = Color3.fromRGB(123, 255, 247)
-mine.Position = UDim2.new(0, 44, 0, 28)
-mine.Size = UDim2.new(0, 44, 0, 28)
-mine.Font = Enum.Font.SourceSans
-mine.Text = "减速"
-mine.TextColor3 = Color3.fromRGB(0, 0, 0)
-mine.TextScaled = true
-mine.TextSize = 14
-mine.Active = true
-
 speed.Name = "speed"
 speed.Parent = Frame
 speed.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
-speed.Position = UDim2.new(0, 88, 0, 28)
+speed.Position = UDim2.fromOffset(88, 28)
 speed.Size = UDim2.new(0, 44, 0, 28)
 speed.Font = Enum.Font.SourceSans
 speed.Text = "1"
 speed.TextColor3 = Color3.fromRGB(0, 0, 0)
 speed.TextScaled = true
 speed.TextSize = 14
-speed.AutoButtonColor = false
 speed.Active = true
 
 onof.Name = "onof"
 onof.Parent = Frame
 onof.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
-onof.Position = UDim2.new(0, 132, 0, 28)
+onof.Position = UDim2.fromOffset(132, 28)
 onof.Size = UDim2.new(0, 58, 0, 28)
 onof.Font = Enum.Font.SourceSans
 onof.Text = "飞天(关闭)"
@@ -209,13 +181,6 @@ local modifiedBuildingParts = {}
 local IGNORED_NAMES = { "baseplate", "ground", "floor", "terrain", "platform", "road" }
 local IGNORE_PLAYER = true
 
-local buildingManualList = {}
-if not _G._buildingManualList then
-    _G._buildingManualList = buildingManualList
-else
-    buildingManualList = _G._buildingManualList
-end
-
 local nightVisionEnabled = false
 local nightVisionBrightness = 2.5
 local originalLighting = {}
@@ -300,25 +265,48 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 主窗口拖拽 ====================
+-- ==================== 【重构】移动端拖拽逻辑 ====================
+-- 关键：使用 InputBegan 检测触摸是否落在 Frame 上，并排除按钮区域
 local isDragging = false
 local dragStartPos = nil
 local dragStartFrame = nil
+local dragTouchInput = nil
 
-Frame.MouseButton1Down:Connect(function()
-    isDragging = true
-    dragStartPos = UserInputService:GetMouseLocation()
-    dragStartFrame = Vector2.new(frameX, frameY)
+-- 所有需要排除的按钮和标签
+local dragBlockElements = { up, plus, uiLabel, hide, down, mine, speed, onof }
+
+local function isPointOnAnyBlockElement(pos)
+    for _, element in ipairs(dragBlockElements) do
+        if element and element.Parent then
+            local p = element.AbsolutePosition
+            local s = element.AbsoluteSize
+            if pos.X >= p.X and pos.X <= p.X + s.X
+                and pos.Y >= p.Y and pos.Y <= p.Y + s.Y then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- 只在 Frame 空白区域启动拖拽
+Frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch
+    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local pos = Vector2.new(input.Position.X, input.Position.Y)
+        if isPointOnAnyBlockElement(pos) then
+            return -- 触摸落在按钮上，不启动拖拽
+        end
+        isDragging = true
+        dragTouchInput = input
+        dragStartPos = pos
+        dragStartFrame = Vector2.new(frameX, frameY)
+    end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if not isDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
-        local currentPos = UserInputService:GetMouseLocation()
-        if input.UserInputType == Enum.UserInputType.Touch then
-            currentPos = Vector2.new(input.Position.X, input.Position.Y)
-        end
+Frame.InputChanged:Connect(function(input)
+    if input == dragTouchInput and isDragging then
+        local currentPos = Vector2.new(input.Position.X, input.Position.Y)
         local delta = currentPos - dragStartPos
 
         local newX = dragStartFrame.X + delta.X
@@ -338,9 +326,11 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch
-    or input.UserInputType == Enum.UserInputType.MouseButton1 then
+    if input == dragTouchInput then
         isDragging = false
+        dragTouchInput = nil
+        dragStartPos = nil
+        dragStartFrame = nil
     end
 end)
 
@@ -446,7 +436,7 @@ local function enableBuildingRemoval()
                 modifiedBuildingParts[obj] = { CanCollide = obj.CanCollide, Transparency = obj.Transparency }
             end
             if buildingRemovalMode == 1 then obj.CanCollide = false
-            elseif buildingRemovalMode == 2 then obj.CanCollide = false obj.Transparency = buildingTransparency
+            elseif buildingRemovalMode == 2 then obj.CanCollide = false; obj.Transparency = buildingTransparency
             elseif buildingRemovalMode == 3 then obj.Transparency = buildingTransparency end
             count = count + 1
         end
@@ -1475,7 +1465,6 @@ local function disableAffectedFeatures()
     if buildingRemovalEnabled then disableBuildingRemoval() end
 end
 
--- 【修复 3】去掉 task.wait(0.1)，纯同步恢复
 local function restoreFeatureStates()
     task.spawn(function()
         if savedFeatureStates.fly then toggleFly(true) end
@@ -2282,10 +2271,8 @@ local pickerBuildingList = {}
 local pickerProtectList = {}
 local pickerSavedTrans = {}
 
--- 【修复 2】关闭时恢复透明度
 local function closePicker()
     if not pickerGUI then return end
-    -- 先恢复所有透明度
     for inst, data in pairs(pickerSavedTrans) do
         if inst and inst.Parent then
             if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam") or inst:IsA("Fire") or inst:IsA("Smoke") then
@@ -2295,7 +2282,6 @@ local function closePicker()
             end
         end
     end
-    -- 如果这些部件在 modifiedBuildingParts 里也同步移除
     for inst, _ in pairs(pickerBuildingList) do
         if inst then modifiedBuildingParts[inst] = nil end
     end
@@ -2583,7 +2569,6 @@ local function createPickerWindow()
                 if not pickerBuildingList[obj] and not pickerProtectList[obj] then
                     pickerBuildingList[obj] = true
                     pickerSavedTrans[obj] = obj.Transparency
-                    -- 【修复 1】同步到 modifiedBuildingParts，便于 disableBuildingRemoval 恢复
                     if not modifiedBuildingParts[obj] then
                         modifiedBuildingParts[obj] = { CanCollide = obj.CanCollide, Transparency = obj.Transparency }
                     end
@@ -2741,7 +2726,6 @@ local function smartClassify(part)
     return true
 end
 
--- 【修复 1】智能扫描同步写入 modifiedBuildingParts
 local function runSmartScan()
     local count = 0
     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -2751,7 +2735,6 @@ local function runSmartScan()
                 if not pickerBuildingList[obj] and not pickerProtectList[obj] then
                     pickerBuildingList[obj] = true
                     pickerSavedTrans[obj] = obj.Transparency
-                    -- 【关键】同步写入 modifiedBuildingParts
                     if not modifiedBuildingParts[obj] then
                         modifiedBuildingParts[obj] = { CanCollide = obj.CanCollide, Transparency = obj.Transparency }
                     end
@@ -2908,20 +2891,13 @@ function showMainMenu()
                 scrollingFrame.BorderSizePixel = 0
 
                 local lines = {
-                    "版本 8.1.1 更新内容：",
+                    "版本 8.2.0 更新内容：",
                     "",
-                    "1-21. (略，历史更新)",
-                    "22. UI 拖动改为 Frame.MouseButton1Down",
-                    "23. 飞天/移速开关异常修复（去掉 task.wait 竞争）",
-                    "24. 朝向按钮改为灰色（不显示颜色）",
-                    "25. 建筑移除模式新增第 5 个: 添加目标",
-                    "26. 长按速度按钮 → 5 个移除模式",
-                    "27. 添加目标 → 创建准星拾取悬浮窗",
-                    "28. 建筑移除开启时自动智能扫描",
-                    "29. 【本次修复】智能扫描同步写入 modifiedBuildingParts",
-                    "30. 【本次修复】closePicker 关闭时恢复透明度",
-                    "31. 【本次修复】restoreFeatureStates 去掉 task.wait",
-                    "32. 【本次修复】speed/onof/hide 改用时间戳判定长按",
+                    "1-28. (略，历史更新)",
+                    "29. 【本次修复】移动端 UI 拖拽与按钮冲突问题",
+                    "30. 【本次修复】按钮状态超时保护机制",
+                    "31. 【本次修复】Frame.Active 设为 false 防止抢触摸",
+                    "32. 【本次】拖拽仅在 Frame 空白区域生效",
                     "",
                     "感谢使用！"
                 }
@@ -3288,6 +3264,10 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
+        if tick() - pressStartTime > 10 then -- 10秒超时保护
+            isPressing = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed < 0.3 then return end
         local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
@@ -3324,6 +3304,10 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed < 0.3 then return end
         local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
@@ -3367,6 +3351,10 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed < 0.3 then return end
         local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
@@ -3431,6 +3419,10 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed < 0.3 then return end
         local interval = longPressSpeed * math.pow(0.9, (elapsed - 0.3) / longPressSpeed)
@@ -3442,7 +3434,7 @@ do
     end)
 end
 
--- ==================== 【修复 4】速度标签：Heartbeat + 时间戳 ====================
+-- ==================== 速度标签 ====================
 do
     local pressStartTime = 0
     local isPressing = false
@@ -3525,7 +3517,6 @@ do
         isPressing = false
         local elapsed = tick() - pressStartTime
         if elapsed >= longPressDelay then
-            -- 长按已经通过 Heartbeat 触发过，什么都不做
         else
             doShortPressAction()
         end
@@ -3538,6 +3529,11 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            longPressTriggered = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed >= longPressDelay then
             longPressTriggered = true
@@ -3546,7 +3542,7 @@ do
     end)
 end
 
--- ==================== 【修复 4】主按钮：Heartbeat + 时间戳 ====================
+-- ==================== 主按钮 ====================
 do
     local pressStartTime = 0
     local isPressing = false
@@ -3608,6 +3604,11 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            longPressTriggered = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed >= longPressDelay then
             longPressTriggered = true
@@ -3616,7 +3617,7 @@ do
     end)
 end
 
--- ==================== 【修复 4】隐藏按钮：Heartbeat + 时间戳 ====================
+-- ==================== 隐藏按钮 ====================
 do
     local pressStartTime = 0
     local isPressing = false
@@ -3755,6 +3756,11 @@ do
 
     RunService.Heartbeat:Connect(function()
         if not isPressing or longPressTriggered then return end
+        if tick() - pressStartTime > 10 then
+            isPressing = false
+            longPressTriggered = false
+            return
+        end
         local elapsed = tick() - pressStartTime
         if elapsed >= longPressDelay then
             longPressTriggered = true
