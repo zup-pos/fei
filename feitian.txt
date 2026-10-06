@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.20（修复输入框叠加 + 状态彻底还原 + 文件导入导出 + 准心长按开关）
+-- Version 8.3.21（弹窗互斥修复 + 输入框叠加修复 + 状态彻底还原 + 准心长按开关）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -159,8 +159,9 @@ local showProtectMenu
 local showKeywordManageMenu
 local showKeywordDetailDialog
 
--- 【修复】记录当前打开的输入框，避免叠加
+-- 【修复】追踪当前活动弹窗，实现输入框与菜单互斥
 local _activeInputDialog = nil
+local _activeMenuDialog = nil
 
 -- 关键词去尾数（如 "Chest_01" → "chest"）
 local function extractKeyword(name)
@@ -807,7 +808,7 @@ local SmartBuilding = (function()
             end)
         end)
         pickBtn.MouseButton1Up:Connect(function()
-            -- 【关键修复】立即取消长按检测，避免误触发 toggleCrosshair
+            -- 【关键】立即取消长按检测，避免误触发 toggleCrosshair
             pickPressStart = 0
             if pickLongTriggered then
                 pickLongTriggered = false
@@ -900,7 +901,6 @@ local SmartBuilding = (function()
             end
         end)
 
-        -- 动态更新保护按钮颜色
         task.spawn(function()
             while ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent do
                 task.wait(0.15)
@@ -2314,10 +2314,16 @@ function tanchuangxiaoxi(msg, title)
 end
 
 function showInputDialog(title, defaultText, callback, extraButton)
-    -- 【修复】销毁上一个输入框，避免叠加
+    -- 【修复】输入框与菜单互斥：销毁已有的输入框和菜单，避免叠加
     if _activeInputDialog then
-        pcall(function() _activeInputDialog:Destroy() end)
+        local d = _activeInputDialog
         _activeInputDialog = nil
+        pcall(function() d:Destroy() end)
+    end
+    if _activeMenuDialog then
+        local m = _activeMenuDialog
+        _activeMenuDialog = nil
+        pcall(function() m:Destroy() end)
     end
 
     local screenSize = getScreenSize()
@@ -2481,6 +2487,13 @@ function showInputDialog(title, defaultText, callback, extraButton)
 end
 
 function createMenu(title, buttons, parentMenu)
+    -- 【修复】菜单打开时，自动销毁输入框
+    if _activeInputDialog then
+        local d = _activeInputDialog
+        _activeInputDialog = nil
+        pcall(function() d:Destroy() end)
+    end
+
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
     local btnHeight, spacing, padding = 40, 5, 10
@@ -2496,7 +2509,13 @@ function createMenu(title, buttons, parentMenu)
         contentHeight = math.min(contentHeight, sh)
     end
     local dialog = Instance.new("ScreenGui")
+    _activeMenuDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+    dialog.Destroying:Connect(function()
+        if _activeMenuDialog == dialog then
+            _activeMenuDialog = nil
+        end
+    end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, menuWidth, 0, totalHeight)
@@ -2581,7 +2600,6 @@ function createMenu(title, buttons, parentMenu)
     end)
     return dialog
 end
-
 -- 音量键 UI 控制
 function setUIVisible(visible)
     uiVisible = visible
@@ -3017,7 +3035,11 @@ local function showFlyModeSelection(currentMode, callback)
         contentHeight = math.min(contentHeight, totalHeight - padding - titleHeight - padding - closeBtnHeight - padding)
     end
     local dialog = Instance.new("ScreenGui")
+    _activeMenuDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+    dialog.Destroying:Connect(function()
+        if _activeMenuDialog == dialog then _activeMenuDialog = nil end
+    end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, menuWidth, 0, totalHeight)
@@ -3115,10 +3137,11 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
+-- 【修复】移除 (默认) 标记
 local function showSmartSubMenu()
     local buttons = {}
     table.insert(buttons, {
-        text = "🧠 智能识别" .. (smartSubMode == "smart" and " ✓" or " (默认)"),
+        text = "🧠 智能识别" .. (smartSubMode == "smart" and " ✓" or ""),
         bgColor = Color3.fromRGB(70, 130, 180),
         callback = function(menu)
             smartSubMode = "smart"
@@ -3153,7 +3176,11 @@ function showMainMenu()
                 local dialogWidth = math.min(450, screenSize.X * 0.8)
                 local dialogHeight = math.min(500, screenSize.Y * 0.8)
                 local dialog = Instance.new("ScreenGui")
+                _activeMenuDialog = dialog
                 dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+                dialog.Destroying:Connect(function()
+                    if _activeMenuDialog == dialog then _activeMenuDialog = nil end
+                end)
                 local bg = Instance.new("Frame")
                 bg.Parent = dialog
                 bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
@@ -3175,23 +3202,25 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.20 更新内容：",
+                    "版本 8.3.21 更新内容：",
                     "",
-                    "【修复】输入框叠加 Bug",
-                    "  · 打开新输入框时自动销毁旧的",
-                    "  · 覆盖 showInputDialog / showBrightnessDialog / showCamOffsetDialog",
+                    "【修复】弹窗互斥",
+                    "  · 打开输入框时自动关闭菜单，反之亦然",
+                    "  · 避免输入框和菜单同时叠加",
+                    "",
+                    "【修复】移除「(默认)」标记",
+                    "  · 修改模式里的智能识别不再显示 (默认)",
+                    "",
+                    "【修复】输入框叠加",
+                    "  · 连续打开同一输入框只保留最新一个",
                     "",
                     "【保护系统】",
-                    "  · 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
-                    "  · 关键词双字段：prefix 子串匹配 + exact 完整匹配",
-                    "  · 支持逗号批量导入、从准心拾取、文件导入导出",
+                    "  · 硬保护 + 关键词双字段（prefix/exact）",
+                    "  · 支持逗号批量导入、准心拾取、文件导入导出",
                     "",
                     "【准心添加】",
                     "  · 短按 = 透明/取消透明",
                     "  · 长按0.4s = 开关屏幕中心准心",
-                    "",
-                    "【透明度滑块】",
-                    "  · 拖动时只更新 UI，松手才触发回调",
                     "",
                     "感谢使用！"
                 }
@@ -3231,7 +3260,11 @@ function showMainMenu()
                 local dialogWidth = math.min(400, screenSize.X * 0.8)
                 local dialogHeight = math.min(450, screenSize.Y * 0.8)
                 local dialog = Instance.new("ScreenGui")
+                _activeMenuDialog = dialog
                 dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+                dialog.Destroying:Connect(function()
+                    if _activeMenuDialog == dialog then _activeMenuDialog = nil end
+                end)
                 local bg = Instance.new("Frame")
                 bg.Parent = dialog
                 bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
@@ -3256,7 +3289,7 @@ function showMainMenu()
                     "🔹 主按钮循环：飞天 ➔ 移速 ➔ 穿墙 ➔ 修改 ➔ 透视",
                     "🔹 长按主按钮切换模式",
                     "🔹 【修改模式】短按 onof = 执行当前子模式",
-                    "   - 智能识别（默认）：静默扫描，无 UI",
+                    "   - 智能识别：静默扫描，无 UI",
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
                     "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
                     "🔹 【准心添加】短按 = 添加目标，长按 = 开关准心",
@@ -3446,10 +3479,16 @@ end
 
 -- 相机偏移设置
 function showCamOffsetDialog()
-    -- 【修复】销毁上一个输入框，避免叠加
+    -- 【修复】互斥：关闭已有的输入框和菜单
     if _activeInputDialog then
-        pcall(function() _activeInputDialog:Destroy() end)
+        local d = _activeInputDialog
         _activeInputDialog = nil
+        pcall(function() d:Destroy() end)
+    end
+    if _activeMenuDialog then
+        local m = _activeMenuDialog
+        _activeMenuDialog = nil
+        pcall(function() m:Destroy() end)
     end
 
     local screenSize = getScreenSize()
@@ -4082,10 +4121,16 @@ end
 
 -- 透视亮度设置弹窗
 function showBrightnessDialog()
-    -- 【修复】销毁上一个输入框，避免叠加
+    -- 【修复】互斥：关闭已有的输入框和菜单
     if _activeInputDialog then
-        pcall(function() _activeInputDialog:Destroy() end)
+        local d = _activeInputDialog
         _activeInputDialog = nil
+        pcall(function() d:Destroy() end)
+    end
+    if _activeMenuDialog then
+        local m = _activeMenuDialog
+        _activeMenuDialog = nil
+        pcall(function() m:Destroy() end)
     end
 
     local screenSize = getScreenSize()
@@ -4238,6 +4283,16 @@ function fullShutdown()
 
     if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
     volumeKeyEnabled = false
+
+    -- 清理活动弹窗
+    if _activeInputDialog then
+        pcall(function() _activeInputDialog:Destroy() end)
+        _activeInputDialog = nil
+    end
+    if _activeMenuDialog then
+        pcall(function() _activeMenuDialog:Destroy() end)
+        _activeMenuDialog = nil
+    end
 end
 
 main.Destroying:Connect(function()
