@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.19（状态彻底还原 + 文件导入导出 + 准心长按开关 + 透明度滑块）
+-- Version 8.3.20（修复输入框叠加 + 状态彻底还原 + 文件导入导出 + 准心长按开关）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -158,6 +158,9 @@ local enableVolumeKey, disableVolumeKey
 local showProtectMenu
 local showKeywordManageMenu
 local showKeywordDetailDialog
+
+-- 【修复】记录当前打开的输入框，避免叠加
+local _activeInputDialog = nil
 
 -- 关键词去尾数（如 "Chest_01" → "chest"）
 local function extractKeyword(name)
@@ -804,11 +807,12 @@ local SmartBuilding = (function()
             end)
         end)
         pickBtn.MouseButton1Up:Connect(function()
+            -- 【关键修复】立即取消长按检测，避免误触发 toggleCrosshair
             pickPressStart = 0
             if pickLongTriggered then
-            pickLongTriggered = false
-        return
-        end
+                pickLongTriggered = false
+                return
+            end
             if not SB.getTargetInCenter or not SB.addTarget then return end
             local t = SB.getTargetInCenter()
             if not t then showNotification("未对准目标"); return end
@@ -2310,12 +2314,24 @@ function tanchuangxiaoxi(msg, title)
 end
 
 function showInputDialog(title, defaultText, callback, extraButton)
+    -- 【修复】销毁上一个输入框，避免叠加
+    if _activeInputDialog then
+        pcall(function() _activeInputDialog:Destroy() end)
+        _activeInputDialog = nil
+    end
+
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
     local isSliderMode = (title == "输入透明度 (0-1)")
     local dialogHeight = isSliderMode and 220 or 180
     local dialog = Instance.new("ScreenGui")
+    _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+    dialog.Destroying:Connect(function()
+        if _activeInputDialog == dialog then
+            _activeInputDialog = nil
+        end
+    end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
@@ -3159,23 +3175,23 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.19 更新内容：",
+                    "版本 8.3.20 更新内容：",
+                    "",
+                    "【修复】输入框叠加 Bug",
+                    "  · 打开新输入框时自动销毁旧的",
+                    "  · 覆盖 showInputDialog / showBrightnessDialog / showCamOffsetDialog",
                     "",
                     "【保护系统】",
                     "  · 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
                     "  · 关键词双字段：prefix 子串匹配 + exact 完整匹配",
                     "  · 支持逗号批量导入、从准心拾取、文件导入导出",
-                    "  · 文件列表支持长按重命名/删除",
                     "",
                     "【准心添加】",
-                    "  · 短按 = 透明/取消透明准心瞄准的组件",
+                    "  · 短按 = 透明/取消透明",
                     "  · 长按0.4s = 开关屏幕中心准心",
                     "",
                     "【透明度滑块】",
-                    "  · 输入框内集成滑动条，松手才触发回调",
-                    "",
-                    "【状态还原】",
-                    "  · 结束脚本彻底还原所有状态（含音量键）",
+                    "  · 拖动时只更新 UI，松手才触发回调",
                     "",
                     "感谢使用！"
                 }
@@ -3430,11 +3446,23 @@ end
 
 -- 相机偏移设置
 function showCamOffsetDialog()
+    -- 【修复】销毁上一个输入框，避免叠加
+    if _activeInputDialog then
+        pcall(function() _activeInputDialog:Destroy() end)
+        _activeInputDialog = nil
+    end
+
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
     local dialogHeight = 260
     local dialog = Instance.new("ScreenGui")
+    _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+    dialog.Destroying:Connect(function()
+        if _activeInputDialog == dialog then
+            _activeInputDialog = nil
+        end
+    end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
@@ -4054,11 +4082,23 @@ end
 
 -- 透视亮度设置弹窗
 function showBrightnessDialog()
+    -- 【修复】销毁上一个输入框，避免叠加
+    if _activeInputDialog then
+        pcall(function() _activeInputDialog:Destroy() end)
+        _activeInputDialog = nil
+    end
+
     local screenSize = getScreenSize()
     local dialogWidth = math.min(400, screenSize.X * 0.6)
     local dialogHeight = 250
     local dialog = Instance.new("ScreenGui")
+    _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
+    dialog.Destroying:Connect(function()
+        if _activeInputDialog == dialog then
+            _activeInputDialog = nil
+        end
+    end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
     bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
