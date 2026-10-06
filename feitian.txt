@@ -2487,11 +2487,15 @@ function showInputDialog(title, defaultText, callback, extraButton)
 end
 
 function createMenu(title, buttons, parentMenu)
-    -- 【修复】菜单打开时，自动销毁输入框
     if _activeInputDialog then
         local d = _activeInputDialog
         _activeInputDialog = nil
         pcall(function() d:Destroy() end)
+    end
+    if _activeMenuDialog then
+        local m = _activeMenuDialog
+        _activeMenuDialog = nil
+        pcall(function() m:Destroy() end)
     end
 
     local screenSize = getScreenSize()
