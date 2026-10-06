@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.10（结束脚本状态完整还原 + 相机偏移预览 + 穿墙修复 + 相机偏移冻结）
+-- Version 8.3.11（控制窗紧凑 + 保护功能 + 结束脚本完整还原）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -70,7 +70,6 @@ onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
 onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
 onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
 
--- ==================== 服务与玩家 ====================
 local player = game:GetService("Players").LocalPlayer
 if not player then return end
 local camera = workspace.CurrentCamera
@@ -80,7 +79,6 @@ local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ==================== 全局变量 ====================
 local speeds = 1
 local moveStep = 2
 local incStep = 1
@@ -150,6 +148,9 @@ local noclipSaved = {}
 
 local smartSubMode = "smart"
 
+-- 【新增】全局保护表（存 root：Model 或 Part）
+local protectedList = {}
+
 local tanchuangxiaoxi
 
 -- ==================== 智能透视模块 ====================
@@ -158,7 +159,7 @@ local SmartBuilding = (function()
 
     local UI = {
         scale = 1.0,
-        ctrlW = 200, ctrlH = 300,
+        ctrlW = 200, ctrlH = 245,   -- 【改动】300 → 245，去掉下半部分空白
         infoW = 200, infoH = 180,
         btnH = 26, btnText = 11, titleText = 12, statusText = 10,
         pad = 6, rowH = 24, titleBarH = 24,
@@ -187,14 +188,28 @@ local SmartBuilding = (function()
         strongIgnore = { "terrain", "sky", "clouds", "atmosphere", "baseplate" },
         exactIgnore = { "ground", "floor", "road", "grass", "dirt", "sand",
                         "water", "platform", "tile" },
+        -- 【扩充】保护关键词（物品 + NPC + 交互物 + 中文）
         protectKeywords = {
+            -- 交互物
             "npc", "mob", "monster", "entity", "creature", "enemy",
             "chest", "loot", "reward", "interactive", "trigger", "portal",
+            -- 刷新点
             "spawn", "respawn", "waypoint", "checkpoint", "teleport",
+            -- 物品（英文）
             "item", "drop", "pickup", "collectible",
+            "bag", "shovel", "knife", "sword", "gun", "weapon", "tool",
+            "potion", "coin", "gem", "apple", "food", "drink",
+            "arrow", "ammo", "bullet", "grenade", "bomb", "torch",
+            "key", "crystal", "scroll",
+            -- 玩家
             "player", "character", "humanoid",
+            -- 中文
             "怪物", "宝箱", "空气墙", "边界", "刷新", "出生", "重生", "传送", "复活",
             "物品", "道具", "奖励",
+            "袋子", "铲子", "刀", "剑", "枪", "药水", "金币", "宝石",
+            "苹果", "食物", "箭", "弹药", "子弹", "手雷", "炸弹",
+            "火把", "工具", "武器", "钥匙", "水晶", "卷轴",
+            -- 特殊
             "invisible", "barrier", "boundary", "blocker", "airwall", "air_wall",
         },
         buildingKeywords = {
@@ -286,9 +301,20 @@ local SmartBuilding = (function()
         return false
     end
 
+    -- 【改动】checkIgnored 增加用户保护检查
     local function checkIgnored(part)
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
+
+        -- 【新增】沿祖先链检查用户保护表
+        do
+            local cur, depth = part, 0
+            while cur and cur ~= workspace and depth < 15 do
+                if protectedList[cur] then return true, "用户保护" end
+                cur = cur.Parent; depth = depth + 1
+            end
+        end
+
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
         if nameMatches(part, CONFIG.invisibleWallKeywords)
             and not nameMatches(part, CONFIG.buildingKeywords) then return true, "空气墙名" end
@@ -405,6 +431,7 @@ local SmartBuilding = (function()
         end
         return part
     end
+    SB.getTargetRoot = getTargetRoot  -- 【新增】暴露给控制窗按钮用
 
     local function collectTargetParts(root)
         local list = {}
@@ -592,6 +619,8 @@ local SmartBuilding = (function()
         local y = 4; local gap = btnH + 3
         local scanBtn = makeBtn(y, "🧠 智能扫描", Color3.fromRGB(70, 130, 180)); y = y + gap
         local pickBtn = makeBtn(y, "🎯 准心添加", Color3.fromRGB(46, 139, 87)); y = y + gap
+        -- 【新增】保护按钮
+        local protectBtn = makeBtn(y, "🛡 保护目标", Color3.fromRGB(150, 100, 200)); y = y + gap
         local clearBtn = makeBtn(y, "🗑 全部取消", Color3.fromRGB(178, 34, 34)); y = y + gap
 
         local tLbl = Instance.new("TextLabel")
@@ -688,8 +717,8 @@ local SmartBuilding = (function()
         status.Font = Enum.Font.Code; status.TextSize = sz.statusText
         status.Parent = content
 
-        ui.control = { scanBtn = scanBtn, pickBtn = pickBtn, clearBtn = clearBtn,
-                       tLbl = tLbl, tBox = tBox, status = status,
+        ui.control = { scanBtn = scanBtn, pickBtn = pickBtn, protectBtn = protectBtn,
+                       clearBtn = clearBtn, tLbl = tLbl, tBox = tBox, status = status,
                        listBtn = listBtn, scaleBox = scaleBox,
                        alphaKnob = alphaKnob }
 
@@ -701,6 +730,13 @@ local SmartBuilding = (function()
             local t = SB.getTargetInCenter()
             if not t then showNotification("未对准目标"); return end
             SB.addTarget(t)
+        end)
+        -- 【新增】保护按钮回调
+        protectBtn.MouseButton1Click:Connect(function()
+            if not SB.getTargetInCenter or not SB.toggleProtect then return end
+            local t = SB.getTargetInCenter()
+            if not t then showNotification("未对准目标"); return end
+            SB.toggleProtect(t)
         end)
         clearBtn.MouseButton1Click:Connect(function()
             if not SB.restoreAll then return end
@@ -738,6 +774,24 @@ local SmartBuilding = (function()
                 end)
             else
                 scaleBox.Text = tostring(math.floor(UI.scale * 100)) .. "%"
+            end
+        end)
+
+        -- 【新增】每 0.15s 检测准心目标，动态更新保护按钮文字
+        task.spawn(function()
+            while ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent do
+                task.wait(0.15)
+                if not (ui.control and ui.control.protectBtn) then break end
+                if not SB.getTargetInCenter or not SB.getTargetRoot then break end
+                local t = SB.getTargetInCenter()
+                local root = t and SB.getTargetRoot(t) or nil
+                if root and protectedList[root] then
+                    ui.control.protectBtn.Text = "🛡 取消保护"
+                    ui.control.protectBtn.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
+                else
+                    ui.control.protectBtn.Text = "🛡 保护目标"
+                    ui.control.protectBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
+                end
             end
         end)
 
@@ -1000,6 +1054,35 @@ local SmartBuilding = (function()
             targetList[p] = nil; guiStateMap[p] = nil; partRootMap[p] = nil
         end
         SB.refreshListUI()
+    end
+
+    -- 【新增】切换目标保护状态
+    SB.toggleProtect = function(target)
+        if not target then return end
+        local root = getTargetRoot(target)
+        if not root then return end
+
+        if protectedList[root] then
+            -- 取消保护
+            protectedList[root] = nil
+            tanchuangxiaoxi("已取消保护: " .. root.Name, "保护")
+        else
+            -- 开启保护：加入保护表
+            protectedList[root] = true
+            -- 若已透明化，立即恢复原样
+            local parts = collectTargetParts(root)
+            local restored = 0
+            for _, p in ipairs(parts) do
+                if targetList[p] ~= nil or guiStateMap[p] ~= nil then
+                    restoreObj(p)
+                    targetList[p] = nil; guiStateMap[p] = nil; partRootMap[p] = nil
+                    restored = restored + 1
+                end
+            end
+            SB.refreshListUI()
+            local extra = (restored > 0) and (" (已恢复 " .. restored .. " 部件)") or ""
+            tanchuangxiaoxi("已保护: " .. root.Name .. extra, "保护")
+        end
     end
 
     SB.restoreAll = function()
@@ -1602,7 +1685,7 @@ local function disableNightVision()
     end
 end
 
--- ==================== 相机偏移（含持续冻结） ====================
+-- ==================== 相机偏移 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
@@ -1743,7 +1826,7 @@ local function manualResnap()
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
 
--- ==================== 穿墙（修复：保存原值） ====================
+-- ==================== 穿墙 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -1752,7 +1835,6 @@ local function getCharacterParts()
     if not hrp or not hum then return nil end
     return char, hrp, hum
 end
-
 local function applyNoclip()
     local char = player.Character
     if not char then return end
@@ -1765,7 +1847,6 @@ local function applyNoclip()
         end
     end
 end
-
 local function restoreNoclip()
     for part, orig in pairs(noclipSaved) do
         if part and part.Parent then
@@ -1774,7 +1855,6 @@ local function restoreNoclip()
     end
     noclipSaved = {}
 end
-
 local function disableNoclip()
     if not noclipEnabled then return end
     noclipEnabled = false
@@ -2500,12 +2580,14 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.10 更新内容：",
+                    "版本 8.3.11 更新内容：",
                     "",
-                    "1-57. (略，历史更新)",
-                    "58. 【关键】结束脚本状态完整还原",
-                    "    - 飞天/移速/相机偏移恢复正常",
-                    "    - 通过 fullShutdown 统一关闭",
+                    "1-58. (略，历史更新)",
+                    "59. 【新增】控制窗加「保护目标」按钮",
+                    "    - 点击切换保护状态",
+                    "    - 保护后不会被透明",
+                    "60. 控制窗高度 300 → 245（更紧凑）",
+                    "61. 扩充物品保护关键词（袋子/铲子/刀/箭等）",
                     "",
                     "感谢使用！"
                 }
@@ -2572,10 +2654,12 @@ function showMainMenu()
                     "🔹 【修改模式】短按 onof = 执行当前子模式",
                     "   - 智能识别（默认）：静默扫描，无 UI",
                     "   - 添加目标：打开完整 UI（控制窗+名单窗）",
+                    "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
+                    "🔹 保护按钮：准心瞄准目标后点击切换保护状态",
+                    "🔹 保护后的目标不会被扫描透明化",
                     "🔹 透明度可用输入框或滑动条调整",
                     "🔹 名单窗默认隐藏，点「📋 名单」开关",
                     "🔹 缩放 50%~150% 生效重建 UI",
-                    "🔹 相机偏移（设置）会持续冻结，防回拉",
                     "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
                     "🔹 穿墙关闭后会完整恢复原碰撞",
                     "🔹 结束脚本会完整还原所有状态",
@@ -2698,9 +2782,7 @@ function showMainMenu()
                     { text = "确认",
                       callback = function(confirmMenu)
                           confirmMenu:Destroy()
-                          -- 【关键修复】按正常流程关闭所有功能，确保状态完整还原
                           fullShutdown()
-                          -- 再销毁 UI
                           if main and main.Parent then main:Destroy() end
                           if miniWindow and miniWindow.Parent then miniWindow:Destroy() miniWindow = nil end
                           if noclipWindow and noclipWindow.Parent then noclipWindow:Destroy() noclipWindow = nil end
@@ -2747,7 +2829,7 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- ==================== 相机偏移对话框（含预览） ====================
+-- ==================== 相机偏移对话框 ====================
 function showCamOffsetDialog()
     local screenSize = getScreenSize()
     local dialogWidth = math.min(380, screenSize.X * 0.75)
@@ -3492,20 +3574,15 @@ function showBrightnessDialog()
     end)
 end
 
--- ==================== 【新增】统一完整关闭（结束脚本前调用） ====================
+-- ==================== 统一完整关闭 ====================
 local function fullShutdown()
-    -- 用正常流程关闭，确保状态完整还原
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
     if nightVisionEnabled then pcall(disableNightVision) end
     if SmartBuilding.isActive() then pcall(SmartBuilding.closeUI) end
-
-    -- 相机冻结 / 穿墙
     pcall(stopCamFreeze)
     pcall(disableCamNoClip)
-
-    -- 相机偏移：断开 + 归零
     if camOffsetConn then camOffsetConn:Disconnect() camOffsetConn = nil end
     camOffsetX, camOffsetY, camOffsetZ = 0, 0, 0
     local char = player.Character
@@ -3513,13 +3590,9 @@ local function fullShutdown()
         local hum = char:FindFirstChildWhichIsA("Humanoid")
         if hum then pcall(function() hum.CameraOffset = Vector3.zero end) end
     end
-
-    -- 断开遗留连接
     if speedModeConnection then speedModeConnection:Disconnect() speedModeConnection = nil end
     if speedUpdateConnection then speedUpdateConnection:Disconnect() speedUpdateConnection = nil end
     if accelConn then accelConn:Disconnect() accelConn = nil end
-
-    -- 清空目标表
     if _G._flyData then removeFly() end
     stopPhysAccel()
     tpwalking = false
@@ -3527,7 +3600,6 @@ end
 
 -- ==================== 清理 ====================
 main.Destroying:Connect(function()
-    -- 兜底：若 fullShutdown 已经执行过，这里的 pcall 不会重复动作
     pcall(fullShutdown)
     if miniWindow then miniWindow:Destroy() miniWindow = nil end
     if noclipWindow then noclipWindow:Destroy() noclipWindow = nil end
