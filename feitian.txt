@@ -300,34 +300,55 @@ local function setFramePos(x, y)
     Frame.Position = UDim2.fromOffset(x, y)
 end
 
--- ==================== 【最终修复】把柄式拖拽逻辑 ====================
+-- ==================== 【最终修复】把柄式拖拽逻辑（多指丝滑 + 身份锁定） ====================
 -- 【原理】
 --   1. uiLabel.Active = true → 触摸被它消费 → 相机不接收 → 视角不乱晃
---   2. 拖动事件绑定在 uiLabel 自己身上 → 只有触摸"UI"标签才触发
---   3. 用 activeTouches 计数 → 多指按在 uiLabel 上时不会因一根手指抬起就中断
+--   2. InputBegan 记录发起拖动的 InputObject 身份（dragInput）
+--   3. InputChanged / InputEnded 用全局 UIS：手指移出 uiLabel 后依然跟手
+--      → 只响应身份匹配的输入，其它手指乱动/抬起都不会影响
+--   4. handleTouches 记录所有按在 uiLabel 上的手指：
+--      发起手指抬起时，若还有其它手指按着，则转交给它继续拖动（不中断）
 local isDragging = false
+local dragInput = nil
 local dragStartPos = nil
 local dragStartFrame = nil
-local activeTouches = 0
+local handleTouches = {}
+
+local function isDragStartInput(input)
+    return input.UserInputType == Enum.UserInputType.Touch
+        or input.UserInputType == Enum.UserInputType.MouseButton1
+end
+
+local function beginExpandDrag(input)
+    isDragging = true
+    dragInput = input
+    dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+    dragStartFrame = Vector2.new(frameX, frameY)
+end
 
 uiLabel.InputBegan:Connect(function(input)
-    if input.UserInputType ~= Enum.UserInputType.Touch
-    and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-        return
-    end
+    if not isDragStartInput(input) then return end
 
-    activeTouches = activeTouches + 1
+    handleTouches[input] = true
 
     -- 已有手指在拖动，忽略新手指，避免 dragStartPos 被覆盖
     if isDragging then return end
 
-    isDragging = true
-    dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
-    dragStartFrame = Vector2.new(frameX, frameY)
+    beginExpandDrag(input)
 end)
 
-uiLabel.InputChanged:Connect(function(input)
+-- 【关键】InputChanged 用全局 UIS：手指移出 uiLabel 后依然触发；只认发起手指
+UserInputService.InputChanged:Connect(function(input)
     if not isDragging then return end
+
+    -- 身份锁定：只响应发起拖动的那个输入对象
+    -- PC 端 MouseMovement 与按下的 MouseButton1 不是同一实例，单独放行
+    local matched = (input == dragInput)
+        or (dragInput ~= nil
+            and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+            and input.UserInputType == Enum.UserInputType.MouseMovement)
+    if not matched then return end
+
     if input.UserInputType ~= Enum.UserInputType.Touch
     and input.UserInputType ~= Enum.UserInputType.MouseMovement then
         return
@@ -342,26 +363,31 @@ uiLabel.InputChanged:Connect(function(input)
     local frameW = Frame.Size.X.Offset
     local frameH = Frame.Size.Y.Offset
 
-    local newX = dragStartFrame.X + delta.X
-    local newY = dragStartFrame.Y + delta.Y
-
-    newX = clamp(newX, 0, vp.X - frameW)
-    newY = clamp(newY, 0, vp.Y - frameH)
+    local newX = clamp(dragStartFrame.X + delta.X, 0, vp.X - frameW)
+    local newY = clamp(dragStartFrame.Y + delta.Y, 0, vp.Y - frameH)
 
     setFramePos(newX, newY)
 end)
 
-uiLabel.InputEnded:Connect(function(input)
-    if input.UserInputType ~= Enum.UserInputType.Touch
-    and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-        return
+-- 【关键】InputEnded 用全局 UIS：手指在别处抬起也能结束拖动；支持手指转交
+UserInputService.InputEnded:Connect(function(input)
+    if handleTouches[input] then handleTouches[input] = nil end
+
+    if not isDragging or input ~= dragInput then return end
+    if not isDragStartInput(input) then return end
+
+    -- 发起手指抬起：若还有其它手指按在 uiLabel 上，转交给它继续拖动
+    local nextInput = nil
+    for t in pairs(handleTouches) do
+        nextInput = t
+        break
     end
 
-    activeTouches = math.max(0, activeTouches - 1)
-
-    -- 只有当按在 uiLabel 上的所有手指都离开时，才结束拖动
-    if activeTouches == 0 then
+    if nextInput then
+        beginExpandDrag(nextInput)
+    else
         isDragging = false
+        dragInput = nil
         dragStartPos = nil
         dragStartFrame = nil
     end
@@ -3682,102 +3708,120 @@ do
         miniBtn.Active = true
 
         local miniX_var, miniY_var = miniX, miniY
-
-        -- ==================== 【折叠窗口修复】把柄式拖拽（与主窗口一致） ====================
-        -- 【原理】
-        --   1. miniBtn 是 TextButton 且 Active = true → 触摸被它消费 → 相机不接收 → 视角不乱晃
-        --   2. 拖动事件绑定在 miniBtn 自己身上 → 只有「按在 mini 上的那根手指」驱动它，
-        --      另一只手在屏幕别处操作不会影响 mini 位置（跟随指定的一只手）
-        --   3. 用 miniActiveTouches 计数 → 多指按在 mini 上时不会因一根手指抬起就中断
-        --   4. 位置 = 按下时坐标 + 手指总位移 → 用绝对基准，不会逐帧漂移
         local miniIsDragging = false
-        local miniStartPos = nil
-        local miniStartFrame = nil
-        local miniActiveTouches = 0
+        local miniDragInput = nil
+        local miniDragStartPos = nil
+        local miniDragStartFrame = nil
+        local miniHandleTouches = {}
+        local miniLastTouchPos = nil
+        local miniTotalDelta = 0
         local miniPressStartPos = nil
-        local miniMoved = false
 
-        local function setMiniPos(x, y)
-            miniX_var = x
-            miniY_var = y
-            mini.Position = UDim2.fromOffset(x, y)
+        local function isMiniStartInput(input)
+            return input.UserInputType == Enum.UserInputType.Touch
+                or input.UserInputType == Enum.UserInputType.MouseButton1
+        end
+
+        local function beginMiniDrag(input)
+            miniIsDragging = true
+            miniDragInput = input
+            miniDragStartPos = Vector2.new(input.Position.X, input.Position.Y)
+            miniDragStartFrame = Vector2.new(miniX_var, miniY_var)
+            miniLastTouchPos = miniDragStartPos
         end
 
         miniBtn.InputBegan:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-                return
-            end
+            if not isMiniStartInput(input) then return end
 
-            miniActiveTouches = miniActiveTouches + 1
+            miniHandleTouches[input] = true
 
-            -- 已有手指在拖动，忽略新手指，避免基准点被覆盖
+            -- 已有手指在拖动，忽略新手指
             if miniIsDragging then return end
 
-            miniIsDragging = true
-            miniMoved = false
-            miniStartPos = Vector2.new(input.Position.X, input.Position.Y)
-            miniPressStartPos = miniStartPos
-            miniStartFrame = Vector2.new(miniX_var, miniY_var)
+            beginMiniDrag(input)
+            miniTotalDelta = 0
+            miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
         end)
 
-        miniBtn.InputChanged:Connect(function(input)
+        -- 【关键】身份锁定：只跟发起拖动的那根手指；直接跟手，无需逐帧 delta 累积
+        UserInputService.InputChanged:Connect(function(input)
             if not miniIsDragging then return end
+
+            local matched = (input == miniDragInput)
+                or (miniDragInput ~= nil
+                    and miniDragInput.UserInputType == Enum.UserInputType.MouseButton1
+                    and input.UserInputType == Enum.UserInputType.MouseMovement)
+            if not matched then return end
+
             if input.UserInputType ~= Enum.UserInputType.Touch
             and input.UserInputType ~= Enum.UserInputType.MouseMovement then
                 return
             end
 
             local curPos = Vector2.new(input.Position.X, input.Position.Y)
-            local delta = curPos - miniStartPos
-
-            if miniPressStartPos and (curPos - miniPressStartPos).Magnitude >= 10 then
-                miniMoved = true
+            if miniLastTouchPos then
+                miniTotalDelta = miniTotalDelta + (curPos - miniLastTouchPos).Magnitude
             end
+            miniLastTouchPos = curPos
+
+            local delta = curPos - miniDragStartPos
+            local newX = miniDragStartFrame.X + delta.X
+            local newY = miniDragStartFrame.Y + delta.Y
 
             local camera = workspace.CurrentCamera
             if not camera then return end
-            local vp = camera.ViewportSize
+            local vp3 = camera.ViewportSize
             local miniW = mini.Size.X.Offset
             local miniH = mini.Size.Y.Offset
-
-            local newX = clamp(miniStartFrame.X + delta.X, 0, vp.X - miniW)
-            local newY = clamp(miniStartFrame.Y + delta.Y, 0, vp.Y - miniH)
-            setMiniPos(newX, newY)
+            newX = clamp(newX, 0, vp3.X - miniW)
+            newY = clamp(newY, 0, vp3.Y - miniH)
+            miniX_var = newX
+            miniY_var = newY
+            mini.Position = UDim2.fromOffset(newX, newY)
         end)
 
-        miniBtn.InputEnded:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+        UserInputService.InputEnded:Connect(function(input)
+            if miniHandleTouches[input] then miniHandleTouches[input] = nil end
+
+            if not miniIsDragging or input ~= miniDragInput then return end
+            if not isMiniStartInput(input) then return end
+
+            -- 若还有其它手指按在 miniBtn 上，转交继续拖动（不触发点击）
+            local nextInput = nil
+            for t in pairs(miniHandleTouches) do
+                nextInput = t
+                break
+            end
+            if nextInput then
+                beginMiniDrag(nextInput)
                 return
             end
 
-            miniActiveTouches = math.max(0, miniActiveTouches - 1)
-
-            -- 只有当按在 mini 上的所有手指都离开时，才结束拖动
-            if miniActiveTouches == 0 then
-                local wasMoved = miniMoved
-                miniIsDragging = false
-                miniStartPos = nil
-                miniStartFrame = nil
-                miniPressStartPos = nil
-                miniMoved = false
-
-                if not wasMoved then
-                    -- 未明显移动 → 视为点击，展开主面板（展开公式与收起公式互逆）
-                    -- 收起: miniX = frameX + 132,  miniY = frameY
-                    -- 展开: frameX = miniX - 132,  frameY = miniY
-                    local vp2 = getScreenSize()
-                    local frameW = Frame.Size.X.Offset
-                    local frameH = Frame.Size.Y.Offset
-                    local newX = clamp(miniX_var - 132, 0, vp2.X - frameW)
-                    local newY = clamp(miniY_var, 0, vp2.Y - frameH)
-                    setFramePos(newX, newY)
-                    Frame.Visible = true
-                    mini:Destroy()
-                    miniWindow = nil
-                end
+            -- 所有手指都离开：根据位移判定点击 / 拖动
+            local endPos = Vector2.new(input.Position.X, input.Position.Y)
+            local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
+            if straightDist < 10 and miniTotalDelta < 15 then
+                -- 【Bug 2 修复】展开公式必须与收起公式互逆
+                -- 收起: miniX = frameX + 132,  miniY = frameY
+                -- 展开: frameX = miniX - 132,  frameY = miniY
+                local vp2 = getScreenSize()
+                local frameW = Frame.Size.X.Offset
+                local frameH = Frame.Size.Y.Offset
+                local newX = miniX_var - 132
+                local newY = miniY_var
+                newX = clamp(newX, 0, vp2.X - frameW)
+                newY = clamp(newY, 0, vp2.Y - frameH)
+                setFramePos(newX, newY)
+                Frame.Visible = true
+                mini:Destroy()
+                miniWindow = nil
             end
+            miniIsDragging = false
+            miniDragInput = nil
+            miniDragStartPos = nil
+            miniDragStartFrame = nil
+            miniLastTouchPos = nil
+            miniPressStartPos = nil
         end)
 
         miniWindow = mini
