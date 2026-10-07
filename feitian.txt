@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.24（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单）
+-- Version 8.3.25（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -154,7 +154,6 @@ local userProtectKeywords = {}
 local collisionDeleteEnabled = false
 
 -- ==================== 默认保护分类管理 ====================
--- 分类数据（硬编码常量，永不改变）
 local DEFAULT_PROTECT_GROUPS = {
     { id = "npc", name = "🧟 NPC/怪物", keywords = {
         "npc", "mob", "monster", "entity", "creature", "enemy",
@@ -170,19 +169,16 @@ local DEFAULT_PROTECT_GROUPS = {
         "空气墙", "围墙", "边界墙", "阻断", "阻挡" } },
 }
 
--- 用户开关：每个分类是否启用（默认全部启用）
 local protectGroupEnabled = {
     npc = true, chest = true, interactive = true, player = true, airwall = true,
 }
 
--- 高级兜底选项（Q2 选 C：默认开，可关闭）
 local advancedProtect = {
-    humanoid = true,    -- 保护含 Humanoid 的对象（真 NPC）
-    prompt = true,      -- 保护含 ProximityPrompt/ClickDetector 的对象
-    classes = true,     -- 保护 SpawnLocation/Tool/Seat/VehicleSeat/Accessory
+    humanoid = true,
+    prompt = true,
+    classes = true,
 }
 
--- 构建当前生效的关键词列表（判定时用这个）
 local function buildActiveProtectKeywords()
     local list = {}
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
@@ -197,7 +193,6 @@ end
 
 local activeProtectKeywords = buildActiveProtectKeywords()
 
--- 重置为默认（恢复所有分类和高级选项）
 local function resetProtectDefaults()
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
         protectGroupEnabled[group.id] = true
@@ -208,7 +203,6 @@ local function resetProtectDefaults()
     activeProtectKeywords = buildActiveProtectKeywords()
 end
 
--- 重新构建生效关键词列表（分类开关变化时调用）
 local function refreshActiveProtectKeywords()
     activeProtectKeywords = buildActiveProtectKeywords()
 end
@@ -274,6 +268,61 @@ local function deserializeKeywords(content)
     return keywords
 end
 
+-- ==================== 通用滑块拖动（多指隔离） ====================
+-- 【新增】修复进度条拖动时"第二根手指触摸屏幕导致滑块乱跳"的问题
+-- 核心：用 input.Position（每根手指独立）代替 UserInputService:GetMouseLocation()（全局单值）
+-- 返回一个清理函数，销毁对话框时调用即可断开所有监听
+local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
+    local dragging = false
+    local dragInput = nil
+    local lastCp = 0
+
+    local function updateFromInput(input)
+        local ap = sliderBg.AbsolutePosition
+        local as = sliderBg.AbsoluteSize.X
+        if as <= 0 then return end
+        local relX = math.clamp(input.Position.X - ap.X, 0, as)
+        local cp = relX / as
+        lastCp = cp
+        knob.Position = UDim2.new(cp, knobOffsetX, 0, knobOffsetY)
+        if onUpdate then onUpdate(cp) end
+    end
+
+    local connKnobBegan = knob.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        dragging = true
+        dragInput = input
+        updateFromInput(input)
+    end)
+
+    local connChanged = UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        local matched = (input == dragInput)
+            or (dragInput ~= nil
+                and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseMovement)
+        if not matched then return end
+        if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        updateFromInput(input)
+    end)
+
+    local connEnded = UserInputService.InputEnded:Connect(function(input)
+        if input ~= dragInput then return end
+        dragging = false
+        dragInput = nil
+        if onEnd then onEnd(lastCp) end
+    end)
+
+    return function()
+        if connKnobBegan then connKnobBegan:Disconnect() end
+        if connChanged then connChanged:Disconnect() end
+        if connEnded then connEnded:Disconnect() end
+    end
+end
+-- ==================== 通用滑块拖动结束 ====================
+
 local SmartBuilding = (function()
     local SB = {}
     SB.crosshairEnabled = true
@@ -333,7 +382,6 @@ local SmartBuilding = (function()
     local ui = {}
     local crosshair = nil
     local scanRunning = false
-    local controlAlphaConn = nil
 
     local MAX_ANCESTOR_DEPTH = 100
 
@@ -747,7 +795,6 @@ local SmartBuilding = (function()
     local openControlWindow
     openControlWindow = function()
         if ui.controlWin and ui.controlWin.frame and ui.controlWin.frame.Parent then return end
-        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
 
         local sz = applyScale()
         local W, H = sz.ctrlW, sz.ctrlH
@@ -819,25 +866,9 @@ local SmartBuilding = (function()
         alphaKnob.Parent = alphaSliderBg
         local akc = Instance.new("UICorner"); akc.CornerRadius = UDim.new(1, 0); akc.Parent = alphaKnob
 
-        local alphaDragging = false
-        alphaKnob.MouseButton1Down:Connect(function() alphaDragging = true end)
-        UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-                alphaDragging = false
-            end
-        end)
-
-        controlAlphaConn = RunService.RenderStepped:Connect(function()
-            if not alphaDragging then return end
-            if not alphaSliderBg.Parent then return end
-            local mp = UserInputService:GetMouseLocation()
-            local ap = alphaSliderBg.AbsolutePosition
-            local as = alphaSliderBg.AbsoluteSize.X
-            local relX = math.clamp(mp.X - ap.X, 0, as)
-            local cp = relX / as
+        -- 【修改】改用 makeSliderDraggable（多指隔离）
+        makeSliderDraggable(alphaKnob, alphaSliderBg, -7, -4, function(cp)
             CONFIG.transparency = math.floor(cp * 100) / 100
-            alphaKnob.Position = UDim2.new(cp, -7, 0, -4)
             tBox.Text = string.format("%.2f", CONFIG.transparency)
             tLbl.Text = "透明度: " .. tBox.Text
             for part, _ in pairs(targetList) do
@@ -1401,7 +1432,6 @@ local SmartBuilding = (function()
         active = false
         containerGui.Enabled = false
         SB.removeCrosshair()
-        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
         if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
         if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
         ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
@@ -1416,7 +1446,6 @@ local SmartBuilding = (function()
         active = false
         containerGui.Enabled = false
         SB.removeCrosshair()
-        if controlAlphaConn then controlAlphaConn:Disconnect() controlAlphaConn = nil end
         if ui.controlWin and ui.controlWin.frame then ui.controlWin.frame:Destroy() end
         if ui.infoWin and ui.infoWin.frame then ui.infoWin.frame:Destroy() end
         ui.controlWin = nil; ui.infoWin = nil; ui.info = nil; ui.control = nil
@@ -2318,25 +2347,18 @@ local function createNightVisionWindow()
         if nightVisionEnabled then applyNightVision() end
         tanchuangxiaoxi("已重置所有渲染属性", "透视")
     end)
-    local dragging = false
-    knob.MouseButton1Down:Connect(function() dragging = true end)
-    local inputEndConn = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+
+    -- 【修改】亮度滑块改用 makeSliderDraggable（多指隔离）
+    local cleanupSlider = makeSliderDraggable(knob, sliderBg, -6, -4.5, function(cp)
+        local nb = minBright + cp * (maxBright - minBright)
+        nb = math.floor(nb * 100) / 100
+        nightVisionBrightness = nb
+        if nightVisionEnabled then applyNightVision() end
     end)
+
+    -- 保留 RenderStepped：持续更新 knob 位置 + valueLabel 显示（非拖动时也要刷新）
     local conn
     conn = RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mp = UserInputService:GetMouseLocation()
-            local ap = sliderBg.AbsolutePosition
-            local as = sliderBg.AbsoluteSize.X
-            local relX = clamp(mp.X - ap.X, 0, as)
-            local cp = relX / as
-            local nb = minBright + cp * (maxBright - minBright)
-            nb = math.floor(nb * 100) / 100
-            nightVisionBrightness = nb
-            if nightVisionEnabled then applyNightVision() end
-        end
         local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(sp, -6, 0, -4.5)
         valueLabel.Text = "亮度: " .. string.format("%.2f", nightVisionBrightness)
@@ -2344,7 +2366,7 @@ local function createNightVisionWindow()
     end)
     sg.Destroying:Connect(function()
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end
+        if cleanupSlider then cleanupSlider() end
     end)
     makeDeltaDraggable(bg, title)
     return sg
@@ -2559,7 +2581,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
     textBox.Font = Enum.Font.Gotham; textBox.TextSize = 14
     textBox.ClearTextOnFocus = false
 
-    local sliderBg, sliderKnob, sliderConn
+    local sliderBg, sliderKnob, cleanupSlider
     if isSliderMode then
         sliderBg = Instance.new("Frame")
         sliderBg.Size = UDim2.new(1, -40, 0, 6)
@@ -2577,40 +2599,18 @@ function showInputDialog(title, defaultText, callback, extraButton)
         sliderKnob.Parent = sliderBg
         local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = sliderKnob
 
-        local draggingSlider = false
-        sliderKnob.MouseButton1Down:Connect(function() draggingSlider = true end)
-
-        local function onSliderEnd()
-            if draggingSlider then
-                draggingSlider = false
-                if callback then
-                    local cp = tonumber(textBox.Text)
-                    if cp then callback(cp) end
-                end
-            end
-        end
-
-        local sliderInputEnd = UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                onSliderEnd()
-            end
-        end)
-
-        sliderConn = RunService.RenderStepped:Connect(function()
-            if draggingSlider then
-                local mp = UserInputService:GetMouseLocation()
-                local ap = sliderBg.AbsolutePosition
-                local as = sliderBg.AbsoluteSize.X
-                local relX = math.clamp(mp.X - ap.X, 0, as)
-                local cp = relX / as
+        -- 【修改】改用 makeSliderDraggable（多指隔离）
+        cleanupSlider = makeSliderDraggable(sliderKnob, sliderBg, -8, -5,
+            function(cp)
                 textBox.Text = string.format("%.2f", cp)
-                sliderKnob.Position = UDim2.new(cp, -8, 0, -5)
+            end,
+            function(cp)
+                -- 拖动结束回调
+                if callback then callback(cp) end
             end
-        end)
-
+        )
         dialog.Destroying:Connect(function()
-            if sliderConn then sliderConn:Disconnect() end
-            if sliderInputEnd then sliderInputEnd:Disconnect() end
+            if cleanupSlider then cleanupSlider() end
         end)
     end
 
@@ -3466,7 +3466,7 @@ showSingleManageMenu = function()
     end
     local total = #validTargets
 
-    -- 【修改】列表为空时，只显示"（暂无单目标）"（跟管理关键词一致）
+    -- 列表为空时，只显示"（暂无单目标）"（跟管理关键词一致）
     if total == 0 then
         table.insert(buttons, {
             text = "（暂无单目标）",
@@ -3915,7 +3915,7 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.24 更新内容：",
+                    "版本 8.3.25 更新内容：",
                     "",
                     "【新增】碰撞删除",
                     "  · 建筑不阻挡玩家（不是删除建筑）",
@@ -3941,6 +3941,10 @@ function showMainMenu()
                     "  · 支持按名字批量添加",
                     "  · 支持从准心拾取",
                     "  · 支持复制名字 / 复制路径 / 导出 / 导入 / 清空",
+                    "",
+                    "【修复】所有滑块拖动多指隔离",
+                    "  · 控制窗透明度 / 透视窗亮度 / 输入框滑块",
+                    "  · 一只手按住别处，另一只手拖滑块不会乱跳",
                     "",
                     "感谢使用！"
                 }
@@ -4021,6 +4025,7 @@ function showMainMenu()
                     "   - 关键词：复制 / 导出 / 查看详情",
                     "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
                     "🔹 保护已补全：非 BasePart 子对象也受保护",
+                    "🔹 所有滑块多指隔离：一只手按别处，另一只手拖滑块不会乱跳",
                     "🔹 硬保护：本机玩家永远被保护",
                     "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
@@ -4892,25 +4897,18 @@ function showBrightnessDialog()
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200); knob.Text = ""
     knob.Parent = sliderBg
     local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = knob
-    local dragging = false
-    knob.MouseButton1Down:Connect(function() dragging = true end)
-    local inputEndConn = UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+
+    -- 【修改】改用 makeSliderDraggable（多指隔离）
+    local cleanupSlider = makeSliderDraggable(knob, sliderBg, -10, -8, function(cp)
+        local nb = minBright + cp * (maxBright - minBright)
+        nb = math.floor(nb * 100) / 100
+        nightVisionBrightness = nb
+        if nightVisionEnabled then applyNightVision() end
     end)
+
+    -- 保留 RenderStepped：持续更新 knob 位置 + 显示
     local conn
     conn = RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mp = UserInputService:GetMouseLocation()
-            local ap = sliderBg.AbsolutePosition
-            local as = sliderBg.AbsoluteSize.X
-            local relX = clamp(mp.X - ap.X, 0, as)
-            local cp = relX / as
-            local nb = minBright + cp * (maxBright - minBright)
-            nb = math.floor(nb * 100) / 100
-            nightVisionBrightness = nb
-            if nightVisionEnabled then applyNightVision() end
-        end
         local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(sp, -10, 0, -8)
         if not textBox:IsFocused() then textBox.Text = string.format("%.2f", nightVisionBrightness) end
@@ -4949,7 +4947,7 @@ function showBrightnessDialog()
     local cc2 = Instance.new("UICorner"); cc2.CornerRadius = UDim.new(0, 6); cc2.Parent = confirmBtn
     cancelBtn.MouseButton1Click:Connect(function()
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end
+        if cleanupSlider then cleanupSlider() end
         dialog:Destroy()
     end)
     confirmBtn.MouseButton1Click:Connect(function()
@@ -4962,7 +4960,7 @@ function showBrightnessDialog()
             tanchuangxiaoxi("亮度已设为 " .. num, "亮度设置")
         end
         if conn then conn:Disconnect() end
-        if inputEndConn then inputEndConn:Disconnect() end
+        if cleanupSlider then cleanupSlider() end
         dialog:Destroy()
     end)
 end
