@@ -2239,7 +2239,7 @@ local function createNightVisionWindow()
     bg.Position = UDim2.new(0.5, -95, 0.5, -55)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
-    bg.Active = true; bg.Draggable = true
+    bg.Active = true
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
     title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
@@ -2346,6 +2346,7 @@ local function createNightVisionWindow()
         if conn then conn:Disconnect() end
         if inputEndConn then inputEndConn:Disconnect() end
     end)
+    makeDeltaDraggable(bg, title)
     return sg
 end
 
