@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.23（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全）
+-- Version 8.3.24（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -223,6 +223,9 @@ local showProtectMenu
 local showKeywordManageMenu
 local showKeywordDetailDialog
 local showDefaultProtectMenu
+local showSingleProtectMenu
+local showSingleManageMenu
+local showSingleDetailDialog
 
 -- 追踪当前活动弹窗，实现互斥
 local _activeInputDialog = nil
@@ -358,7 +361,6 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 使用 activeProtectKeywords 而不是硬编码的 CONFIG.protectKeywords
     local function ancestorsMatchActiveProtect(inst)
         local cur, depth = inst, 0
         while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
@@ -416,9 +418,7 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 【新增】任何对象（不限于 BasePart）沿祖先链检查是否被保护
-    -- 修复：之前只对 BasePart 检查保护，导致 Decal/Texture/SurfaceGui/BillboardGui
-    -- 等非 BasePart 子对象在"先保护、后扫描"场景下会被照常透明化
+    -- 【新增】任何对象（不限于 BasePart）沿祖先链检查是否被单目标保护
     local function isAncestorProtected(obj)
         if not obj then return false end
         local cur, depth = obj, 0
@@ -426,6 +426,30 @@ local SmartBuilding = (function()
             if protectedList[cur] then return true end
             cur = cur.Parent; depth = depth + 1
         end
+        return false
+    end
+
+    -- 【新增】纯名字类保护检查（任何 Instance 都能用，不依赖 BasePart 类型）
+    -- 用于非 BasePart 对象（Decal/Texture/SurfaceGui/BillboardGui/特效等）
+    local function isNameProtected(obj)
+        if not obj then return false end
+        -- 单目标保护
+        if isAncestorProtected(obj) then return true end
+        -- 用户关键词
+        if ancestorsMatchUserKw(obj) then return true end
+        -- 本机玩家角色
+        if player.Character and obj:IsDescendantOf(player.Character) then return true end
+        -- 空气墙名
+        if nameMatches(obj, CONFIG.invisibleWallKeywords)
+            and not nameMatches(obj, CONFIG.buildingKeywords) then return true end
+        -- 强忽略词
+        if nameMatches(obj, CONFIG.strongIgnore) then return true end
+        -- 精确忽略词
+        if exactMatchAny(obj.Name, CONFIG.exactIgnore) then return true end
+        -- 默认保护分类
+        if ancestorsMatchActiveProtect(obj) then return true end
+        -- 刷新点/出生点
+        if ancestorsMatch(obj, CONFIG.spawnKeywords) then return true end
         return false
     end
 
@@ -539,7 +563,6 @@ local SmartBuilding = (function()
         end
     end
 
-    -- 恢复 CanCollide
     local function restoreObj(obj)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
@@ -583,7 +606,6 @@ local SmartBuilding = (function()
         end
     end
 
-    -- 核心修复：从自身往上找，遇到合适大小的 Model 就返回
     local function getTargetRoot(part)
         if not part then return nil end
         local cur = part
@@ -604,14 +626,13 @@ local SmartBuilding = (function()
     end
     SB.getTargetRoot = getTargetRoot
 
-    -- 【修改】collectTargetParts 里加上 isAncestorProtected 过滤
-    -- 修复：被保护的对象及其子树直接跳过，避免"先保护、后扫描"时非 BasePart 子对象被透明化
+    -- 【修改】collectTargetParts 里改用 isNameProtected 过滤
     local function collectTargetParts(root)
         local list = {}
         if not root then return list end
         local function consider(obj)
-            -- 【新增】祖先保护直接跳过（含 root 本身）
-            if isAncestorProtected(obj) then return end
+            -- 【关键】名字类保护直接跳过（覆盖 BasePart + 非 BasePart）
+            if isNameProtected(obj) then return end
             if obj:IsA("BasePart") and not obj:IsA("Terrain") then
                 if not isInvisibleWall(obj) then table.insert(list, obj) end
             elseif obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
@@ -1231,8 +1252,7 @@ local SmartBuilding = (function()
                     and not targetList[part] and not isInvisibleWall(part) then
                     if not isIgnored(part) then
                         local root = getTargetRoot(part)
-                        -- 【修改】同时排除已保护的 root
-                        if root and not rootSet[root] and not isAncestorProtected(root) then
+                        if root and not rootSet[root] and not isNameProtected(root) then
                             rootSet[root] = true
                             table.insert(roots, root)
                         end
@@ -1250,12 +1270,11 @@ local SmartBuilding = (function()
                 local subParts = collectTargetParts(root)
                 for _, p in ipairs(subParts) do
                     if targetList[p] == nil and guiStateMap[p] == nil then
-                        -- 【修改】BasePart 用 isIgnored；非 BasePart 用 isAncestorProtected
                         local blocked = false
                         if p:IsA("BasePart") then
                             blocked = isIgnored(p)
                         else
-                            blocked = isAncestorProtected(p)
+                            blocked = isNameProtected(p)
                         end
                         if not blocked then
                             setObjTransparency(p, CONFIG.transparency)
@@ -1282,7 +1301,6 @@ local SmartBuilding = (function()
         end)
     end
 
-    -- 【修改】addTarget 完整补全保护判断
     SB.addTarget = function(target)
         if not target then return false end
         if not (target:IsA("BasePart") or target:IsA("Model")) then
@@ -1291,8 +1309,8 @@ local SmartBuilding = (function()
         local root = getTargetRoot(target)
         if not root then return false end
 
-        -- 【新增】整体保护检查：root 本身已被保护则直接拒绝
-        if isAncestorProtected(root) then
+        -- 整体保护检查：root 本身被保护则直接拒绝
+        if isNameProtected(root) then
             showNotification("该目标已被保护")
             tanchuangxiaoxi("已被保护，无法添加: " .. root.Name, "保护")
             return false
@@ -1301,7 +1319,6 @@ local SmartBuilding = (function()
         local parts = collectTargetParts(root)
         if #parts == 0 then showNotification("无有效部件"); return false end
 
-        -- 【修改】统计"已添加"的部件数，只有"全部已添加"才走 toggle 取消
         local addedCount = 0
         for _, p in ipairs(parts) do
             if targetList[p] ~= nil or guiStateMap[p] ~= nil then
@@ -1314,7 +1331,6 @@ local SmartBuilding = (function()
             return false
         end
 
-        -- 【修改】应用循环里对非 BasePart 也检查保护
         local added = 0
         for _, p in ipairs(parts) do
             if player.Character and p:IsDescendantOf(player.Character) then continue end
@@ -1322,7 +1338,7 @@ local SmartBuilding = (function()
             if p:IsA("BasePart") then
                 blocked = isIgnored(p)
             else
-                blocked = isAncestorProtected(p)
+                blocked = isNameProtected(p)
             end
             if blocked then continue end
             if targetList[p] == nil and guiStateMap[p] == nil then
@@ -1364,7 +1380,6 @@ local SmartBuilding = (function()
             protectedList[root] = true
             -- 恢复所有该 root 下已被修改的部件（含非 BasePart）
             local restored = 0
-            -- 【修改】用 GetDescendants 直接遍历，因为 collectTargetParts 会过滤保护对象
             local allObjs = { root }
             for _, d in ipairs(root:GetDescendants()) do
                 table.insert(allObjs, d)
@@ -2694,7 +2709,8 @@ function showInputDialog(title, defaultText, callback, extraButton)
                 if title == "输入透明度 (0-1)"
                     or string.find(title, "关键词")
                     or string.find(title, "名称")
-                    or string.find(title, "文件名") then
+                    or string.find(title, "文件名")
+                    or string.find(title, "对象名字") then
                     callback(input) close() return
                 end
                 local num = tonumber(input)
@@ -3098,9 +3114,24 @@ showProtectMenu = function()
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理 ====================
+-- ==================== 关键词管理（含单目标跳转） ====================
 showKeywordManageMenu = function()
     local buttons = {}
+
+    -- 【方案 C】单目标保护入口（跳转到独立菜单）
+    local protectedCount = 0
+    for obj, _ in pairs(protectedList) do
+        if obj and obj.Parent then protectedCount = protectedCount + 1 end
+    end
+    table.insert(buttons, {
+        text = "🎯 单目标保护 (" .. protectedCount .. ")  →",
+        bgColor = Color3.fromRGB(180, 100, 60),
+        callback = function(menu)
+            menu:Destroy()
+            if showSingleProtectMenu then showSingleProtectMenu() end
+        end
+    })
+
     if #userProtectKeywords == 0 then
         table.insert(buttons, {
             text = "（暂无关键词）",
@@ -3313,6 +3344,385 @@ showKeywordDetailDialog = function(idx)
     end)
 end
 
+-- ==================== 单目标保护主菜单 ====================
+showSingleProtectMenu = function()
+    local buttons = {}
+
+    -- 统计
+    local protectedCount = 0
+    for obj, _ in pairs(protectedList) do
+        if obj and obj.Parent then protectedCount = protectedCount + 1 end
+    end
+
+    -- 1. 添加目标（按名字批量）
+    table.insert(buttons, {
+        text = "➕ 添加目标（按名字，逗号分隔批量）",
+        bgColor = Color3.fromRGB(50, 130, 200),
+        callback = function(menu)
+            menu:Destroy()
+            showInputDialog("输入对象名字（可用逗号分隔批量）", "", function(val)
+                if not val or val == "" then return end
+                local names = {}
+                for n in string.gmatch(val, "([^,]+)") do
+                    local trimmed = n:match("^%s*(.-)%s*$")
+                    if trimmed ~= "" then table.insert(names, trimmed) end
+                end
+                if #names == 0 then
+                    tanchuangxiaoxi("未检测到有效名字", "保护"); return
+                end
+
+                local added, scanned = 0, 0
+                local nameSet = {}
+                for _, n in ipairs(names) do nameSet[n] = true end
+
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    scanned = scanned + 1
+                    if nameSet[obj.Name] and not protectedList[obj] then
+                        protectedList[obj] = true
+                        added = added + 1
+                    end
+                end
+                tanchuangxiaoxi("已添加 " .. added .. " 个对象 (扫描 " .. scanned .. ")", "保护")
+                if showSingleProtectMenu then showSingleProtectMenu() end
+            end)
+        end
+    })
+
+    -- 2. 从准心拾取目标
+    table.insert(buttons, {
+        text = "🎯 从准心拾取目标",
+        bgColor = Color3.fromRGB(80, 180, 100),
+        callback = function(menu)
+            menu:Destroy()
+            if not SmartBuilding.getTargetInCenter or not SmartBuilding.getTargetRoot then
+                tanchuangxiaoxi("模块未就绪", "保护"); return
+            end
+            local t = SmartBuilding.getTargetInCenter()
+            if not t then tanchuangxiaoxi("未对准目标", "保护"); return end
+            local root = SmartBuilding.getTargetRoot(t)
+            if not root then tanchuangxiaoxi("无法获取根对象", "保护"); return end
+
+            if protectedList[root] then
+                tanchuangxiaoxi("已保护: " .. root.Name, "保护")
+            else
+                SmartBuilding.toggleProtect(t)
+            end
+        end
+    })
+
+    -- 3. 管理单目标（进入子列表）
+    table.insert(buttons, {
+        text = "📋 管理单目标 (" .. protectedCount .. ")",
+        bgColor = Color3.fromRGB(150, 100, 200),
+        callback = function(menu)
+            menu:Destroy()
+            if showSingleManageMenu then showSingleManageMenu() end
+        end
+    })
+
+    -- 4. 从文件导入
+    table.insert(buttons, {
+        text = "📥 从文件导入单目标",
+        bgColor = Color3.fromRGB(46, 139, 87),
+        callback = function(menu)
+            menu:Destroy()
+            if not isfolder("ProtectKeywords") then
+                tanchuangxiaoxi("文件夹 ProtectKeywords 不存在，请先导出一次", "保护"); return
+            end
+            local files = listfiles("ProtectKeywords")
+            local btnList = {}
+            for _, file in ipairs(files) do
+                if string.sub(file, -4) == ".txt" then
+                    local fileName = string.match(file, "([^/\\]+)%.txt$") or file
+                    table.insert(btnList, {
+                        text = "📄 " .. fileName,
+                        bgColor = Color3.fromRGB(70, 130, 180),
+                        callback = function(subMenu)
+                            subMenu:Destroy()
+                            local content = readfile(file)
+                            -- 解析每行：支持 "name" 或 "prefix,exact" 格式
+                            local names = {}
+                            for line in string.gmatch(content, "[^\n]+") do
+                                local firstComma = string.find(line, ",")
+                                if firstComma then
+                                    local exact = string.sub(line, firstComma + 1)
+                                    if exact ~= "" then
+                                        table.insert(names, exact)
+                                    else
+                                        local prefix = string.sub(line, 1, firstComma - 1)
+                                        if prefix ~= "" then table.insert(names, prefix) end
+                                    end
+                                else
+                                    if line ~= "" then table.insert(names, line) end
+                                end
+                            end
+                            local nameSet = {}
+                            for _, n in ipairs(names) do nameSet[n] = true end
+
+                            local added = 0
+                            for _, obj in ipairs(workspace:GetDescendants()) do
+                                if nameSet[obj.Name] and not protectedList[obj] then
+                                    protectedList[obj] = true
+                                    added = added + 1
+                                end
+                            end
+                            tanchuangxiaoxi("已从 [" .. fileName .. "] 导入 " .. added .. " 个对象", "保护")
+                            if showSingleProtectMenu then showSingleProtectMenu() end
+                        end
+                    })
+                end
+            end
+            if #btnList == 0 then tanchuangxiaoxi("文件夹内暂无 .txt 文件", "保护")
+            else createMenu("选择要导入的单目标文件", btnList, showSingleProtectMenu) end
+        end
+    })
+
+    -- 5. 清空单目标
+    table.insert(buttons, {
+        text = "🗑 清空单目标 (" .. protectedCount .. ")",
+        bgColor = Color3.fromRGB(178, 34, 34),
+        callback = function(menu)
+            menu:Destroy()
+            protectedList = {}
+            tanchuangxiaoxi("已清空 " .. protectedCount .. " 个单目标保护", "保护")
+            if showSingleProtectMenu then showSingleProtectMenu() end
+        end
+    })
+
+    createMenu("🎯 单目标保护管理", buttons, showKeywordManageMenu)
+end
+
+-- ==================== 管理单目标（子列表） ====================
+showSingleManageMenu = function()
+    local buttons = {}
+
+    -- 收集有效单目标，顺便清理失效的
+    local validTargets = {}
+    for obj, _ in pairs(protectedList) do
+        if obj and obj.Parent then
+            table.insert(validTargets, obj)
+        else
+            protectedList[obj] = nil
+        end
+    end
+    local total = #validTargets
+
+    -- 1. 复制所有单目标信息
+    table.insert(buttons, {
+        text = "📋 复制所有单目标信息 (" .. total .. ")",
+        bgColor = Color3.fromRGB(50, 130, 200),
+        callback = function(menu)
+            menu:Destroy()
+            if total == 0 then tanchuangxiaoxi("没有可复制的对象", "保护"); return end
+            local lines = {}
+            for _, obj in ipairs(validTargets) do
+                table.insert(lines, obj:GetFullName())
+            end
+            local text = table.concat(lines, "\n")
+            if setclipboard then
+                pcall(setclipboard, text)
+                tanchuangxiaoxi("已复制 " .. total .. " 条信息", "保护")
+            else
+                tanchuangxiaoxi("剪贴板不可用", "保护")
+            end
+        end
+    })
+
+    -- 2. 导出到文件
+    table.insert(buttons, {
+        text = "📤 导出到文件 (" .. total .. ")",
+        bgColor = Color3.fromRGB(200, 130, 0),
+        callback = function(menu)
+            menu:Destroy()
+            if total == 0 then tanchuangxiaoxi("没有可导出的对象", "保护"); return end
+            if not isfolder("ProtectKeywords") then makefolder("ProtectKeywords") end
+
+            -- 生成导出内容：每行 ",name"（prefix 空，exact=名字）
+            local lines = {}
+            for _, obj in ipairs(validTargets) do
+                table.insert(lines, "," .. obj.Name)
+            end
+            local exportText = table.concat(lines, "\n")
+
+            showInputDialog("输入导出文件名", "singles_" .. os.date("%Y%m%d_%H%M%S"), function(filename)
+                if not filename or filename == "" then return end
+                filename = filename:match("^%s*(.-)%s*$")
+                if filename == "" then return end
+                local filepath = "ProtectKeywords/" .. filename .. ".txt"
+                local function doWrite()
+                    writefile(filepath, exportText)
+                    tanchuangxiaoxi("已导出 " .. total .. " 条到 " .. filepath, "保护")
+                end
+                if isfile(filepath) then
+                    createMenu("文件已存在", {
+                        { text = "🔄 覆盖原文件", callback = function(sm) sm:Destroy(); doWrite() end },
+                        { text = "✏️ 重命名", callback = function(sm)
+                            sm:Destroy()
+                            showInputDialog("输入新文件名", filename .. "_1", function(newName)
+                                if not newName or newName == "" then return end
+                                newName = newName:match("^%s*(.-)%s*$")
+                                if newName == "" then return end
+                                local np = "ProtectKeywords/" .. newName .. ".txt"
+                                if isfile(np) then tanchuangxiaoxi("该文件名依然存在！", "保护")
+                                else writefile(np, exportText); tanchuangxiaoxi("已导出: " .. np, "保护") end
+                            end)
+                        end },
+                        { text = "❌ 取消", callback = function(sm) sm:Destroy() end }
+                    }, nil)
+                else
+                    doWrite()
+                end
+            end)
+        end
+    })
+
+    -- 3. 对象列表（最多显示 100 个）
+    local displayLimit = 100
+    local index = 0
+    for _, obj in ipairs(validTargets) do
+        if index >= displayLimit then break end
+        index = index + 1
+        local objCopy = obj
+        local displayName = obj.Name
+        if #displayName > 30 then displayName = string.sub(displayName, 1, 27) .. "..." end
+        table.insert(buttons, {
+            text = "🎯 " .. displayName .. "（点击查看）",
+            bgColor = Color3.fromRGB(60, 100, 140),
+            callback = function(menu)
+                menu:Destroy()
+                if showSingleDetailDialog then showSingleDetailDialog(objCopy) end
+            end
+        })
+    end
+
+    if total > displayLimit then
+        table.insert(buttons, {
+            text = "（还有 " .. (total - displayLimit) .. " 个未显示）",
+            bgColor = Color3.fromRGB(60, 60, 60),
+            callback = function() end
+        })
+    end
+
+    createMenu("📋 管理单目标 (" .. total .. ")", buttons, showSingleProtectMenu)
+end
+
+-- ==================== 单目标详情 ====================
+showSingleDetailDialog = function(targetObj)
+    if not targetObj or not targetObj.Parent then
+        tanchuangxiaoxi("对象已不存在", "保护")
+        if showSingleManageMenu then showSingleManageMenu() end
+        return
+    end
+
+    local screenSize = getScreenSize()
+    local dialogWidth = math.min(400, screenSize.X * 0.85)
+    local dialogHeight = 240
+
+    local dialog = Instance.new("ScreenGui")
+    dialog.Parent = playerGui
+    dialog.IgnoreGuiInset = true
+    dialog.ResetOnSpawn = false
+
+    local bg = Instance.new("Frame")
+    bg.Parent = dialog
+    bg.Size = UDim2.new(0, dialogWidth, 0, dialogHeight)
+    bg.Position = UDim2.new(0.5, -dialogWidth/2, 0.5, -dialogHeight/2)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    bg.BackgroundTransparency = 0.15
+    bg.BorderSizePixel = 0
+    bg.Active = true
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = bg
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 28)
+    title.Position = UDim2.new(0, 10, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Text = "🎯 单目标详情"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = bg
+
+    local hint = Instance.new("TextLabel")
+    hint.Size = UDim2.new(1, -20, 0, 16)
+    hint.Position = UDim2.new(0, 10, 0, 36)
+    hint.BackgroundTransparency = 1
+    hint.Text = "该对象及其子对象全部受保护，不会被扫描/添加修改"
+    hint.TextColor3 = Color3.fromRGB(180, 180, 220)
+    hint.Font = Enum.Font.Gotham
+    hint.TextSize = 10
+    hint.TextXAlignment = Enum.TextXAlignment.Left
+    hint.Parent = bg
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.new(1, -20, 0, 80)
+    textBox.Position = UDim2.new(0, 10, 0, 56)
+    textBox.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    textBox.TextColor3 = Color3.fromRGB(200, 220, 255)
+    textBox.Font = Enum.Font.Code
+    textBox.TextSize = 13
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = Enum.TextYAlignment.Top
+    textBox.TextEditable = true
+    textBox.ClearTextOnFocus = false
+    textBox.MultiLine = true
+    textBox.Text = "名字: " .. targetObj.Name .. "\n路径: " .. targetObj:GetFullName()
+    textBox.Parent = bg
+    local tbc = Instance.new("UICorner")
+    tbc.CornerRadius = UDim.new(0, 4)
+    tbc.Parent = textBox
+
+    local btnFrame = Instance.new("Frame")
+    btnFrame.Size = UDim2.new(1, -20, 0, 40)
+    btnFrame.Position = UDim2.new(0, 10, 1, -50)
+    btnFrame.BackgroundTransparency = 1
+    btnFrame.Parent = bg
+
+    local function mkBtn(text, x, w, bgColor, cb)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, w, 1, 0)
+        b.Position = UDim2.new(0, x, 0, 0)
+        b.BackgroundColor3 = bgColor
+        b.Text = text
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 12
+        b.AutoButtonColor = false
+        b.Parent = btnFrame
+        local cc = Instance.new("UICorner")
+        cc.CornerRadius = UDim.new(0, 6)
+        cc.Parent = b
+        b.MouseButton1Click:Connect(cb)
+        return b
+    end
+
+    local totalW = dialogWidth - 20
+    local btnW = (totalW - 14) / 3
+
+    mkBtn("📋 复制名字", 0, btnW, Color3.fromRGB(50, 130, 200), function()
+        local ok = false
+        if setclipboard then ok = pcall(setclipboard, targetObj.Name) end
+        if ok then tanchuangxiaoxi("已复制: " .. targetObj.Name, "保护")
+        else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
+    end)
+
+    mkBtn("❌ 取消保护", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
+        protectedList[targetObj] = nil
+        dialog:Destroy()
+        tanchuangxiaoxi("已取消保护: " .. targetObj.Name, "保护")
+        if showSingleManageMenu then showSingleManageMenu() end
+    end)
+
+    mkBtn("返回", 2 * (btnW + 7), btnW, Color3.fromRGB(100, 100, 100), function()
+        dialog:Destroy()
+        if showSingleManageMenu then showSingleManageMenu() end
+    end)
+end
+
 -- ==================== 飞行模式选择 ====================
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
@@ -3495,30 +3905,32 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.23 更新内容：",
+                    "版本 8.3.24 更新内容：",
                     "",
                     "【新增】碰撞删除",
                     "  · 建筑不阻挡玩家（不是删除建筑）",
                     "  · CanCollide=false，完全可逆",
-                    "  · 控制窗点击切换，默认关闭",
                     "",
                     "【新增】默认保护分类管理",
                     "  · 按分类显示：NPC/宝箱/交互物/玩家/空气墙",
                     "  · 单个分类可独立禁用",
                     "  · 高级兜底：Humanoid / 交互组件 / 特定类",
-                    "  · 一键重置为默认",
                     "",
                     "【修复】建筑有大有小",
                     "  · 深度限制从 15 提升到 100",
-                    "  · getTargetRoot 改为逐层向上查找",
                     "",
                     "【修复】弹窗互斥",
                     "  · 长按不再叠加菜单",
-                    "  · 输入框与菜单互斥",
                     "",
                     "【修复】保护补全",
                     "  · 非 BasePart 子对象（贴图/界面/特效）也受保护",
-                    "  · 保护后扫描/添加完全跳过该对象",
+                    "  · 准星拾取关键词后，扫描/添加完全跳过该对象",
+                    "",
+                    "【新增】单目标保护独立菜单",
+                    "  · 管理保护关键词 → 顶部「🎯 单目标保护」",
+                    "  · 支持按名字批量添加",
+                    "  · 支持从准心拾取",
+                    "  · 支持复制信息 / 导出 / 导入 / 清空",
                     "",
                     "感谢使用！"
                 }
@@ -3593,11 +4005,10 @@ function showMainMenu()
                     "🔹 【准心添加】短按 = 添加目标，长按 = 开关准心",
                     "🔹 【保护按钮】短按 = 切换单目标保护",
                     "🔹 【保护按钮】长按 = 保护设置菜单",
-                    "   - 添加保护关键词（支持逗号批量导入）",
-                    "   - 从准心拾取关键词（自动去尾数）",
-                    "   - 管理保护关键词：详情 / 复制 / 导出文件",
-                    "   - 默认保护管理：分类开关 + 高级兜底 + 重置",
-                    "   - 外部主菜单支持一键清空所有关键词",
+                    "🔹 管理保护关键词：",
+                    "   - 顶部「🎯 单目标保护」跳转独立菜单",
+                    "   - 单目标：批量添加 / 准心拾取 / 复制信息 / 导出 / 导入 / 清空",
+                    "   - 关键词：复制 / 导出 / 查看详情",
                     "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
                     "🔹 保护已补全：非 BasePart 子对象也受保护",
                     "🔹 硬保护：本机玩家永远被保护",
