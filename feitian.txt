@@ -3507,28 +3507,61 @@ showSingleManageMenu = function()
     end
     local total = #validTargets
 
-    -- 1. 复制所有单目标信息
+    -- 1. 复制所有名字（跳过空值，逗号分隔）
     table.insert(buttons, {
-        text = "📋 复制所有单目标信息 (" .. total .. ")",
+        text = "📋 复制所有名字 (" .. total .. ")",
         bgColor = Color3.fromRGB(50, 130, 200),
         callback = function(menu)
             menu:Destroy()
             if total == 0 then tanchuangxiaoxi("没有可复制的对象", "保护"); return end
-            local lines = {}
+            local names = {}
             for _, obj in ipairs(validTargets) do
-                table.insert(lines, obj:GetFullName())
+                local n = obj.Name
+                if n and n ~= "" then
+                    table.insert(names, n)
+                end
             end
-            local text = table.concat(lines, "\n")
+            if #names == 0 then
+                tanchuangxiaoxi("没有有效的名字可复制", "保护"); return
+            end
+            local text = table.concat(names, ",")
             if setclipboard then
                 pcall(setclipboard, text)
-                tanchuangxiaoxi("已复制 " .. total .. " 条信息", "保护")
+                tanchuangxiaoxi("已复制 " .. #names .. " 个名字", "保护")
             else
                 tanchuangxiaoxi("剪贴板不可用", "保护")
             end
         end
     })
 
-    -- 2. 导出到文件
+    -- 2. 复制所有路径（跳过空值，逗号分隔）
+    table.insert(buttons, {
+        text = "📋 复制所有路径 (" .. total .. ")",
+        bgColor = Color3.fromRGB(70, 140, 180),
+        callback = function(menu)
+            menu:Destroy()
+            if total == 0 then tanchuangxiaoxi("没有可复制的对象", "保护"); return end
+            local paths = {}
+            for _, obj in ipairs(validTargets) do
+                local p = obj:GetFullName()
+                if p and p ~= "" then
+                    table.insert(paths, p)
+                end
+            end
+            if #paths == 0 then
+                tanchuangxiaoxi("没有有效的路径可复制", "保护"); return
+            end
+            local text = table.concat(paths, ",")
+            if setclipboard then
+                pcall(setclipboard, text)
+                tanchuangxiaoxi("已复制 " .. #paths .. " 条路径", "保护")
+            else
+                tanchuangxiaoxi("剪贴板不可用", "保护")
+            end
+        end
+    })
+
+    -- 3. 导出到文件
     table.insert(buttons, {
         text = "📤 导出到文件 (" .. total .. ")",
         bgColor = Color3.fromRGB(200, 130, 0),
@@ -3537,10 +3570,16 @@ showSingleManageMenu = function()
             if total == 0 then tanchuangxiaoxi("没有可导出的对象", "保护"); return end
             if not isfolder("ProtectKeywords") then makefolder("ProtectKeywords") end
 
-            -- 生成导出内容：每行 ",name"（prefix 空，exact=名字）
+            -- 生成导出内容：每行 ",name"（prefix 空，exact=名字）；跳过空名字
             local lines = {}
             for _, obj in ipairs(validTargets) do
-                table.insert(lines, "," .. obj.Name)
+                local n = obj.Name
+                if n and n ~= "" then
+                    table.insert(lines, "," .. n)
+                end
+            end
+            if #lines == 0 then
+                tanchuangxiaoxi("没有有效的对象名字可导出", "保护"); return
             end
             local exportText = table.concat(lines, "\n")
 
@@ -3551,7 +3590,7 @@ showSingleManageMenu = function()
                 local filepath = "ProtectKeywords/" .. filename .. ".txt"
                 local function doWrite()
                     writefile(filepath, exportText)
-                    tanchuangxiaoxi("已导出 " .. total .. " 条到 " .. filepath, "保护")
+                    tanchuangxiaoxi("已导出 " .. #lines .. " 条到 " .. filepath, "保护")
                 end
                 if isfile(filepath) then
                     createMenu("文件已存在", {
@@ -3576,7 +3615,7 @@ showSingleManageMenu = function()
         end
     })
 
-    -- 3. 对象列表（最多显示 100 个）
+    -- 4. 对象列表（最多显示 100 个）
     local displayLimit = 100
     local index = 0
     for _, obj in ipairs(validTargets) do
@@ -3584,6 +3623,7 @@ showSingleManageMenu = function()
         index = index + 1
         local objCopy = obj
         local displayName = obj.Name
+        if not displayName or displayName == "" then displayName = "(无名)" end
         if #displayName > 30 then displayName = string.sub(displayName, 1, 27) .. "..." end
         table.insert(buttons, {
             text = "🎯 " .. displayName .. "（点击查看）",
@@ -3704,9 +3744,13 @@ showSingleDetailDialog = function(targetObj)
     local btnW = (totalW - 14) / 3
 
     mkBtn("📋 复制名字", 0, btnW, Color3.fromRGB(50, 130, 200), function()
+        local nameToCopy = targetObj.Name
+        if not nameToCopy or nameToCopy == "" then
+            tanchuangxiaoxi("名字为空，无法复制", "保护"); return
+        end
         local ok = false
-        if setclipboard then ok = pcall(setclipboard, targetObj.Name) end
-        if ok then tanchuangxiaoxi("已复制: " .. targetObj.Name, "保护")
+        if setclipboard then ok = pcall(setclipboard, nameToCopy) end
+        if ok then tanchuangxiaoxi("已复制: " .. nameToCopy, "保护")
         else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
     end)
 
@@ -3930,7 +3974,7 @@ function showMainMenu()
                     "  · 管理保护关键词 → 顶部「🎯 单目标保护」",
                     "  · 支持按名字批量添加",
                     "  · 支持从准心拾取",
-                    "  · 支持复制信息 / 导出 / 导入 / 清空",
+                    "  · 支持复制名字 / 复制路径 / 导出 / 导入 / 清空",
                     "",
                     "感谢使用！"
                 }
@@ -4007,7 +4051,7 @@ function showMainMenu()
                     "🔹 【保护按钮】长按 = 保护设置菜单",
                     "🔹 管理保护关键词：",
                     "   - 顶部「🎯 单目标保护」跳转独立菜单",
-                    "   - 单目标：批量添加 / 准心拾取 / 复制信息 / 导出 / 导入 / 清空",
+                    "   - 单目标：批量添加 / 准心拾取 / 复制名字 / 复制路径 / 导出 / 导入 / 清空",
                     "   - 关键词：复制 / 导出 / 查看详情",
                     "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
                     "🔹 保护已补全：非 BasePart 子对象也受保护",
