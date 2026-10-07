@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.21（弹窗互斥修复 + 输入框叠加修复 + 状态彻底还原 + 准心长按开关）
+-- Version 8.3.23（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -150,20 +150,85 @@ local smartSubMode = "smart"
 local protectedList = {}
 local userProtectKeywords = {}
 
+-- 【新增】碰撞删除全局开关（默认关闭）
+local collisionDeleteEnabled = false
+
+-- ==================== 默认保护分类管理 ====================
+-- 分类数据（硬编码常量，永不改变）
+local DEFAULT_PROTECT_GROUPS = {
+    { id = "npc", name = "🧟 NPC/怪物", keywords = {
+        "npc", "mob", "monster", "entity", "creature", "enemy",
+        "怪物", "敌人", "守卫", "僵尸" } },
+    { id = "chest", name = "📦 宝箱/奖励", keywords = {
+        "chest", "loot", "reward", "宝箱", "奖励", "战利品" } },
+    { id = "interactive", name = "🚪 交互物/传送门", keywords = {
+        "interactive", "trigger", "portal", "传送门", "触发器" } },
+    { id = "player", name = "👤 玩家相关", keywords = {
+        "player", "character", "humanoid" } },
+    { id = "airwall", name = "🧱 空气墙", keywords = {
+        "invisible", "barrier", "boundary", "blocker", "airwall", "air_wall",
+        "空气墙", "围墙", "边界墙", "阻断", "阻挡" } },
+}
+
+-- 用户开关：每个分类是否启用（默认全部启用）
+local protectGroupEnabled = {
+    npc = true, chest = true, interactive = true, player = true, airwall = true,
+}
+
+-- 高级兜底选项（Q2 选 C：默认开，可关闭）
+local advancedProtect = {
+    humanoid = true,    -- 保护含 Humanoid 的对象（真 NPC）
+    prompt = true,      -- 保护含 ProximityPrompt/ClickDetector 的对象
+    classes = true,     -- 保护 SpawnLocation/Tool/Seat/VehicleSeat/Accessory
+}
+
+-- 构建当前生效的关键词列表（判定时用这个）
+local function buildActiveProtectKeywords()
+    local list = {}
+    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
+        if protectGroupEnabled[group.id] then
+            for _, kw in ipairs(group.keywords) do
+                table.insert(list, kw)
+            end
+        end
+    end
+    return list
+end
+
+local activeProtectKeywords = buildActiveProtectKeywords()
+
+-- 重置为默认（恢复所有分类和高级选项）
+local function resetProtectDefaults()
+    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
+        protectGroupEnabled[group.id] = true
+    end
+    advancedProtect.humanoid = true
+    advancedProtect.prompt = true
+    advancedProtect.classes = true
+    activeProtectKeywords = buildActiveProtectKeywords()
+end
+
+-- 重新构建生效关键词列表（分类开关变化时调用）
+local function refreshActiveProtectKeywords()
+    activeProtectKeywords = buildActiveProtectKeywords()
+end
+-- ==================== 默认保护分类管理结束 ====================
+
 local tanchuangxiaoxi
--- 前向声明，避免顺序问题
+-- 前向声明
 local fullShutdown
 local setUIVisible
 local enableVolumeKey, disableVolumeKey
 local showProtectMenu
 local showKeywordManageMenu
 local showKeywordDetailDialog
+local showDefaultProtectMenu
 
--- 【修复】追踪当前活动弹窗，实现输入框与菜单互斥
+-- 追踪当前活动弹窗，实现互斥
 local _activeInputDialog = nil
 local _activeMenuDialog = nil
 
--- 关键词去尾数（如 "Chest_01" → "chest"）
+-- 关键词去尾数
 local function extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
@@ -176,7 +241,7 @@ local function extractKeyword(name)
     return string.lower(s)
 end
 
--- 序列化：关键词列表 → 文本（每行 "前缀,完整名"）
+-- 序列化 / 反序列化
 local function serializeKeywords(keywords)
     local lines = {}
     for _, item in ipairs(keywords) do
@@ -187,7 +252,6 @@ local function serializeKeywords(keywords)
     return table.concat(lines, "\n")
 end
 
--- 反序列化：文本 → 关键词列表
 local function deserializeKeywords(content)
     local keywords = {}
     for line in string.gmatch(content, "[^\n]+") do
@@ -213,7 +277,7 @@ local SmartBuilding = (function()
 
     local UI = {
         scale = 1.0,
-        ctrlW = 200, ctrlH = 245,
+        ctrlW = 200, ctrlH = 285,
         infoW = 200, infoH = 180,
         btnH = 26, btnText = 11, titleText = 12, statusText = 10,
         pad = 6, rowH = 24, titleBarH = 24,
@@ -242,15 +306,6 @@ local SmartBuilding = (function()
         strongIgnore = { "terrain", "sky", "clouds", "atmosphere", "baseplate" },
         exactIgnore = { "ground", "floor", "road", "grass", "dirt", "sand",
                         "water", "platform", "tile" },
-        protectKeywords = {
-            "npc", "mob", "monster", "entity", "creature", "enemy",
-            "怪物", "敌人", "守卫", "僵尸",
-            "chest", "loot", "reward", "宝箱", "奖励", "战利品",
-            "interactive", "trigger", "portal", "传送门", "触发器",
-            "player", "character", "humanoid",
-            "invisible", "barrier", "boundary", "blocker", "airwall", "air_wall",
-            "空气墙", "围墙", "边界墙", "阻断", "阻挡",
-        },
         buildingKeywords = {
             "wall", "floor", "roof", "house", "building", "rock", "stone", "brick",
             "tree", "leaf", "leaves", "branch", "trunk", "grass", "bush", "vine",
@@ -277,6 +332,9 @@ local SmartBuilding = (function()
     local scanRunning = false
     local controlAlphaConn = nil
 
+    -- 深度限制从 15 提升到 100
+    local MAX_ANCESTOR_DEPTH = 100
+
     local function nameMatches(inst, list)
         if not inst then return false end
         local n = string.lower(inst.Name)
@@ -300,9 +358,19 @@ local SmartBuilding = (function()
         return false
     end
 
+    -- 使用 activeProtectKeywords 而不是硬编码的 CONFIG.protectKeywords
+    local function ancestorsMatchActiveProtect(inst)
+        local cur, depth = inst, 0
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
+            if nameMatches(cur, activeProtectKeywords) then return true end
+            cur = cur.Parent; depth = depth + 1
+        end
+        return false
+    end
+
     local function ancestorsMatch(inst, list)
         local cur, depth = inst, 0
-        while cur and cur ~= workspace and depth < 15 do
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
             if nameMatches(cur, list) then return true end
             cur = cur.Parent; depth = depth + 1
         end
@@ -313,7 +381,7 @@ local SmartBuilding = (function()
         if not inst then return false end
         if #userProtectKeywords == 0 then return false end
         local cur, depth = inst, 0
-        while cur and cur ~= workspace and depth < 15 do
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
             local n = string.lower(cur.Name)
             for _, item in ipairs(userProtectKeywords) do
                 if item.exact and item.exact ~= "" and string.lower(item.exact) == n then
@@ -330,7 +398,7 @@ local SmartBuilding = (function()
 
     local function ancestorsHavePrompt(inst)
         local cur, depth = inst, 0
-        while cur and cur ~= workspace and depth < 15 do
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
             for _, c in ipairs(cur:GetChildren()) do
                 if c:IsA("ProximityPrompt") or c:IsA("ClickDetector") then return true end
             end
@@ -341,7 +409,7 @@ local SmartBuilding = (function()
 
     local function ancestorsHaveHumanoid(inst)
         local cur, depth = inst, 0
-        while cur and cur ~= workspace and depth < 15 do
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
             if cur:IsA("Model") and cur:FindFirstChildOfClass("Humanoid") then return true end
             cur = cur.Parent; depth = depth + 1
         end
@@ -359,45 +427,78 @@ local SmartBuilding = (function()
         return false
     end
 
+    -- 重构：使用 activeProtectKeywords 和 advancedProtect 开关
     local function checkIgnored(part)
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
+
+        -- 单目标保护
         do
             local cur, depth = part, 0
-            while cur and cur ~= workspace and depth < 15 do
+            while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
                 if protectedList[cur] then return true, "单目标保护" end
                 cur = cur.Parent; depth = depth + 1
             end
         end
+
+        -- 用户自定义关键词
         if ancestorsMatchUserKw(part) then return true, "用户关键词" end
+
+        -- 本机玩家角色（永远保护）
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
+
+        -- 空气墙名（硬编码）
         if nameMatches(part, CONFIG.invisibleWallKeywords)
             and not nameMatches(part, CONFIG.buildingKeywords) then return true, "空气墙名" end
+
+        -- 强忽略词（硬编码）
         if nameMatches(part, CONFIG.strongIgnore) then return true, "强忽略词" end
         if exactMatchAny(part.Name, CONFIG.exactIgnore) then return true, "忽略词" end
-        if ancestorsMatch(part, CONFIG.protectKeywords) then return true, "硬保护词" end
+
+        -- 默认保护分类（用户可编辑）
+        if ancestorsMatchActiveProtect(part) then return true, "默认保护" end
+
+        -- 刷新点/出生点（硬编码）
         if ancestorsMatch(part, CONFIG.spawnKeywords) then return true, "刷新点/出生点" end
-        for _, cls in ipairs(CONFIG.protectClasses) do
-            if part:IsA(cls) then return true, "保护类 " .. cls end
+
+        -- 高级兜底：保护类
+        if advancedProtect.classes then
+            for _, cls in ipairs(CONFIG.protectClasses) do
+                if part:IsA(cls) then return true, "保护类 " .. cls end
+            end
         end
-        if ancestorsHavePrompt(part) then return true, "含交互组件" end
-        if ancestorsHaveHumanoid(part) then return true, "含 Humanoid" end
+
+        -- 高级兜底：含交互组件
+        if advancedProtect.prompt and ancestorsHavePrompt(part) then
+            return true, "含交互组件"
+        end
+
+        -- 高级兜底：含 Humanoid（真 NPC）
+        if advancedProtect.humanoid and ancestorsHaveHumanoid(part) then
+            return true, "含 Humanoid"
+        end
+
         return false, nil
     end
     local function isIgnored(part) return (checkIgnored(part)) end
 
+    -- 支持 CanCollide 保存和碰撞删除
     local function setObjTransparency(obj, trans)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
             local rec = targetList[obj]
             if not rec then
                 rec = { transparency = obj.Transparency, material = obj.Material,
-                        castShadow = obj.CastShadow, reflectance = obj.Reflectance }
+                        castShadow = obj.CastShadow, reflectance = obj.Reflectance,
+                        canCollide = obj.CanCollide }
                 targetList[obj] = rec
             end
             obj.Transparency = trans
             obj.Material = Enum.Material.SmoothPlastic
             obj.CastShadow = false; obj.Reflectance = 0
+            if collisionDeleteEnabled then
+                obj.CanCollide = false
+            end
             return
         end
         if obj:IsA("Decal") or obj:IsA("Texture") then
@@ -431,6 +532,7 @@ local SmartBuilding = (function()
         end
     end
 
+    -- 恢复 CanCollide
     local function restoreObj(obj)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
@@ -440,6 +542,9 @@ local SmartBuilding = (function()
                 obj.Material = rec.material
                 obj.CastShadow = rec.castShadow
                 obj.Reflectance = rec.reflectance
+                if rec.canCollide ~= nil then
+                    obj.CanCollide = rec.canCollide
+                end
             end
             return
         end
@@ -471,18 +576,22 @@ local SmartBuilding = (function()
         end
     end
 
+    -- 核心修复：从自身往上找，遇到合适大小的 Model 就返回
     local function getTargetRoot(part)
         if not part then return nil end
-        local model = part:FindFirstAncestorOfClass("Model")
-        if model and model ~= workspace then
-            local count, tooBig = 0, false
-            for _, d in ipairs(model:GetDescendants()) do
-                if d:IsA("BasePart") then
-                    count = count + 1
-                    if count > CONFIG.maxModelParts then tooBig = true break end
+        local cur = part
+        while cur and cur ~= workspace do
+            if cur:IsA("Model") then
+                local count, tooBig = 0, false
+                for _, d in ipairs(cur:GetDescendants()) do
+                    if d:IsA("BasePart") then
+                        count = count + 1
+                        if count > CONFIG.maxModelParts then tooBig = true break end
+                    end
                 end
+                if not tooBig then return cur end
             end
-            if not tooBig then return model end
+            cur = cur.Parent
         end
         return part
     end
@@ -675,6 +784,7 @@ local SmartBuilding = (function()
         local scanBtn = makeBtn(y, "🧠 智能扫描", Color3.fromRGB(70, 130, 180)); y = y + gap
         local pickBtn = makeBtn(y, "🎯 准心添加", Color3.fromRGB(46, 139, 87)); y = y + gap
         local protectBtn = makeBtn(y, "🛡 保护目标", Color3.fromRGB(150, 100, 200)); y = y + gap
+        local collisionBtn = makeBtn(y, "💨 碰撞删除: 关闭", Color3.fromRGB(90, 90, 90)); y = y + gap
         local clearBtn = makeBtn(y, "🗑 全部取消", Color3.fromRGB(178, 34, 34)); y = y + gap
 
         local tLbl = Instance.new("TextLabel")
@@ -772,6 +882,7 @@ local SmartBuilding = (function()
         status.Parent = content
 
         ui.control = { scanBtn = scanBtn, pickBtn = pickBtn, protectBtn = protectBtn,
+                       collisionBtn = collisionBtn,
                        clearBtn = clearBtn, tLbl = tLbl, tBox = tBox, status = status,
                        listBtn = listBtn, scaleBox = scaleBox,
                        alphaKnob = alphaKnob }
@@ -780,7 +891,31 @@ local SmartBuilding = (function()
             if SB.smartScan then SB.smartScan() end
         end)
 
-        -- 【准心添加】短按 = 添加/取消目标；长按0.4秒 = 开关屏幕中心准心
+        collisionBtn.MouseButton1Click:Connect(function()
+            collisionDeleteEnabled = not collisionDeleteEnabled
+            if collisionDeleteEnabled then
+                collisionBtn.Text = "💨 碰撞删除: 开启"
+                collisionBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+                for part, _ in pairs(targetList) do
+                    if part and part.Parent and part:IsA("BasePart") then
+                        pcall(function() part.CanCollide = false end)
+                    end
+                end
+                showNotification("碰撞删除已开启")
+            else
+                collisionBtn.Text = "💨 碰撞删除: 关闭"
+                collisionBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 90)
+                for part, rec in pairs(targetList) do
+                    if part and part.Parent and part:IsA("BasePart") then
+                        if rec.canCollide ~= nil then
+                            pcall(function() part.CanCollide = rec.canCollide end)
+                        end
+                    end
+                end
+                showNotification("碰撞删除已关闭")
+            end
+        end)
+
         local pickPressStart = 0
         local pickLongTriggered = false
         local function toggleCrosshair()
@@ -808,7 +943,6 @@ local SmartBuilding = (function()
             end)
         end)
         pickBtn.MouseButton1Up:Connect(function()
-            -- 【关键】立即取消长按检测，避免误触发 toggleCrosshair
             pickPressStart = 0
             if pickLongTriggered then
                 pickLongTriggered = false
@@ -827,7 +961,6 @@ local SmartBuilding = (function()
             tanchuangxiaoxi(string.format("已恢复 %d 个部件", n), "修改模式")
         end)
 
-        -- 【保护目标】短按 = 切换单目标保护；长按0.4秒 = 打开保护设置菜单
         do
             local pressStart = 0
             local pressing = false
@@ -1130,7 +1263,6 @@ local SmartBuilding = (function()
         end)
     end
 
-    -- 【修复】大模型取消异常：统计已添加部件，只要存在已添加项就直接取消
     SB.addTarget = function(target)
         if not target then return false end
         if not (target:IsA("BasePart") or target:IsA("Model")) then
@@ -1313,7 +1445,7 @@ local function isPointInGui(g, x, y)
     return x >= tl.X and x <= tl.X + sz.X and y >= tl.Y and y <= tl.Y + sz.Y
 end
 
--- 主 UI 拖拽（通过 uiLabel 拖动）
+-- 主 UI 拖拽
 local isDragging = false
 local dragInput = nil
 local handleTouches = {}
@@ -1854,17 +1986,14 @@ local function startCamFreeze(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     if camFreezeEnabled then return end
     camFreezeEnabled = true
+
     enforceCameraOnce()
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
-    RunService:BindToRenderStep(camFreezeConnName, Enum.RenderPriority.Last.Value, function()
-        if not camFreezeEnabled then return end
-        enforceCameraOnce()
-    end)
-    camFreezeBound = true
+
     local cam = workspace.CurrentCamera
     if cam then
         cam:GetPropertyChangedSignal("CameraType"):Connect(function()
-            if camFreezeEnabled and cam.CameraType ~= Enum.CameraType.Custom then
+            if not camFreezeEnabled then return end
+            if cam.CameraType ~= Enum.CameraType.Custom then
                 pcall(function() cam.CameraType = Enum.CameraType.Custom end)
             end
         end)
@@ -1878,14 +2007,21 @@ local function startCamFreeze(autoSnap)
         end)
     end
     player:GetPropertyChangedSignal("CameraMode"):Connect(function()
-        if camFreezeEnabled and player.CameraMode ~= Enum.CameraMode.Classic then
+        if not camFreezeEnabled then return end
+        if player.CameraMode ~= Enum.CameraMode.Classic then
             pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
         end
     end)
+
+    if camFreezeBound and camFreezeConnName then
+        pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    end
+    camFreezeBound = false  -- 标记不再使用 BindToRenderStep
+
     tanchuangxiaoxi("冻结解锁已开启", "自由相机")
 end
 local function stopCamFreeze()
-    if not camFreezeEnabled and not camFreezeBound then return end
+    if not camFreezeEnabled then return end
     camFreezeEnabled = false
     pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
     camFreezeBound = false
@@ -1974,16 +2110,61 @@ local function disableNoclip()
     updateMainButtonText(); updateSpeedButtonText()
 end
 
+-- 【修复】Delta 增量拖动，替代 Roblox 内置 Draggable
+-- 只累加 Input.Delta，不读 AbsolutePosition，天然不会首帧闪跳
+local function makeDeltaDraggable(frame, handle)
+    handle = handle or frame
+    local dragging, dragInput = false, nil
+    local handleTouches = {}
+    local function isStartInput(i)
+        return i.UserInputType == Enum.UserInputType.Touch
+            or i.UserInputType == Enum.UserInputType.MouseButton1
+    end
+    local function beginDrag(i) dragging = true; dragInput = i end
+    handle.InputBegan:Connect(function(input)
+        if not isStartInput(input) then return end
+        handleTouches[input] = true
+        if dragging then return end
+        beginDrag(input)
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        local matched = (input == dragInput)
+            or (dragInput ~= nil
+                and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseMovement)
+        if not matched then return end
+        if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        local d = Vector2.new(input.Delta.X, input.Delta.Y)
+        if d.Magnitude == 0 then return end
+        frame.Position = frame.Position + UDim2.fromOffset(d.X, d.Y)
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if handleTouches[input] then handleTouches[input] = nil end
+        if input ~= dragInput then return end
+        if not isStartInput(input) then return end
+        local nextInput = nil
+        for t in pairs(handleTouches) do nextInput = t; break end
+        if nextInput then beginDrag(nextInput)
+        else dragging = false; dragInput = nil end
+    end)
+end
+
 local function createNoclipWindow()
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"; sg.Parent = playerGui
     sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
     local bg = Instance.new("Frame")
-    bg.Parent = sg; bg.Size = UDim2.new(0, 150, 0, 50)
-    bg.Position = UDim2.new(0.5, -75, 0.5, -25)
+    bg.Parent = sg
+    -- 【修改】缩小穿墙窗宽度 (150 -> 120) 和高度 (50 -> 48)
+    bg.Size = UDim2.new(0, 120, 0, 48)
+    bg.Position = UDim2.new(0.5, -60, 0.5, -24)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
-    bg.Active = true; bg.Draggable = true
+    bg.Active = true
+    -- 【修复】移除 bg.Draggable = true，改用自定义增量拖动
+    -- bg.Draggable = true
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
     title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
@@ -2001,8 +2182,10 @@ local function createNoclipWindow()
     local c1 = Instance.new("UICorner"); c1.CornerRadius = UDim.new(0, 2); c1.Parent = closeBtn
     closeBtn.MouseButton1Click:Connect(function() sg:Destroy(); noclipWindow = nil end)
     local eb = Instance.new("TextButton")
-    eb.Parent = bg; eb.Size = UDim2.new(0.8, 0, 0, 18)
-    eb.Position = UDim2.new(0.1, 0, 0, 18)
+    eb.Parent = bg
+    -- 【修改】缩小“应急”按钮尺寸并水平居中
+    eb.Size = UDim2.new(0, 80, 0, 18)
+    eb.Position = UDim2.new(0.5, -40, 0, 18)
     eb.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
     eb.Text = "应急"; eb.TextColor3 = Color3.new(1, 1, 1)
     eb.Font = Enum.Font.GothamBold; eb.TextSize = 9
@@ -2026,6 +2209,8 @@ local function createNoclipWindow()
             if isFlying then toggleFly(false) end
         end)
     end)
+    -- 【修复】使用自定义增量拖动，手柄挂在 title 上避免误触按钮
+    makeDeltaDraggable(bg, title)
     return sg
 end
 
@@ -2314,7 +2499,6 @@ function tanchuangxiaoxi(msg, title)
 end
 
 function showInputDialog(title, defaultText, callback, extraButton)
-    -- 【修复】输入框与菜单互斥：销毁已有的输入框和菜单，避免叠加
     if _activeInputDialog then
         local d = _activeInputDialog
         _activeInputDialog = nil
@@ -2334,9 +2518,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
     _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     dialog.Destroying:Connect(function()
-        if _activeInputDialog == dialog then
-            _activeInputDialog = nil
-        end
+        if _activeInputDialog == dialog then _activeInputDialog = nil end
     end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
@@ -2360,7 +2542,6 @@ function showInputDialog(title, defaultText, callback, extraButton)
     textBox.Font = Enum.Font.Gotham; textBox.TextSize = 14
     textBox.ClearTextOnFocus = false
 
-    -- 透明度弹窗集成滑动条：拖动时只更新 UI，松手才触发回调，避免刷屏
     local sliderBg, sliderKnob, sliderConn
     if isSliderMode then
         sliderBg = Instance.new("Frame")
@@ -2516,9 +2697,7 @@ function createMenu(title, buttons, parentMenu)
     _activeMenuDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     dialog.Destroying:Connect(function()
-        if _activeMenuDialog == dialog then
-            _activeMenuDialog = nil
-        end
+        if _activeMenuDialog == dialog then _activeMenuDialog = nil end
     end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
@@ -2558,7 +2737,6 @@ function createMenu(title, buttons, parentMenu)
         local btnC = Instance.new("UICorner"); btnC.Parent = button; btnC.CornerRadius = UDim.new(0, 4)
 
         if btn.onLongPress then
-            -- 支持长按的按钮：短按 0.4s 内松开触发 callback，长按 0.4s 触发 onLongPress
             local pressStart = 0
             local longTriggered = false
             button.MouseButton1Down:Connect(function()
@@ -2604,7 +2782,8 @@ function createMenu(title, buttons, parentMenu)
     end)
     return dialog
 end
--- 音量键 UI 控制
+
+-- ==================== 音量键 UI 控制 ====================
 function setUIVisible(visible)
     uiVisible = visible
     Frame.Visible = uiVisible
@@ -2634,7 +2813,72 @@ function disableVolumeKey()
     tanchuangxiaoxi("音量键已禁用", "设置")
 end
 
--- 保护设置菜单
+-- ==================== 默认保护管理菜单 ====================
+showDefaultProtectMenu = function()
+    local buttons = {}
+    -- 分类列表
+    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
+        local enabled = protectGroupEnabled[group.id]
+        local status = enabled and "✅" or "❌"
+        table.insert(buttons, {
+            text = status .. " " .. group.name .. " (" .. #group.keywords .. " 词)",
+            bgColor = enabled and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+            callback = function(menu)
+                protectGroupEnabled[group.id] = not protectGroupEnabled[group.id]
+                refreshActiveProtectKeywords()
+                local newState = protectGroupEnabled[group.id]
+                tanchuangxiaoxi(group.name .. (newState and " 已启用" or " 已禁用"), "保护管理")
+                menu:Destroy()
+                showDefaultProtectMenu()
+            end
+        })
+    end
+    -- 高级兜底
+    table.insert(buttons, {
+        text = (advancedProtect.humanoid and "✅" or "❌") .. " 🧬 强制保护含 Humanoid（真 NPC）",
+        bgColor = advancedProtect.humanoid and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.humanoid = not advancedProtect.humanoid
+            tanchuangxiaoxi("Humanoid 兜底: " .. (advancedProtect.humanoid and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
+        end
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.prompt and "✅" or "❌") .. " 🚪 强制保护含交互组件",
+        bgColor = advancedProtect.prompt and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.prompt = not advancedProtect.prompt
+            tanchuangxiaoxi("交互组件兜底: " .. (advancedProtect.prompt and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
+        end
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.classes and "✅" or "❌") .. " 🏷️ 强制保护特定类（Tool/Seat 等）",
+        bgColor = advancedProtect.classes and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.classes = not advancedProtect.classes
+            tanchuangxiaoxi("保护类兜底: " .. (advancedProtect.classes and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
+        end
+    })
+    -- 重置按钮
+    table.insert(buttons, {
+        text = "🔄 重置为默认",
+        bgColor = Color3.fromRGB(200, 130, 0),
+        callback = function(menu)
+            menu:Destroy()
+            resetProtectDefaults()
+            tanchuangxiaoxi("已重置为默认保护配置", "保护管理")
+            showDefaultProtectMenu()
+        end
+    })
+    createMenu("🔧 默认保护管理", buttons, showProtectMenu)
+end
+
+-- ==================== 保护设置菜单 ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
@@ -2700,6 +2944,15 @@ showProtectMenu = function()
         callback = function(menu)
             menu:Destroy()
             if showKeywordManageMenu then showKeywordManageMenu() end
+        end
+    })
+    -- 【新增】默认保护管理入口
+    table.insert(buttons, {
+        text = "🔧 默认保护管理",
+        bgColor = Color3.fromRGB(90, 130, 170),
+        callback = function(menu)
+            menu:Destroy()
+            if showDefaultProtectMenu then showDefaultProtectMenu() end
         end
     })
     table.insert(buttons, {
@@ -2807,7 +3060,7 @@ showProtectMenu = function()
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- 关键词管理
+-- ==================== 关键词管理 ====================
 showKeywordManageMenu = function()
     local buttons = {}
     if #userProtectKeywords == 0 then
@@ -2901,7 +3154,7 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
--- 关键词详情
+-- ==================== 关键词详情 ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -3003,7 +3256,6 @@ showKeywordDetailDialog = function(idx)
         else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
     end)
 
-    -- 基于对象引用删除，避免索引错乱
     local targetItem = userProtectKeywords[idx]
     mkBtn("❌ 删除", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
         for i, item in ipairs(userProtectKeywords) do
@@ -3023,7 +3275,7 @@ showKeywordDetailDialog = function(idx)
     end)
 end
 
--- 飞行模式选择
+-- ==================== 飞行模式选择 ====================
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
@@ -3073,8 +3325,8 @@ local function showFlyModeSelection(currentMode, callback)
     local function refreshFaceToggleBtn()
         if not faceToggleBtn or not faceToggleBtn.Parent then return end
         faceToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        if flyFaceMode == "全局" then faceToggleBtn.Text = "角色朝向: 全局"
-        else faceToggleBtn.Text = "角色朝向: 水平" end
+        if flyFaceMode == "全局" then faceToggleBtn.Text = "🔀 朝向: 全局 (点击切换)"
+        else faceToggleBtn.Text = "🔀 朝向: 水平 (点击切换)" end
     end
     for _, mode in ipairs(FLY_MODES) do
         local isCurrent = (mode == currentMode)
@@ -3095,7 +3347,7 @@ local function showFlyModeSelection(currentMode, callback)
             ftBtn.Size = UDim2.new(1, -10, 0, btnHeight)
             ftBtn.Position = UDim2.new(0, 0, 0, yPos)
             ftBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-            ftBtn.Text = "角色朝向: 全局"
+            ftBtn.Text = "🔀 朝向: 全局 (点击切换)"
             ftBtn.TextColor3 = Color3.new(1, 1, 1); ftBtn.Font = Enum.Font.GothamBold
             ftBtn.TextSize = 14; ftBtn.AutoButtonColor = false
             local fc = Instance.new("UICorner"); fc.Parent = ftBtn; fc.CornerRadius = UDim.new(0, 4)
@@ -3141,7 +3393,7 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
--- 【修复】移除 (默认) 标记
+-- 【修改】移除 "(默认)" 标记
 local function showSmartSubMenu()
     local buttons = {}
     table.insert(buttons, {
@@ -3169,7 +3421,7 @@ local function showSmartSubMenu()
     createMenu("修改模式", buttons, nil)
 end
 
--- 主菜单
+-- ==================== 主菜单 ====================
 function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -3206,25 +3458,26 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.21 更新内容：",
+                    "版本 8.3.23 更新内容：",
+                    "",
+                    "【新增】碰撞删除",
+                    "  · 建筑不阻挡玩家（不是删除建筑）",
+                    "  · CanCollide=false，完全可逆",
+                    "  · 控制窗点击切换，默认关闭",
+                    "",
+                    "【新增】默认保护分类管理",
+                    "  · 按分类显示：NPC/宝箱/交互物/玩家/空气墙",
+                    "  · 单个分类可独立禁用",
+                    "  · 高级兜底：Humanoid / 交互组件 / 特定类",
+                    "  · 一键重置为默认",
+                    "",
+                    "【修复】建筑有大有小",
+                    "  · 深度限制从 15 提升到 100",
+                    "  · getTargetRoot 改为逐层向上查找",
                     "",
                     "【修复】弹窗互斥",
-                    "  · 打开输入框时自动关闭菜单，反之亦然",
-                    "  · 避免输入框和菜单同时叠加",
-                    "",
-                    "【修复】移除「(默认)」标记",
-                    "  · 修改模式里的智能识别不再显示 (默认)",
-                    "",
-                    "【修复】输入框叠加",
-                    "  · 连续打开同一输入框只保留最新一个",
-                    "",
-                    "【保护系统】",
-                    "  · 硬保护 + 关键词双字段（prefix/exact）",
-                    "  · 支持逗号批量导入、准心拾取、文件导入导出",
-                    "",
-                    "【准心添加】",
-                    "  · 短按 = 透明/取消透明",
-                    "  · 长按0.4s = 开关屏幕中心准心",
+                    "  · 长按不再叠加菜单",
+                    "  · 输入框与菜单互斥",
                     "",
                     "感谢使用！"
                 }
@@ -3294,22 +3547,18 @@ function showMainMenu()
                     "🔹 长按主按钮切换模式",
                     "🔹 【修改模式】短按 onof = 执行当前子模式",
                     "   - 智能识别：静默扫描，无 UI",
-                    "   - 添加目标：打开完整 UI（控制窗+名单窗）",
-                    "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 全部取消",
+                    "   - 添加目标：打开完整 UI",
+                    "🔹 控制窗按钮：扫描 / 准心添加 / 保护 / 碰撞删除 / 全部取消",
                     "🔹 【准心添加】短按 = 添加目标，长按 = 开关准心",
                     "🔹 【保护按钮】短按 = 切换单目标保护",
                     "🔹 【保护按钮】长按 = 保护设置菜单",
                     "   - 添加保护关键词（支持逗号批量导入）",
                     "   - 从准心拾取关键词（自动去尾数）",
-                    "   - 从文件导入关键词（自动去重）",
                     "   - 管理保护关键词：详情 / 复制 / 导出文件",
-                    "   - 文件列表支持长按重命名/删除",
+                    "   - 默认保护管理：分类开关 + 高级兜底 + 重置",
                     "   - 外部主菜单支持一键清空所有关键词",
-                    "🔹 双字段：prefix 子串匹配 + exact 完整匹配",
-                    "🔹 硬保护：NPC/宝箱/交互物/空气墙/刷新点/玩家",
-                    "🔹 透明度可用输入框或滑动条调整",
-                    "🔹 名单窗默认隐藏，点「📋 名单」开关",
-                    "🔹 相机偏移支持「⏱ 预览」秒数后自动还原",
+                    "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
+                    "🔹 硬保护：本机玩家永远被保护",
                     "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
                 local cc = Instance.new("Frame")
@@ -3451,7 +3700,7 @@ function showMainMenu()
     }, nil)
 end
 
--- 自由相机菜单
+-- ==================== 自由相机菜单 ====================
 showCameraMenu = function(parentMenu)
     local function buildCamMenu()
         local freezeText = camFreezeEnabled and "🧊 冻结解锁: 开启中" or "🧊 冻结解锁: 关闭"
@@ -3481,9 +3730,8 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- 相机偏移设置
+-- ==================== 相机偏移设置 ====================
 function showCamOffsetDialog()
-    -- 【修复】互斥：关闭已有的输入框和菜单
     if _activeInputDialog then
         local d = _activeInputDialog
         _activeInputDialog = nil
@@ -3502,9 +3750,7 @@ function showCamOffsetDialog()
     _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     dialog.Destroying:Connect(function()
-        if _activeInputDialog == dialog then
-            _activeInputDialog = nil
-        end
+        if _activeInputDialog == dialog then _activeInputDialog = nil end
     end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
@@ -3718,7 +3964,7 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- 上升按钮
+-- ==================== 按钮绑定：上升 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -3750,7 +3996,7 @@ do
     end)
 end
 
--- 下降按钮
+-- ==================== 按钮绑定：下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     down.MouseButton1Down:Connect(function()
@@ -3782,7 +4028,7 @@ do
     end)
 end
 
--- 加速按钮
+-- ==================== 按钮绑定：加速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -3822,7 +4068,7 @@ do
     end)
 end
 
--- 减速按钮
+-- ==================== 按钮绑定：减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
@@ -3866,7 +4112,7 @@ do
     end)
 end
 
--- speed 多功能按钮：短按 = 设置当前模式参数；长按0.3s = 打开子菜单
+-- ==================== 按钮绑定：speed 多功能按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -3953,7 +4199,7 @@ do
     end)
 end
 
--- onof 主按钮：短按 = 切换当前模式开关；长按0.3s = 切换模式
+-- ==================== 按钮绑定：onof 主按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4017,7 +4263,7 @@ do
     end)
 end
 
--- 隐藏/设置按钮：短按 = 缩为迷你窗；长按 = 打开主菜单
+-- ==================== 按钮绑定：隐藏/设置 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4123,9 +4369,8 @@ do
     end)
 end
 
--- 透视亮度设置弹窗
+-- ==================== 透视亮度设置弹窗 ====================
 function showBrightnessDialog()
-    -- 【修复】互斥：关闭已有的输入框和菜单
     if _activeInputDialog then
         local d = _activeInputDialog
         _activeInputDialog = nil
@@ -4144,9 +4389,7 @@ function showBrightnessDialog()
     _activeInputDialog = dialog
     dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
     dialog.Destroying:Connect(function()
-        if _activeInputDialog == dialog then
-            _activeInputDialog = nil
-        end
+        if _activeInputDialog == dialog then _activeInputDialog = nil end
     end)
     local bg = Instance.new("Frame")
     bg.Parent = dialog
@@ -4203,6 +4446,8 @@ function showBrightnessDialog()
             local nb = minBright + cp * (maxBright - minBright)
             nb = math.floor(nb * 100) / 100
             nightVisionBrightness = nb
+            -- 【修复】拖动时立即应用亮度
+            if nightVisionEnabled then applyNightVision() end
         end
         local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
         knob.Position = UDim2.new(sp, -10, 0, -8)
@@ -4260,7 +4505,7 @@ function showBrightnessDialog()
     end)
 end
 
--- 彻底关闭：按顺序还原所有状态
+-- ==================== 彻底关闭 ====================
 function fullShutdown()
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
@@ -4288,7 +4533,6 @@ function fullShutdown()
     if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
     volumeKeyEnabled = false
 
-    -- 清理活动弹窗
     if _activeInputDialog then
         pcall(function() _activeInputDialog:Destroy() end)
         _activeInputDialog = nil
@@ -4306,7 +4550,7 @@ main.Destroying:Connect(function()
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
 end)
 
--- 初始化
+-- ==================== 初始化 ====================
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
