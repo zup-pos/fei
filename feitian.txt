@@ -1,5 +1,5 @@
 -- Gui to Lua
--- Version 8.3.23（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥）
+-- Version 8.3.23（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全）
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -416,6 +416,19 @@ local SmartBuilding = (function()
         return false
     end
 
+    -- 【新增】任何对象（不限于 BasePart）沿祖先链检查是否被保护
+    -- 修复：之前只对 BasePart 检查保护，导致 Decal/Texture/SurfaceGui/BillboardGui
+    -- 等非 BasePart 子对象在"先保护、后扫描"场景下会被照常透明化
+    local function isAncestorProtected(obj)
+        if not obj then return false end
+        local cur, depth = obj, 0
+        while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
+            if protectedList[cur] then return true end
+            cur = cur.Parent; depth = depth + 1
+        end
+        return false
+    end
+
     local function isInvisibleWall(part)
         if not part or not part:IsA("BasePart") then return false end
         if nameMatches(part, CONFIG.buildingKeywords) then return false end
@@ -432,14 +445,8 @@ local SmartBuilding = (function()
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
 
-        -- 单目标保护
-        do
-            local cur, depth = part, 0
-            while cur and cur ~= workspace and depth < MAX_ANCESTOR_DEPTH do
-                if protectedList[cur] then return true, "单目标保护" end
-                cur = cur.Parent; depth = depth + 1
-            end
-        end
+        -- 单目标保护（先检查，优先级最高）
+        if isAncestorProtected(part) then return true, "单目标保护" end
 
         -- 用户自定义关键词
         if ancestorsMatchUserKw(part) then return true, "用户关键词" end
@@ -597,10 +604,14 @@ local SmartBuilding = (function()
     end
     SB.getTargetRoot = getTargetRoot
 
+    -- 【修改】collectTargetParts 里加上 isAncestorProtected 过滤
+    -- 修复：被保护的对象及其子树直接跳过，避免"先保护、后扫描"时非 BasePart 子对象被透明化
     local function collectTargetParts(root)
         local list = {}
         if not root then return list end
         local function consider(obj)
+            -- 【新增】祖先保护直接跳过（含 root 本身）
+            if isAncestorProtected(obj) then return end
             if obj:IsA("BasePart") and not obj:IsA("Terrain") then
                 if not isInvisibleWall(obj) then table.insert(list, obj) end
             elseif obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
@@ -1220,7 +1231,8 @@ local SmartBuilding = (function()
                     and not targetList[part] and not isInvisibleWall(part) then
                     if not isIgnored(part) then
                         local root = getTargetRoot(part)
-                        if root and not rootSet[root] then
+                        -- 【修改】同时排除已保护的 root
+                        if root and not rootSet[root] and not isAncestorProtected(root) then
                             rootSet[root] = true
                             table.insert(roots, root)
                         end
@@ -1238,7 +1250,14 @@ local SmartBuilding = (function()
                 local subParts = collectTargetParts(root)
                 for _, p in ipairs(subParts) do
                     if targetList[p] == nil and guiStateMap[p] == nil then
-                        if not (p:IsA("BasePart") and isIgnored(p)) then
+                        -- 【修改】BasePart 用 isIgnored；非 BasePart 用 isAncestorProtected
+                        local blocked = false
+                        if p:IsA("BasePart") then
+                            blocked = isIgnored(p)
+                        else
+                            blocked = isAncestorProtected(p)
+                        end
+                        if not blocked then
                             setObjTransparency(p, CONFIG.transparency)
                             partRootMap[p] = root
                             applied = applied + 1
@@ -1263,6 +1282,7 @@ local SmartBuilding = (function()
         end)
     end
 
+    -- 【修改】addTarget 完整补全保护判断
     SB.addTarget = function(target)
         if not target then return false end
         if not (target:IsA("BasePart") or target:IsA("Model")) then
@@ -1270,25 +1290,41 @@ local SmartBuilding = (function()
         end
         local root = getTargetRoot(target)
         if not root then return false end
+
+        -- 【新增】整体保护检查：root 本身已被保护则直接拒绝
+        if isAncestorProtected(root) then
+            showNotification("该目标已被保护")
+            tanchuangxiaoxi("已被保护，无法添加: " .. root.Name, "保护")
+            return false
+        end
+
         local parts = collectTargetParts(root)
         if #parts == 0 then showNotification("无有效部件"); return false end
 
+        -- 【修改】统计"已添加"的部件数，只有"全部已添加"才走 toggle 取消
         local addedCount = 0
         for _, p in ipairs(parts) do
             if targetList[p] ~= nil or guiStateMap[p] ~= nil then
                 addedCount = addedCount + 1
             end
         end
-        if addedCount > 0 then
+        if addedCount == #parts and addedCount > 0 then
             SB.removeTarget(root)
             showNotification("已取消: " .. root.Name)
             return false
         end
 
+        -- 【修改】应用循环里对非 BasePart 也检查保护
         local added = 0
         for _, p in ipairs(parts) do
             if player.Character and p:IsDescendantOf(player.Character) then continue end
-            if p:IsA("BasePart") and isIgnored(p) then continue end
+            local blocked = false
+            if p:IsA("BasePart") then
+                blocked = isIgnored(p)
+            else
+                blocked = isAncestorProtected(p)
+            end
+            if blocked then continue end
             if targetList[p] == nil and guiStateMap[p] == nil then
                 setObjTransparency(p, CONFIG.transparency)
                 partRootMap[p] = root
@@ -1296,8 +1332,11 @@ local SmartBuilding = (function()
             end
         end
         SB.refreshListUI()
-        if added > 0 then showNotification("已添加 " .. root.Name .. " (" .. added .. ")")
-        else showNotification("全部被拦，未添加") end
+        if added > 0 then
+            showNotification("已添加 " .. root.Name .. " (" .. added .. ")")
+        else
+            showNotification("全部被拦，未添加")
+        end
         return added > 0
     end
 
@@ -1317,13 +1356,20 @@ local SmartBuilding = (function()
         if not root then return end
 
         if protectedList[root] then
+            -- 取消保护
             protectedList[root] = nil
             tanchuangxiaoxi("已取消保护: " .. root.Name, "保护")
         else
+            -- 开启保护
             protectedList[root] = true
-            local parts = collectTargetParts(root)
+            -- 恢复所有该 root 下已被修改的部件（含非 BasePart）
             local restored = 0
-            for _, p in ipairs(parts) do
+            -- 【修改】用 GetDescendants 直接遍历，因为 collectTargetParts 会过滤保护对象
+            local allObjs = { root }
+            for _, d in ipairs(root:GetDescendants()) do
+                table.insert(allObjs, d)
+            end
+            for _, p in ipairs(allObjs) do
                 if targetList[p] ~= nil or guiStateMap[p] ~= nil then
                     restoreObj(p)
                     targetList[p] = nil; guiStateMap[p] = nil; partRootMap[p] = nil
@@ -2016,7 +2062,7 @@ local function startCamFreeze(autoSnap)
     if camFreezeBound and camFreezeConnName then
         pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
     end
-    camFreezeBound = false  -- 标记不再使用 BindToRenderStep
+    camFreezeBound = false
 
     tanchuangxiaoxi("冻结解锁已开启", "自由相机")
 end
@@ -2110,8 +2156,6 @@ local function disableNoclip()
     updateMainButtonText(); updateSpeedButtonText()
 end
 
--- 【修复】Delta 增量拖动，替代 Roblox 内置 Draggable
--- 只累加 Input.Delta，不读 AbsolutePosition，天然不会首帧闪跳
 local function makeDeltaDraggable(frame, handle)
     handle = handle or frame
     local dragging, dragInput = false, nil
@@ -2155,16 +2199,16 @@ local function createNoclipWindow()
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"; sg.Parent = playerGui
     sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
+
     local bg = Instance.new("Frame")
     bg.Parent = sg
-    -- 【修改】缩小穿墙窗宽度 (150 -> 120) 和高度 (50 -> 48)
     bg.Size = UDim2.new(0, 120, 0, 48)
     bg.Position = UDim2.new(0.5, -60, 0.5, -24)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
     bg.Active = true
-    -- 【修复】移除 bg.Draggable = true，改用自定义增量拖动
-    -- bg.Draggable = true
+
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
     title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
@@ -2183,7 +2227,6 @@ local function createNoclipWindow()
     closeBtn.MouseButton1Click:Connect(function() sg:Destroy(); noclipWindow = nil end)
     local eb = Instance.new("TextButton")
     eb.Parent = bg
-    -- 【修改】缩小“应急”按钮尺寸并水平居中
     eb.Size = UDim2.new(0, 80, 0, 18)
     eb.Position = UDim2.new(0.5, -40, 0, 18)
     eb.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
@@ -2209,7 +2252,6 @@ local function createNoclipWindow()
             if isFlying then toggleFly(false) end
         end)
     end)
-    -- 【修复】使用自定义增量拖动，手柄挂在 title 上避免误触按钮
     makeDeltaDraggable(bg, title)
     return sg
 end
@@ -2816,7 +2858,6 @@ end
 -- ==================== 默认保护管理菜单 ====================
 showDefaultProtectMenu = function()
     local buttons = {}
-    -- 分类列表
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
         local enabled = protectGroupEnabled[group.id]
         local status = enabled and "✅" or "❌"
@@ -2833,7 +2874,6 @@ showDefaultProtectMenu = function()
             end
         })
     end
-    -- 高级兜底
     table.insert(buttons, {
         text = (advancedProtect.humanoid and "✅" or "❌") .. " 🧬 强制保护含 Humanoid（真 NPC）",
         bgColor = advancedProtect.humanoid and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
@@ -2864,7 +2904,6 @@ showDefaultProtectMenu = function()
             showDefaultProtectMenu()
         end
     })
-    -- 重置按钮
     table.insert(buttons, {
         text = "🔄 重置为默认",
         bgColor = Color3.fromRGB(200, 130, 0),
@@ -2946,7 +2985,6 @@ showProtectMenu = function()
             if showKeywordManageMenu then showKeywordManageMenu() end
         end
     })
-    -- 【新增】默认保护管理入口
     table.insert(buttons, {
         text = "🔧 默认保护管理",
         bgColor = Color3.fromRGB(90, 130, 170),
@@ -3393,7 +3431,6 @@ local function showSpeedSubModeSelection(currentMode, callback)
     createMenu("选择移速子模式", buttons, nil)
 end
 
--- 【修改】移除 "(默认)" 标记
 local function showSmartSubMenu()
     local buttons = {}
     table.insert(buttons, {
@@ -3479,6 +3516,10 @@ function showMainMenu()
                     "  · 长按不再叠加菜单",
                     "  · 输入框与菜单互斥",
                     "",
+                    "【修复】保护补全",
+                    "  · 非 BasePart 子对象（贴图/界面/特效）也受保护",
+                    "  · 保护后扫描/添加完全跳过该对象",
+                    "",
                     "感谢使用！"
                 }
                 local cc = Instance.new("Frame")
@@ -3558,6 +3599,7 @@ function showMainMenu()
                     "   - 默认保护管理：分类开关 + 高级兜底 + 重置",
                     "   - 外部主菜单支持一键清空所有关键词",
                     "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
+                    "🔹 保护已补全：非 BasePart 子对象也受保护",
                     "🔹 硬保护：本机玩家永远被保护",
                     "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
@@ -4446,7 +4488,6 @@ function showBrightnessDialog()
             local nb = minBright + cp * (maxBright - minBright)
             nb = math.floor(nb * 100) / 100
             nightVisionBrightness = nb
-            -- 【修复】拖动时立即应用亮度
             if nightVisionEnabled then applyNightVision() end
         end
         local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
