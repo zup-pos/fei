@@ -335,7 +335,6 @@ local SmartBuilding = (function()
     local scanRunning = false
     local controlAlphaConn = nil
 
-    -- 深度限制从 15 提升到 100
     local MAX_ANCESTOR_DEPTH = 100
 
     local function nameMatches(inst, list)
@@ -418,7 +417,6 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 【新增】任何对象（不限于 BasePart）沿祖先链检查是否被单目标保护
     local function isAncestorProtected(obj)
         if not obj then return false end
         local cur, depth = obj, 0
@@ -429,26 +427,16 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 【新增】纯名字类保护检查（任何 Instance 都能用，不依赖 BasePart 类型）
-    -- 用于非 BasePart 对象（Decal/Texture/SurfaceGui/BillboardGui/特效等）
     local function isNameProtected(obj)
         if not obj then return false end
-        -- 单目标保护
         if isAncestorProtected(obj) then return true end
-        -- 用户关键词
         if ancestorsMatchUserKw(obj) then return true end
-        -- 本机玩家角色
         if player.Character and obj:IsDescendantOf(player.Character) then return true end
-        -- 空气墙名
         if nameMatches(obj, CONFIG.invisibleWallKeywords)
             and not nameMatches(obj, CONFIG.buildingKeywords) then return true end
-        -- 强忽略词
         if nameMatches(obj, CONFIG.strongIgnore) then return true end
-        -- 精确忽略词
         if exactMatchAny(obj.Name, CONFIG.exactIgnore) then return true end
-        -- 默认保护分类
         if ancestorsMatchActiveProtect(obj) then return true end
-        -- 刷新点/出生点
         if ancestorsMatch(obj, CONFIG.spawnKeywords) then return true end
         return false
     end
@@ -464,56 +452,33 @@ local SmartBuilding = (function()
         return false
     end
 
-    -- 重构：使用 activeProtectKeywords 和 advancedProtect 开关
     local function checkIgnored(part)
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
-
-        -- 单目标保护（先检查，优先级最高）
         if isAncestorProtected(part) then return true, "单目标保护" end
-
-        -- 用户自定义关键词
         if ancestorsMatchUserKw(part) then return true, "用户关键词" end
-
-        -- 本机玩家角色（永远保护）
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
-
-        -- 空气墙名（硬编码）
         if nameMatches(part, CONFIG.invisibleWallKeywords)
             and not nameMatches(part, CONFIG.buildingKeywords) then return true, "空气墙名" end
-
-        -- 强忽略词（硬编码）
         if nameMatches(part, CONFIG.strongIgnore) then return true, "强忽略词" end
         if exactMatchAny(part.Name, CONFIG.exactIgnore) then return true, "忽略词" end
-
-        -- 默认保护分类（用户可编辑）
         if ancestorsMatchActiveProtect(part) then return true, "默认保护" end
-
-        -- 刷新点/出生点（硬编码）
         if ancestorsMatch(part, CONFIG.spawnKeywords) then return true, "刷新点/出生点" end
-
-        -- 高级兜底：保护类
         if advancedProtect.classes then
             for _, cls in ipairs(CONFIG.protectClasses) do
                 if part:IsA(cls) then return true, "保护类 " .. cls end
             end
         end
-
-        -- 高级兜底：含交互组件
         if advancedProtect.prompt and ancestorsHavePrompt(part) then
             return true, "含交互组件"
         end
-
-        -- 高级兜底：含 Humanoid（真 NPC）
         if advancedProtect.humanoid and ancestorsHaveHumanoid(part) then
             return true, "含 Humanoid"
         end
-
         return false, nil
     end
     local function isIgnored(part) return (checkIgnored(part)) end
 
-    -- 支持 CanCollide 保存和碰撞删除
     local function setObjTransparency(obj, trans)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
@@ -626,12 +591,10 @@ local SmartBuilding = (function()
     end
     SB.getTargetRoot = getTargetRoot
 
-    -- 【修改】collectTargetParts 里改用 isNameProtected 过滤
     local function collectTargetParts(root)
         local list = {}
         if not root then return list end
         local function consider(obj)
-            -- 【关键】名字类保护直接跳过（覆盖 BasePart + 非 BasePart）
             if isNameProtected(obj) then return end
             if obj:IsA("BasePart") and not obj:IsA("Terrain") then
                 if not isInvisibleWall(obj) then table.insert(list, obj) end
@@ -1309,7 +1272,6 @@ local SmartBuilding = (function()
         local root = getTargetRoot(target)
         if not root then return false end
 
-        -- 整体保护检查：root 本身被保护则直接拒绝
         if isNameProtected(root) then
             showNotification("该目标已被保护")
             tanchuangxiaoxi("已被保护，无法添加: " .. root.Name, "保护")
@@ -1372,13 +1334,10 @@ local SmartBuilding = (function()
         if not root then return end
 
         if protectedList[root] then
-            -- 取消保护
             protectedList[root] = nil
             tanchuangxiaoxi("已取消保护: " .. root.Name, "保护")
         else
-            -- 开启保护
             protectedList[root] = true
-            -- 恢复所有该 root 下已被修改的部件（含非 BasePart）
             local restored = 0
             local allObjs = { root }
             for _, d in ipairs(root:GetDescendants()) do
@@ -3440,7 +3399,6 @@ showSingleProtectMenu = function()
                         callback = function(subMenu)
                             subMenu:Destroy()
                             local content = readfile(file)
-                            -- 解析每行：支持 "name" 或 "prefix,exact" 格式
                             local names = {}
                             for line in string.gmatch(content, "[^\n]+") do
                                 local firstComma = string.find(line, ",")
@@ -3496,10 +3454,10 @@ end
 showSingleManageMenu = function()
     local buttons = {}
 
-    -- 收集有效单目标，顺便清理失效的
+    -- 收集有效单目标：必须有 Parent、非空名字，否则清理
     local validTargets = {}
     for obj, _ in pairs(protectedList) do
-        if obj and obj.Parent then
+        if obj and obj.Parent and obj.Name and obj.Name ~= "" then
             table.insert(validTargets, obj)
         else
             protectedList[obj] = nil
@@ -3507,13 +3465,23 @@ showSingleManageMenu = function()
     end
     local total = #validTargets
 
-    -- 1. 复制所有名字（跳过空值，逗号分隔）
+    -- 【修改】列表为空时，只显示"（暂无单目标）"（跟管理关键词一致）
+    if total == 0 then
+        table.insert(buttons, {
+            text = "（暂无单目标）",
+            bgColor = Color3.fromRGB(60, 60, 60),
+            callback = function() end
+        })
+        createMenu("📋 管理单目标 (0)", buttons, showSingleProtectMenu)
+        return
+    end
+
+    -- 1. 复制所有名字（逗号分隔）
     table.insert(buttons, {
         text = "📋 复制所有名字 (" .. total .. ")",
         bgColor = Color3.fromRGB(50, 130, 200),
         callback = function(menu)
             menu:Destroy()
-            if total == 0 then tanchuangxiaoxi("没有可复制的对象", "保护"); return end
             local names = {}
             for _, obj in ipairs(validTargets) do
                 local n = obj.Name
@@ -3534,13 +3502,12 @@ showSingleManageMenu = function()
         end
     })
 
-    -- 2. 复制所有路径（跳过空值，逗号分隔）
+    -- 2. 复制所有路径（逗号分隔）
     table.insert(buttons, {
         text = "📋 复制所有路径 (" .. total .. ")",
         bgColor = Color3.fromRGB(70, 140, 180),
         callback = function(menu)
             menu:Destroy()
-            if total == 0 then tanchuangxiaoxi("没有可复制的对象", "保护"); return end
             local paths = {}
             for _, obj in ipairs(validTargets) do
                 local p = obj:GetFullName()
@@ -3567,7 +3534,6 @@ showSingleManageMenu = function()
         bgColor = Color3.fromRGB(200, 130, 0),
         callback = function(menu)
             menu:Destroy()
-            if total == 0 then tanchuangxiaoxi("没有可导出的对象", "保护"); return end
             if not isfolder("ProtectKeywords") then makefolder("ProtectKeywords") end
 
             -- 生成导出内容：每行 ",name"（prefix 空，exact=名字）；跳过空名字
@@ -3623,7 +3589,6 @@ showSingleManageMenu = function()
         index = index + 1
         local objCopy = obj
         local displayName = obj.Name
-        if not displayName or displayName == "" then displayName = "(无名)" end
         if #displayName > 30 then displayName = string.sub(displayName, 1, 27) .. "..." end
         table.insert(buttons, {
             text = "🎯 " .. displayName .. "（点击查看）",
