@@ -1,5 +1,43 @@
 -- Gui to Lua
--- Version 8.4.0（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离 + 信标系统）
+-- Version 8.4.1（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离 + 信标系统 + Delta兼容修复）
+
+-- ==================== Delta Executor 兼容补丁 ====================
+-- HTTP 超时补丁（防止 request() 在 Delta 上永久挂起）
+local HTTP_TIMEOUT = 5
+local _rawHttpFn = nil
+pcall(function() if request then _rawHttpFn = request end end)
+pcall(function() if not _rawHttpFn and http_request then _rawHttpFn = http_request end end)
+pcall(function() if not _rawHttpFn and syn and syn.request then _rawHttpFn = syn.request end end)
+pcall(function() if not _rawHttpFn and http and http.request then _rawHttpFn = http.request end end)
+
+if _rawHttpFn then
+    local function safeRequest(opts)
+        local result, finished = nil, false
+        task.spawn(function()
+            local ok, res = pcall(_rawHttpFn, opts)
+            if ok and type(res) == "table" then result = res end
+            finished = true
+        end)
+        local t0 = tick()
+        while not finished and (tick() - t0) < HTTP_TIMEOUT do
+            task.wait(0.1)
+        end
+        if not finished then
+            return {StatusCode = 0, Body = "", Headers = {}}
+        end
+        return result
+    end
+    if request then request = function(opts) return safeRequest(opts) end end
+    if http_request then http_request = function(opts) return safeRequest(opts) end end
+    if syn and syn.request then syn.request = function(opts) return safeRequest(opts) end end
+    if http and http.request then http.request = function(opts) return safeRequest(opts) end end
+end
+
+-- getgenv 回退
+if not getgenv then
+    getgenv = function() return getfenv() end
+end
+-- ==================== 兼容补丁结束 ====================
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -70,7 +108,12 @@ onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
 onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
 onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
 
+-- [Delta修复] 等待 LocalPlayer，防止移动端注入过早导致 nil
 local player = game:GetService("Players").LocalPlayer
+if not player then
+    repeat task.wait() until game:GetService("Players").LocalPlayer
+    player = game:GetService("Players").LocalPlayer
+end
 if not player then return end
 local camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
@@ -153,32 +196,25 @@ local userProtectKeywords = {}
 -- 【新增】碰撞删除全局开关（默认关闭）
 local collisionDeleteEnabled = false
 
--- ==================== 信标系统（v8.4.0） ====================
--- 默认信标配置
+-- ==================== 信标系统（v8.4.1） ====================
 local BEACON_DEFAULT = {
-    enabled = false,          -- 总开关，默认关闭
-    showHighlight = true,     -- 是否显示白描框
-    showBeam = true,          -- 是否显示光柱
-    showName = true,          -- 是否显示名字牌
-    customName = "",          -- 自定义名字（空则用目标名）
-    color = Color3.fromRGB(255, 200, 0),  -- 颜色
-    beamWidth = 0.5,          -- 光柱粗细
-    beamHeight = 250,         -- 光柱高度
-    hlTransparency = 0.9,     -- 白描框透明度（越大越淡）
-    periodicScan = false,     -- 周期扫描新同名目标
-    scanInterval = 2.5,       -- 扫描间隔（秒）
+    enabled = false,
+    showHighlight = true,
+    showBeam = true,
+    showName = true,
+    customName = "",
+    color = Color3.fromRGB(255, 200, 0),
+    beamWidth = 0.5,
+    beamHeight = 250,
+    hlTransparency = 0.9,
+    periodicScan = false,
+    scanInterval = 2.5,
 }
 
--- 单目标信标配置：[obj] = config
 local protectedBeaconMap = {}
-
--- 信标实例缓存：[obj] = { hl=, beamModel=, beamSegs=, billboard=, nameLabel=, distLabel=, config=, halfHeight= }
 local beaconInstances = {}
-
--- 信标渲染循环连接
 local beaconLoopConn = nil
 
--- 复制配置
 local function copyBeaconConfig(src)
     local c = {}
     local base = src or BEACON_DEFAULT
@@ -191,13 +227,11 @@ local function copyBeaconConfig(src)
     c.beamWidth = base.beamWidth or 0.5
     c.beamHeight = base.beamHeight or 250
     c.hlTransparency = base.hlTransparency or 0.9
-    -- 【修复】补上周期扫描字段的复制
     c.periodicScan = (base.periodicScan == true)
     c.scanInterval = base.scanInterval or 2.5
     return c
 end
 
--- 构造完整配置（叠加默认值）
 local function makeBeaconConfig(overrides)
     local cfg = copyBeaconConfig(BEACON_DEFAULT)
     if overrides then
@@ -277,6 +311,7 @@ local showSingleProtectMenu
 local showSingleManageMenu
 local showSingleDetailDialog
 local showBeaconConfigDialog
+local showBrightnessDialog   -- [修复] 前向声明
 
 -- 追踪当前活动弹窗，实现互斥
 local _activeInputDialog = nil
@@ -295,7 +330,10 @@ local function extractKeyword(name)
     return string.lower(s)
 end
 
--- 序列化 / 反序列化（新版：每行 13 个字段，用 "|" 分隔；旧版：prefix,exact）
+-- ==================== 序列化 / 反序列化（16字段，用 "|" 分隔） ====================
+-- [修复] 统一为 16 字段格式：prefix|exact|beaconFlag|enabled|showHL|showBeam|showName|customName|R|G|B|width|height|hlTrans|periodic|interval
+local BEACON_FIELD_COUNT = 16
+
 local function serializeKeywords(keywords)
     local lines = {}
     for _, item in ipairs(keywords) do
@@ -303,16 +341,15 @@ local function serializeKeywords(keywords)
         local exact = item.exact or ""
         local b = item.beacon
         if b and b.enabled then
-            -- 有信标 → 13 字段格式
             local c = b.color
             table.insert(lines, table.concat({
                 prefix, exact,
-                "1",                             -- 有新格式标志
+                "1",
                 b.enabled and "1" or "0",
                 b.showHighlight and "1" or "0",
                 b.showBeam and "1" or "0",
                 b.showName and "1" or "0",
-                (b.customName or ""):gsub("|", "/"),  -- 防止破坏分隔
+                (b.customName or ""):gsub("|", "/"),
                 tostring(math.floor(c.R * 255 + 0.5)),
                 tostring(math.floor(c.G * 255 + 0.5)),
                 tostring(math.floor(c.B * 255 + 0.5)),
@@ -323,32 +360,30 @@ local function serializeKeywords(keywords)
                 string.format("%.3f", b.scanInterval or 2.5),
             }, "|"))
         else
-            -- 无信标 → 旧格式
             table.insert(lines, prefix .. "," .. exact)
         end
     end
     return table.concat(lines, "\n")
 end
 
--- 判断一行是不是新版格式（含 13 个 "|"）
+-- [修复] 严格判断：至少 15 个 "|"（16 字段）
 local function isBeaconLine(line)
     local _, count = line:gsub("|", "")
-    return count >= 14  -- 至少 15 个字段
+    return count >= (BEACON_FIELD_COUNT - 1)
 end
 
 local function deserializeKeywords(content)
     local keywords = {}
     for line in string.gmatch(content, "[^\n]+") do
         if isBeaconLine(line) then
-            -- 新版格式
             local fields = {}
             for f in string.gmatch(line .. "|", "([^|]*)|") do
                 table.insert(fields, f)
             end
-            if #fields >= 13 then
+            if #fields >= BEACON_FIELD_COUNT then
                 local prefix = fields[1]
                 local exact = fields[2]
-                if prefix ~= "" then
+                if prefix ~= "" or exact ~= "" then
                     local item = { prefix = prefix, exact = (exact ~= "" and exact) or nil }
                     local b = makeBeaconConfig()
                     b.enabled = (fields[4] == "1")
@@ -362,15 +397,14 @@ local function deserializeKeywords(content)
                     b.color = Color3.fromRGB(r, g, bl)
                     b.beamWidth = tonumber(fields[12]) or 0.5
                     b.beamHeight = tonumber(fields[13]) or 250
-                    b.hlTransparency = tonumber(fields[14] or "0.9") or 0.9
+                    b.hlTransparency = tonumber(fields[14]) or 0.9
                     b.periodicScan = (fields[15] == "1")
-                    b.scanInterval = tonumber(fields[16] or "2.5") or 2.5
+                    b.scanInterval = tonumber(fields[16]) or 2.5
                     item.beacon = b
                     table.insert(keywords, item)
                 end
             end
         else
-            -- 旧版格式
             local firstComma = string.find(line, ",")
             if firstComma then
                 local prefix = string.sub(line, 1, firstComma - 1)
@@ -387,6 +421,7 @@ local function deserializeKeywords(content)
     end
     return keywords
 end
+-- ==================== 序列化结束 ====================
 
 -- ==================== 通用滑块拖动（多指隔离） ====================
 local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
@@ -438,6 +473,7 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
     end
 end
 
+-- ==================== SmartBuilding 智能透视模块 ====================
 local SmartBuilding = (function()
     local SB = {}
     SB.crosshairEnabled = true
@@ -619,6 +655,7 @@ local SmartBuilding = (function()
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
         if isAncestorProtected(part) then return true, "单目标保护" end
+        -- [修复] 补上用户关键词检查
         if ancestorsMatchUserKw(part) then return true, "用户关键词" end
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
         if nameMatches(part, CONFIG.invisibleWallKeywords)
@@ -642,6 +679,7 @@ local SmartBuilding = (function()
     end
     local function isIgnored(part) return (checkIgnored(part)) end
 
+    -- [修复] 记录 canCollide，保证碰撞删除关闭时可恢复
     local function setObjTransparency(obj, trans)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
@@ -1985,6 +2023,7 @@ local function applySpeedMode(enable)
     end
 end
 
+-- ==================== 光照 / 夜视 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -2091,6 +2130,7 @@ local function disableNightVision()
     end
 end
 
+-- ==================== 相机偏移 / 自由相机 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
@@ -2230,6 +2270,7 @@ local function manualResnap()
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
 
+-- ==================== 穿墙 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -2563,8 +2604,6 @@ player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
 -- ==================== 信标系统核心 ====================
-
--- 获取信标锚点（优先级：Head > HRP > PrimaryPart > 第一个 BasePart）
 local function getBeaconAnchor(target)
     if not target then return nil, nil end
     local adornee, size = nil, nil
@@ -2590,7 +2629,6 @@ local function getBeaconAnchor(target)
     return adornee, size
 end
 
--- 创建信标实例的所有视觉元素
 local function createBeaconInstance(target, config)
     local adornee, size = getBeaconAnchor(target)
     if not adornee or not size then return nil end
@@ -2605,13 +2643,12 @@ local function createBeaconInstance(target, config)
         segHeight = nil,
     }
 
-    -- 白描框（不填充 + 白描边）
     if config.showHighlight then
         local hl = Instance.new("Highlight")
         hl.Name = "BeaconHL"
         hl.FillColor = config.color
-        hl.FillTransparency = 1                  -- 不填充，原色透出
-        hl.OutlineColor = Color3.new(1, 1, 1)    -- 白描边
+        hl.FillTransparency = 1
+        hl.OutlineColor = Color3.new(1, 1, 1)
         hl.OutlineTransparency = config.hlTransparency or 0.9
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.Adornee = target
@@ -2619,7 +2656,6 @@ local function createBeaconInstance(target, config)
         inst.hl = hl
     end
 
-    -- 光柱（多段短圆柱 + Highlight 穿透）
     if config.showBeam then
         local beamModel = Instance.new("Model")
         beamModel.Name = "BeaconBeam"
@@ -2656,7 +2692,6 @@ local function createBeaconInstance(target, config)
         inst.segHeight = segH
     end
 
-    -- 名字牌（挂在锚点上方，光柱顶端）
     if config.showName then
         local displayName = (config.customName and config.customName ~= "") and config.customName or target.Name
         local bb = Instance.new("BillboardGui")
@@ -2707,7 +2742,6 @@ local function createBeaconInstance(target, config)
     return inst
 end
 
--- 销毁信标实例
 local function destroyBeaconInstance(inst)
     if not inst then return end
     if inst.hl and inst.hl.Parent then inst.hl:Destroy() end
@@ -2715,7 +2749,6 @@ local function destroyBeaconInstance(inst)
     if inst.beamModel and inst.beamModel.Parent then inst.beamModel:Destroy() end
 end
 
--- 每帧更新信标实例
 local function updateBeaconInstance(inst, myPos)
     local target = inst.target
     if not target or not target.Parent then return false end
@@ -2759,10 +2792,12 @@ local function updateBeaconInstance(inst, myPos)
     return true
 end
 
--- 找关键词匹配的对象（用于信标，不修改 targetList/guiStateMap）
+-- [Delta修复] 分批遍历，避免大量 Descendants 卡死
 local function findKeywordMatches(kwItem)
-    local matches = {}
+    local matches, count = {}, 0
     for _, obj in ipairs(workspace:GetDescendants()) do
+        count = count + 1
+        if count % 2000 == 0 then task.wait() end
         local n = obj.Name
         if n and n ~= "" then
             local ln = string.lower(n)
@@ -2780,28 +2815,24 @@ local function findKeywordMatches(kwItem)
     return matches
 end
 
--- 收集所有需要信标的目标：{ [target] = config }
 local function collectBeaconTargets()
     local result = {}
-    -- 关键词：按名字匹配
     for _, kw in ipairs(userProtectKeywords) do
         if kw.beacon and kw.beacon.enabled then
             local matches = findKeywordMatches(kw)
             for _, obj in ipairs(matches) do
-                result[obj] = kw.beacon   -- 简单覆盖，后添加的优先
+                result[obj] = kw.beacon
             end
         end
     end
-    -- 单目标：直接绑定
     for obj, cfg in pairs(protectedBeaconMap) do
         if cfg and cfg.enabled and obj and obj.Parent then
-            result[obj] = cfg  -- 单目标覆盖关键词
+            result[obj] = cfg
         end
     end
     return result
 end
 
--- 检查是否需要周期扫描（任意关键词开启 periodicScan）
 local function hasPeriodicScanEnabled()
     for _, kw in ipairs(userProtectKeywords) do
         if kw.beacon and kw.beacon.enabled and kw.beacon.periodicScan then
@@ -2811,11 +2842,9 @@ local function hasPeriodicScanEnabled()
     return false, 0
 end
 
--- 同步信标实例：对比 desired 和当前，创建/销毁/更新
 local function syncBeacons()
     local desired = collectBeaconTargets()
 
-    -- 1. 移除已不需要的
     for target, inst in pairs(beaconInstances) do
         if not target.Parent or not desired[target] then
             destroyBeaconInstance(inst)
@@ -2823,7 +2852,6 @@ local function syncBeacons()
         end
     end
 
-    -- 2. 创建新的 / 配置变化时重建
     for target, cfg in pairs(desired) do
         if target.Parent then
             local inst = beaconInstances[target]
@@ -2840,13 +2868,11 @@ local function syncBeacons()
     end
 end
 
--- 每帧更新循环
 local beaconFrameConn = nil
 local beaconScanConn = nil
 local beaconLastScan = 0
 
 local function startBeaconLoop()
-    -- 每帧更新位置
     if beaconFrameConn then beaconFrameConn:Disconnect() end
     beaconFrameConn = RunService.RenderStepped:Connect(function()
         if isShuttingDown then return end
@@ -2863,7 +2889,6 @@ local function startBeaconLoop()
         end
     end)
 
-    -- 周期扫描：只在有开启 periodicScan 时运行
     if beaconScanConn then beaconScanConn:Disconnect() end
     beaconScanConn = RunService.Heartbeat:Connect(function()
         if isShuttingDown then return end
@@ -2876,7 +2901,6 @@ local function startBeaconLoop()
     end)
 end
 
--- 停止信标系统（全部清空）
 local function stopBeaconLoop()
     if beaconFrameConn then beaconFrameConn:Disconnect() beaconFrameConn = nil end
     if beaconScanConn then beaconScanConn:Disconnect() beaconScanConn = nil end
@@ -2884,11 +2908,11 @@ local function stopBeaconLoop()
         destroyBeaconInstance(inst)
     end
     beaconInstances = {}
+    beaconLastScan = 0
 end
-
 -- ==================== 信标系统结束 ====================
--- ==================== 通用弹窗 ====================
 
+-- ==================== 通知系统 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -3224,7 +3248,6 @@ function createMenu(title, buttons, parentMenu)
 end
 
 -- ==================== 信标配置对话框 ====================
-
 local function colorToHexSafe(c)
     local r = math.floor(math.clamp(c.R, 0, 1) * 255 + 0.5)
     local g = math.floor(math.clamp(c.G, 0, 1) * 255 + 0.5)
@@ -3232,15 +3255,10 @@ local function colorToHexSafe(c)
     return string.format("#%02X%02X%02X", r, g, b)
 end
 
--- 通用回调：设置完成后触发同步
 local function afterBeaconChange()
     pcall(syncBeacons)
 end
 
--- item：关键词对象（含 .beacon）或者单目标对象（含 protectedBeaconMap[obj]）
--- getCfg / setCfg：读写配置
--- titleHint：显示在标题旁的对象名
--- 返回：无
 showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
     if _activeInputDialog then
         pcall(function() _activeInputDialog:Destroy() end)
@@ -3261,7 +3279,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         if _activeInputDialog == dialog then _activeInputDialog = nil end
     end)
 
-    -- 当前配置副本（在对话框里改，点确认才写回）
     local workingCfg = makeBeaconConfig(getCfg() or {})
 
     local bg = Instance.new("Frame")
@@ -3274,7 +3291,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
     bg.Parent = dialog
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
 
-    -- 标题
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -20, 0, 26)
     title.Position = UDim2.new(0, 10, 0, 8)
@@ -3298,7 +3314,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
     hint.TextTruncate = Enum.TextTruncate.AtEnd
     hint.Parent = bg
 
-    -- 可滚动内容区
     local scroll = Instance.new("ScrollingFrame")
     scroll.Size = UDim2.new(1, -16, 1, -160)
     scroll.Position = UDim2.new(0, 8, 0, 54)
@@ -3529,7 +3544,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         hBox.ClearTextOnFocus = false
         hBox.Parent = row
         local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(0, 3); hc.Parent = hBox
-        -- 【修复】去掉错误的 :connect and 写法，改为直接 :Connect
         hBox.FocusLost:Connect(function()
             local n = tonumber(hBox.Text)
             if n then
@@ -3727,7 +3741,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
             end
         end
 
-        -- 预设色
         local PRESETS = {
             Color3.fromRGB(255, 200, 0),
             Color3.fromRGB(255, 70, 70),
@@ -3836,7 +3849,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
     btnFrame.BackgroundTransparency = 1
     btnFrame.Parent = bg
 
-    -- 【修复】改成 3 格均匀分布
     local function makeBtn3(text, idx, bgColor)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1/3, -6, 1, 0)
@@ -3858,10 +3870,8 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
     end
 
     resetBtn.MouseButton1Click:Connect(function()
-        -- 重置当前配置为默认
         local d = makeBeaconConfig({})
         for k, v in pairs(d) do workingCfg[k] = v end
-        -- 刷新对话框最简单方法：关闭再打开
         closeDialog()
         if onClose then pcall(onClose) end
         showBeaconConfigDialog(getCfg, setCfg, titleHint, onClose)
@@ -3884,7 +3894,6 @@ end
 showKeywordManageMenu = function()
     local buttons = {}
 
-    -- 单目标保护入口
     local protectedCount = 0
     for obj, _ in pairs(protectedList) do
         if obj and obj.Parent then protectedCount = protectedCount + 1 end
@@ -3905,7 +3914,6 @@ showKeywordManageMenu = function()
             callback = function() end
         })
     else
-        -- 前缀复制
         table.insert(buttons, {
             text = "📋 复制所有前缀 (" .. #userProtectKeywords .. ")",
             bgColor = Color3.fromRGB(50, 130, 200),
@@ -3921,7 +3929,6 @@ showKeywordManageMenu = function()
                 menu:Destroy()
             end
         })
-        -- 完整名复制
         table.insert(buttons, {
             text = "📋 复制所有完整名 (" .. #userProtectKeywords .. ")",
             bgColor = Color3.fromRGB(70, 140, 180),
@@ -3937,7 +3944,6 @@ showKeywordManageMenu = function()
                 menu:Destroy()
             end
         })
-        -- 导出
         table.insert(buttons, {
             text = "📤 导出到文件 (" .. #userProtectKeywords .. ")",
             bgColor = Color3.fromRGB(200, 130, 0),
@@ -3976,7 +3982,6 @@ showKeywordManageMenu = function()
                 end)
             end
         })
-        -- 关键词列表（短按查看详情，长按信标设置）
         for i, item in ipairs(userProtectKeywords) do
             local idxCopy = i
             local label = item.prefix or item.exact or "?"
@@ -4275,7 +4280,7 @@ showSingleProtectMenu = function()
     createMenu("🎯 单目标保护管理", buttons, showKeywordManageMenu)
 end
 
--- ==================== 管理单目标（子列表） ====================
+-- ==================== 管理单目标 ====================
 showSingleManageMenu = function()
     local buttons = {}
 
@@ -4300,7 +4305,6 @@ showSingleManageMenu = function()
         return
     end
 
-    -- 复制名字
     table.insert(buttons, {
         text = "📋 复制所有名字 (" .. total .. ")",
         bgColor = Color3.fromRGB(50, 130, 200),
@@ -4317,7 +4321,6 @@ showSingleManageMenu = function()
         end
     })
 
-    -- 复制路径
     table.insert(buttons, {
         text = "📋 复制所有路径 (" .. total .. ")",
         bgColor = Color3.fromRGB(70, 140, 180),
@@ -4335,7 +4338,7 @@ showSingleManageMenu = function()
         end
     })
 
-    -- 导出
+    -- [修复] 单目标导出：把名字放入 prefix 字段，exact 留空
     table.insert(buttons, {
         text = "📤 导出到文件 (" .. total .. ")",
         bgColor = Color3.fromRGB(200, 130, 0),
@@ -4349,7 +4352,8 @@ showSingleManageMenu = function()
                     if cfg and cfg.enabled then
                         local c = cfg.color
                         table.insert(lines, table.concat({
-                            "", obj.Name, "1",
+                            obj.Name, "",
+                            "1",
                             "1",
                             cfg.showHighlight and "1" or "0",
                             cfg.showBeam and "1" or "0",
@@ -4365,7 +4369,7 @@ showSingleManageMenu = function()
                             string.format("%.3f", cfg.scanInterval or 2.5),
                         }, "|"))
                     else
-                        table.insert(lines, "," .. obj.Name)
+                        table.insert(lines, obj.Name .. ",")
                     end
                 end
             end
@@ -4403,7 +4407,6 @@ showSingleManageMenu = function()
         end
     })
 
-    -- 对象列表：短按查看详情，长按信标设置
     local displayLimit = 100
     local index = 0
     for _, obj in ipairs(validTargets) do
@@ -4762,24 +4765,26 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.4.0 更新内容：",
+                    "版本 8.4.1 更新内容：",
                     "",
-                    "【新增】信标系统（v8.4.0）",
+                    "【修复】Delta Executor 兼容性：",
+                    "  · 加入 HTTP request 超时保护（5秒）",
+                    "  · 加入 getgenv 回退处理",
+                    "  · 等待 LocalPlayer 防止移动端注入过早",
+                    "  · findKeywordMatches 分批处理防卡死",
+                    "",
+                    "【修复】碰撞删除关闭时 CanCollide 恢复",
+                    "【修复】单目标导出格式（名字放入 prefix）",
+                    "【修复】checkIgnored 补上用户关键词检查",
+                    "【修复】isBeaconLine 字段判断严格化",
+                    "【修复】showBrightnessDialog 前向声明",
+                    "",
+                    "【信标系统】",
                     "  · 每个关键词/单目标可独立开启信标",
                     "  · 白描框 + 光柱 + 名字牌，全可独立开关",
                     "  · 颜色、粗细、高度、透明度全可调",
-                    "  · 自定义名字（空则用目标名）",
-                    "  · 支持周期扫描新同名目标（可调间隔）",
-                    "  · 与透明功能完全独立",
+                    "  · 支持周期扫描新同名目标",
                     "  · 短按查看、长按信标设置",
-                    "  · 导出文件自动包含信标配置",
-                    "",
-                    "【改进】关键词/单目标菜单显示数量 (n)",
-                    "  · 复制所有前缀 (n)",
-                    "  · 复制所有完整名 (n)",
-                    "  · 导出到文件 (n)",
-                    "",
-                    "【保留】滑块多指隔离、穿墙/透视窗拖动",
                     "",
                     "感谢使用！"
                 }
@@ -5800,6 +5805,154 @@ function showBrightnessDialog()
     end)
 end
 
+-- ==================== 保护设置菜单（占位） ====================
+showProtectMenu = function()
+    local buttons = {}
+    table.insert(buttons, {
+        text = "🔑 管理保护关键词 (" .. #userProtectKeywords .. ")",
+        bgColor = Color3.fromRGB(80, 140, 200),
+        callback = function(menu)
+            menu:Destroy()
+            if showKeywordManageMenu then showKeywordManageMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "🛡 默认保护分类",
+        bgColor = Color3.fromRGB(100, 180, 120),
+        callback = function(menu)
+            menu:Destroy()
+            if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "➕ 添加保护关键词",
+        bgColor = Color3.fromRGB(60, 160, 200),
+        callback = function(menu)
+            menu:Destroy()
+            showInputDialog("输入关键词（多个用逗号分隔）", "", function(input)
+                if not input or input == "" then return end
+                local added = 0
+                for kw in string.gmatch(input, "([^,]+)") do
+                    local trimmed = kw:match("^%s*(.-)%s*$")
+                    if trimmed ~= "" then
+                        local exists = false
+                        for _, item in ipairs(userProtectKeywords) do
+                            if (item.prefix == trimmed) or (item.exact == trimmed) then
+                                exists = true; break
+                            end
+                        end
+                        if not exists then
+                            table.insert(userProtectKeywords, { prefix = trimmed, exact = nil })
+                            added = added + 1
+                        end
+                    end
+                end
+                tanchuangxiaoxi("已添加 " .. added .. " 个关键词", "保护")
+                if showProtectMenu then showProtectMenu() end
+            end)
+        end
+    })
+    table.insert(buttons, {
+        text = "📥 从文件导入关键词",
+        bgColor = Color3.fromRGB(120, 100, 180),
+        callback = function(menu)
+            menu:Destroy()
+            if not isfolder("ProtectKeywords") then
+                tanchuangxiaoxi("文件夹 ProtectKeywords 不存在", "保护"); return
+            end
+            local files = listfiles("ProtectKeywords")
+            local btnList = {}
+            for _, file in ipairs(files) do
+                if string.sub(file, -4) == ".txt" then
+                    local fileName = string.match(file, "([^/\\]+)%.txt$") or file
+                    table.insert(btnList, {
+                        text = "📄 " .. fileName,
+                        bgColor = Color3.fromRGB(70, 130, 180),
+                        callback = function(subMenu)
+                            subMenu:Destroy()
+                            local content = readfile(file)
+                            local parsed = deserializeKeywords(content)
+                            local added = 0
+                            for _, item in ipairs(parsed) do
+                                table.insert(userProtectKeywords, item)
+                                added = added + 1
+                            end
+                            tanchuangxiaoxi("已从 [" .. fileName .. "] 导入 " .. added .. " 条", "保护")
+                            afterBeaconChange()
+                            if showProtectMenu then showProtectMenu() end
+                        end
+                    })
+                end
+            end
+            if #btnList == 0 then tanchuangxiaoxi("暂无 .txt 文件", "保护")
+            else createMenu("选择要导入的文件", btnList, showProtectMenu) end
+        end
+    })
+    table.insert(buttons, {
+        text = "🗑 清空所有关键词 (" .. #userProtectKeywords .. ")",
+        bgColor = Color3.fromRGB(180, 50, 50),
+        callback = function(menu)
+            menu:Destroy()
+            local n = #userProtectKeywords
+            userProtectKeywords = {}
+            tanchuangxiaoxi("已清空 " .. n .. " 条关键词", "保护")
+            afterBeaconChange()
+            if showProtectMenu then showProtectMenu() end
+        end
+    })
+    createMenu("🛡 保护设置", buttons, nil)
+end
+
+showDefaultProtectMenu = function()
+    local buttons = {}
+    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
+        local enabled = protectGroupEnabled[group.id]
+        table.insert(buttons, {
+            text = (enabled and "✅ " or "❌ ") .. group.name,
+            bgColor = enabled and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
+            callback = function(menu)
+                protectGroupEnabled[group.id] = not protectGroupEnabled[group.id]
+                refreshActiveProtectKeywords()
+                menu:Destroy()
+                if showDefaultProtectMenu then showDefaultProtectMenu() end
+            end
+        })
+    end
+    table.insert(buttons, {
+        text = (advancedProtect.humanoid and "✅ " or "❌ ") .. "含 Humanoid 的对象",
+        bgColor = advancedProtect.humanoid and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
+        callback = function(menu)
+            advancedProtect.humanoid = not advancedProtect.humanoid
+            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.prompt and "✅ " or "❌ ") .. "含交互组件 (Prompt/ClickDetector)",
+        bgColor = advancedProtect.prompt and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
+        callback = function(menu)
+            advancedProtect.prompt = not advancedProtect.prompt
+            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.classes and "✅ " or "❌ ") .. "保护特定类 (Spawn/Tool/Seat...)",
+        bgColor = advancedProtect.classes and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
+        callback = function(menu)
+            advancedProtect.classes = not advancedProtect.classes
+            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "🔄 重置为默认（全部开启）",
+        bgColor = Color3.fromRGB(200, 130, 0),
+        callback = function(menu)
+            resetProtectDefaults()
+            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    createMenu("🛡 默认保护分类", buttons, showProtectMenu)
+end
+
 -- ==================== 彻底关闭 ====================
 function fullShutdown()
     if isFlying then pcall(toggleFly, false) end
@@ -5859,4 +6012,3 @@ end)
 
 -- 启动信标系统
 startBeaconLoop()
-
