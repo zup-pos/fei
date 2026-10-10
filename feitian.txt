@@ -1,8 +1,7 @@
 -- Gui to Lua
--- Version 8.4.1（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离 + 信标系统 + Delta兼容修复）
+-- Version 8.4.2（稳定版基础 + 信标系统 + Delta兼容修复）
 
 -- ==================== Delta Executor 兼容补丁 ====================
--- HTTP 超时补丁（防止 request() 在 Delta 上永久挂起）
 local HTTP_TIMEOUT = 5
 local _rawHttpFn = nil
 pcall(function() if request then _rawHttpFn = request end end)
@@ -33,7 +32,6 @@ if _rawHttpFn then
     if http and http.request then http.request = function(opts) return safeRequest(opts) end end
 end
 
--- getgenv 回退
 if not getgenv then
     getgenv = function() return getfenv() end
 end
@@ -193,10 +191,9 @@ local smartSubMode = "smart"
 local protectedList = {}
 local userProtectKeywords = {}
 
--- 【新增】碰撞删除全局开关（默认关闭）
 local collisionDeleteEnabled = false
 
--- ==================== 信标系统（v8.4.1） ====================
+-- ==================== 信标系统（v8.4.2 整合版） ====================
 local BEACON_DEFAULT = {
     enabled = false,
     showHighlight = true,
@@ -211,9 +208,14 @@ local BEACON_DEFAULT = {
     scanInterval = 2.5,
 }
 
+-- 单目标信标配置：[obj] = config
 local protectedBeaconMap = {}
+
+-- 信标实例缓存
 local beaconInstances = {}
-local beaconLoopConn = nil
+
+-- 是否正在关闭
+local isShuttingDown = false
 
 local function copyBeaconConfig(src)
     local c = {}
@@ -241,7 +243,7 @@ local function makeBeaconConfig(overrides)
     end
     return cfg
 end
--- ==================== 信标系统结束（核心逻辑在后半部分） ====================
+-- ==================== 信标系统配置结束 ====================
 
 -- ==================== 默认保护分类管理 ====================
 local DEFAULT_PROTECT_GROUPS = {
@@ -311,7 +313,7 @@ local showSingleProtectMenu
 local showSingleManageMenu
 local showSingleDetailDialog
 local showBeaconConfigDialog
-local showBrightnessDialog   -- [修复] 前向声明
+local showBrightnessDialog
 
 -- 追踪当前活动弹窗，实现互斥
 local _activeInputDialog = nil
@@ -330,8 +332,7 @@ local function extractKeyword(name)
     return string.lower(s)
 end
 
--- ==================== 序列化 / 反序列化（16字段，用 "|" 分隔） ====================
--- [修复] 统一为 16 字段格式：prefix|exact|beaconFlag|enabled|showHL|showBeam|showName|customName|R|G|B|width|height|hlTrans|periodic|interval
+-- ==================== 序列化 / 反序列化（16字段 "|" 分隔） ====================
 local BEACON_FIELD_COUNT = 16
 
 local function serializeKeywords(keywords)
@@ -366,7 +367,6 @@ local function serializeKeywords(keywords)
     return table.concat(lines, "\n")
 end
 
--- [修复] 严格判断：至少 15 个 "|"（16 字段）
 local function isBeaconLine(line)
     local _, count = line:gsub("|", "")
     return count >= (BEACON_FIELD_COUNT - 1)
@@ -428,6 +428,7 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
     local dragging = false
     local dragInput = nil
     local lastCp = 0
+
     local function updateFromInput(input)
         local ap = sliderBg.AbsolutePosition
         local as = sliderBg.AbsoluteSize.X
@@ -438,20 +439,16 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
         knob.Position = UDim2.new(cp, knobOffsetX, 0, knobOffsetY)
         if onUpdate then onUpdate(cp) end
     end
-    local conn1 = UserInputService.InputBegan:Connect(function(input)
+
+    local connKnobBegan = knob.InputBegan:Connect(function(input)
         if input.UserInputType ~= Enum.UserInputType.Touch
             and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-        local ap = sliderBg.AbsolutePosition
-        local as = sliderBg.AbsoluteSize
-        local pos = input.Position
-        if pos.X >= ap.X - 5 and pos.X <= ap.X + as.X + 5
-           and pos.Y >= ap.Y - 8 and pos.Y <= ap.Y + as.Y + 8 then
-            dragging = true
-            dragInput = input
-            updateFromInput(input)
-        end
+        dragging = true
+        dragInput = input
+        updateFromInput(input)
     end)
-    local conn2 = UserInputService.InputChanged:Connect(function(input)
+
+    local connChanged = UserInputService.InputChanged:Connect(function(input)
         if not dragging then return end
         local matched = (input == dragInput)
             or (dragInput ~= nil
@@ -462,18 +459,22 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
             and input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
         updateFromInput(input)
     end)
-    local conn3 = UserInputService.InputEnded:Connect(function(input)
+
+    local connEnded = UserInputService.InputEnded:Connect(function(input)
         if input ~= dragInput then return end
         dragging = false
         dragInput = nil
         if onEnd then onEnd(lastCp) end
     end)
+
     return function()
-        conn1:Disconnect(); conn2:Disconnect(); conn3:Disconnect()
+        if connKnobBegan then connKnobBegan:Disconnect() end
+        if connChanged then connChanged:Disconnect() end
+        if connEnded then connEnded:Disconnect() end
     end
 end
+-- ==================== 通用滑块拖动结束 ====================
 
--- ==================== SmartBuilding 智能透视模块 ====================
 local SmartBuilding = (function()
     local SB = {}
     SB.crosshairEnabled = true
@@ -655,7 +656,6 @@ local SmartBuilding = (function()
         if not part or not part:IsA("BasePart") then return true, "非 BasePart" end
         if part:IsA("Terrain") then return true, "Terrain" end
         if isAncestorProtected(part) then return true, "单目标保护" end
-        -- [修复] 补上用户关键词检查
         if ancestorsMatchUserKw(part) then return true, "用户关键词" end
         if player.Character and part:IsDescendantOf(player.Character) then return true, "玩家角色" end
         if nameMatches(part, CONFIG.invisibleWallKeywords)
@@ -679,7 +679,6 @@ local SmartBuilding = (function()
     end
     local function isIgnored(part) return (checkIgnored(part)) end
 
-    -- [修复] 记录 canCollide，保证碰撞删除关闭时可恢复
     local function setObjTransparency(obj, trans)
         if not obj or not obj.Parent then return end
         if obj:IsA("BasePart") and not obj:IsA("Terrain") then
@@ -2792,7 +2791,7 @@ local function updateBeaconInstance(inst, myPos)
     return true
 end
 
--- [Delta修复] 分批遍历，避免大量 Descendants 卡死
+-- [Delta修复] 分批遍历
 local function findKeywordMatches(kwItem)
     local matches, count = {}, 0
     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -3341,7 +3340,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         return row
     end
 
-    -- 总开关
     do
         local row = makeRow(36)
         local lbl = Instance.new("TextLabel")
@@ -3381,7 +3379,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end)
     end
 
-    -- 白描框
     do
         local row = makeRow(50)
         local lbl = Instance.new("TextLabel")
@@ -3452,7 +3449,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end)
     end
 
-    -- 光柱
     do
         local row = makeRow(74)
         local lbl = Instance.new("TextLabel")
@@ -3555,7 +3551,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end)
     end
 
-    -- 名字
     do
         local row = makeRow(50)
         local lbl = Instance.new("TextLabel")
@@ -3610,7 +3605,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end)
     end
 
-    -- 颜色
     do
         local row = makeRow(140)
         local lbl = Instance.new("TextLabel")
@@ -3771,7 +3765,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end
     end
 
-    -- 周期扫描
     do
         local row = makeRow(50)
         local lbl = Instance.new("TextLabel")
@@ -3842,7 +3835,6 @@ showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
         end)
     end
 
-    -- 底部按钮
     local btnFrame = Instance.new("Frame")
     btnFrame.Size = UDim2.new(1, -20, 0, 40)
     btnFrame.Position = UDim2.new(0, 10, 1, -50)
@@ -4010,7 +4002,6 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
--- ==================== 关键词详情 ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -4338,7 +4329,6 @@ showSingleManageMenu = function()
         end
     })
 
-    -- [修复] 单目标导出：把名字放入 prefix 字段，exact 留空
     table.insert(buttons, {
         text = "📤 导出到文件 (" .. total .. ")",
         bgColor = Color3.fromRGB(200, 130, 0),
@@ -4765,26 +4755,26 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.4.1 更新内容：",
+                    "版本 8.4.2（稳定版继承 + Delta 兼容）",
                     "",
-                    "【修复】Delta Executor 兼容性：",
-                    "  · 加入 HTTP request 超时保护（5秒）",
-                    "  · 加入 getgenv 回退处理",
-                    "  · 等待 LocalPlayer 防止移动端注入过早",
+                    "【Delta 兼容】",
+                    "  · HTTP request 超时保护（5秒）",
+                    "  · getgenv 回退处理",
+                    "  · 等待 LocalPlayer 防止注入过早",
                     "  · findKeywordMatches 分批处理防卡死",
                     "",
-                    "【修复】碰撞删除关闭时 CanCollide 恢复",
-                    "【修复】单目标导出格式（名字放入 prefix）",
-                    "【修复】checkIgnored 补上用户关键词检查",
-                    "【修复】isBeaconLine 字段判断严格化",
-                    "【修复】showBrightnessDialog 前向声明",
-                    "",
                     "【信标系统】",
-                    "  · 每个关键词/单目标可独立开启信标",
-                    "  · 白描框 + 光柱 + 名字牌，全可独立开关",
-                    "  · 颜色、粗细、高度、透明度全可调",
+                    "  · 白描框 + 光柱 + 名字牌",
+                    "  · 颜色 / 粗细 / 高度 / 透明度全可调",
                     "  · 支持周期扫描新同名目标",
                     "  · 短按查看、长按信标设置",
+                    "",
+                    "【核心修复】",
+                    "  · 碰撞删除关闭后 CanCollide 恢复",
+                    "  · 单目标导出格式（名字放入 prefix）",
+                    "  · checkIgnored 补上用户关键词检查",
+                    "  · isBeaconLine 字段判断严格化",
+                    "  · showBrightnessDialog 前向声明",
                     "",
                     "感谢使用！"
                 }
@@ -5243,6 +5233,7 @@ function showCamOffsetDialog()
     return dialog
 end
 
+-- ==================== 移动向量 ====================
 local function getMoveVector(dir, rootPart)
     local step = dir * moveStep
     if moveMode == "角色上下" then return rootPart.CFrame.UpVector * step
@@ -5276,7 +5267,7 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 按钮绑定：上升 ====================
+-- ==================== 按钮绑定：上升 / 下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -5308,7 +5299,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     down.MouseButton1Down:Connect(function()
@@ -5340,7 +5330,7 @@ do
     end)
 end
 
--- ==================== 按钮绑定：加速 ====================
+-- ==================== 加速 / 减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -5380,7 +5370,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
@@ -5424,7 +5413,7 @@ do
     end)
 end
 
--- ==================== 按钮绑定：speed 多功能按钮 ====================
+-- ==================== speed 多功能按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5511,7 +5500,7 @@ do
     end)
 end
 
--- ==================== 按钮绑定：onof 主按钮 ====================
+-- ==================== onof 主按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5575,7 +5564,7 @@ do
     end)
 end
 
--- ==================== 按钮绑定：隐藏/设置 ====================
+-- ==================== hide 隐藏/设置 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5681,7 +5670,7 @@ do
     end)
 end
 
--- ==================== 透视亮度设置弹窗 ====================
+-- ==================== 亮度设置弹窗 ====================
 function showBrightnessDialog()
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -5805,7 +5794,7 @@ function showBrightnessDialog()
     end)
 end
 
--- ==================== 保护设置菜单（占位） ====================
+-- ==================== 保护设置菜单 ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
@@ -5953,8 +5942,39 @@ showDefaultProtectMenu = function()
     createMenu("🛡 默认保护分类", buttons, showProtectMenu)
 end
 
+-- ==================== 音量键 ====================
+function setUIVisible(visible)
+    uiVisible = visible
+    Frame.Visible = uiVisible
+    if miniWindow then miniWindow.Visible = uiVisible end
+    tanchuangxiaoxi(uiVisible and "UI已显示" or "UI已隐藏", "音量键")
+end
+
+function enableVolumeKey()
+    local hasVD = pcall(function() return Enum.KeyCode.VolumeDown end)
+    local hasVU = pcall(function() return Enum.KeyCode.VolumeUp end)
+    if not hasVD or not hasVU then
+        tanchuangxiaoxi("您的设备不支持音量键", "提示"); return
+    end
+    if volumeKeyEnabled then return end
+    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.VolumeDown then setUIVisible(false)
+        elseif input.KeyCode == Enum.KeyCode.VolumeUp then setUIVisible(true) end
+    end)
+    volumeKeyEnabled = true
+    tanchuangxiaoxi("音量键已启用", "设置")
+end
+
+function disableVolumeKey()
+    if not volumeKeyEnabled then return end
+    if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
+    volumeKeyEnabled = false
+    tanchuangxiaoxi("音量键已禁用", "设置")
+end
+
 -- ==================== 彻底关闭 ====================
 function fullShutdown()
+    isShuttingDown = true
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
@@ -5991,6 +6011,7 @@ function fullShutdown()
         pcall(function() _activeMenuDialog:Destroy() end)
         _activeMenuDialog = nil
     end
+    isShuttingDown = false
 end
 
 main.Destroying:Connect(function()
@@ -6010,5 +6031,4 @@ task.spawn(function()
     takeCamSnapshot()
 end)
 
--- 启动信标系统
 startBeaconLoop()
