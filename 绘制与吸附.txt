@@ -1,0 +1,2398 @@
+-- =====================================================
+-- 独立脚本：准星瞄准 + 目标追踪 + 屏幕绘制 + 黑洞吸附
+-- v41 定版
+-- 修复：
+--   1. 标签重叠时自动向上错开
+--   2. 超出视野（含1200米外）的目标立即隐藏并清理
+--   3. 保护列表：长按准星/保护列表保护单件部件
+--   4. 关键词状态永不自动清除，到新区域自动重新扫描绘制
+--   5. 移除目标管理长按循环扫描
+--   6. 不同关键词的目标不合并
+--   7. 清理死代码
+--   8. 收紧关键词匹配：去掉反向匹配 + matchRoot 不再遍历后代
+--      → 解决"添加1个 gold_bar 却扫描出8个"的误匹配问题
+--   9. 删除操作期间暂停扫描 200ms，避免删除被扫描线程干扰
+-- =====================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local player = Players.LocalPlayer
+if not player then
+    repeat task.wait() until Players.LocalPlayer
+    player = Players.LocalPlayer
+end
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+local _guiParent
+do
+    local ok, r = pcall(function() return gethui() end)
+    if ok and r then
+        _guiParent = r
+    else
+        local ok2, r2 = pcall(function() return game:GetService("CoreGui") end)
+        if ok2 and r2 then _guiParent = r2 else _guiParent = playerGui end
+    end
+end
+
+-- ★ 常量
+local SCAN_PARTS_PER_FRAME = 100
+local NEARBY_RADIUS = 60
+local NEARBY_MAX_PARTS = 2000
+local FALLBACK_SCAN_INTERVAL = 5
+local MAX_DRAW_DISTANCE = 1200
+local EDGE_MARGIN = 150
+
+local state = {
+    crosshairOn = false,
+    drawOn = false,
+    expanded = true,
+    keywords = {},
+    keywordNotes = {},
+    keywordDrawEnabled = {},
+    protectedTargets = {},
+    logs = {},
+    scanRadius = 2000,
+    blackholeOn = false,
+    showDistance = true,
+    scanPaused = false,  -- ★ 新增：删除操作期间暂停扫描
+}
+
+local scanQueue = nil
+local pendingRoots = {}
+
+local addLog
+
+local conns = {}
+local function addConn(c) table.insert(conns, c); return c end
+local function cleanConns()
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    conns = {}
+end
+
+-- ==================== 通用工具 ====================
+local function isPointInGui(g, x, y)
+    if not g or not g.Parent then return false end
+    local tl, sz = g.AbsolutePosition, g.AbsoluteSize
+    if sz.X <= 0 or sz.Y <= 0 then return false end
+    return x >= tl.X and x <= tl.X + sz.X and y >= tl.Y and y <= tl.Y + sz.Y
+end
+
+local function bindSafeClick(btn, callback)
+    local pressInput, pressPos
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if input.UserInputState ~= Enum.UserInputState.Begin then return end
+        pressInput = input
+        pressPos = Vector2.new(input.Position.X, input.Position.Y)
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input ~= pressInput then return end
+        local pos = Vector2.new(input.Position.X, input.Position.Y)
+        local d = pressPos and (pos - pressPos).Magnitude or 999
+        local wasInside = isPointInGui(btn, pos.X, pos.Y)
+        pressInput = nil
+        pressPos = nil
+        if wasInside and d < 30 then
+            local ok, err = pcall(callback)
+            if not ok then warn("[bindSafeClick] " .. tostring(err)) end
+        end
+    end)
+end
+
+local function isKeywordDrawEnabled(kw)
+    if not kw then return true end
+    local v = state.keywordDrawEnabled[kw]
+    if v == nil then return true end
+    return v
+end
+
+local function isProtected(target)
+    if not target then return false end
+    if state.protectedTargets[target] then return true end
+    local cur = target
+    local depth = 0
+    while cur and cur ~= workspace and depth < 30 do
+        if state.protectedTargets[cur] then return true end
+        cur = cur.Parent
+        depth = depth + 1
+    end
+    return false
+end
+
+local function isProtectedTree(target)
+    if not target then return false end
+    if isProtected(target) then return true end
+    if target:IsA("Model") then
+        local ok, descendants = pcall(function() return target:GetDescendants() end)
+        if ok and descendants then
+            for _, d in ipairs(descendants) do
+                if state.protectedTargets[d] then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function extractKeyword(name)
+    if not name or name == "" then return "" end
+    local s = name
+    s = s:gsub("%s*%(%d+%)%s*$", "")
+    s = s:gsub("[_%s%-]+%d+%s*$", "")
+    s = s:gsub("%d+$", "")
+    s = s:gsub("[_%s%-]+$", "")
+    s = s:match("^%s*(.-)%s*$") or s
+    if s == "" then s = name end
+    return string.lower(s)
+end
+
+local GENERIC_WORDS = {
+    part = true, parts = true,
+    model = true, models = true,
+    mesh = true, meshpart = true, meshparts = true,
+    handle = true, handles = true,
+    block = true, blocks = true,
+    object = true, objects = true,
+    item = true, items = true,
+    thing = true, things = true,
+    base = true, bases = true, baseplate = true,
+    brick = true, bricks = true,
+    piece = true, pieces = true,
+    unit = true, units = true,
+    prop = true, props = true,
+    asset = true, assets = true,
+    node = true, nodes = true,
+    group = true, groups = true,
+    container = true, containers = true,
+    main = true, default = true,
+    folder = true, folders = true,
+    door = true, doors = true,
+    wall = true, walls = true,
+    floor = true, floors = true,
+    roof = true, roofs = true,
+}
+
+local function isGenericKeyword(kw)
+    if not kw or kw == "" then return true end
+    if #kw < 3 then return true end
+    return GENERIC_WORDS[kw] == true
+end
+
+local function tryExtractKeyword(name)
+    local k = extractKeyword(name)
+    if k == "" then return nil end
+    if isGenericKeyword(k) then return nil end
+    return k
+end
+
+-- ★ findBestKeyword 保留后代遍历：只在你「主动添加」时才调用
+--   帮你从不具名的模型（比如整个模型叫 Model）中挖掘出有意义的关键词
+local function findBestKeyword(root)
+    if not root then return nil end
+    local kw = tryExtractKeyword(root.Name)
+    if kw then return kw end
+    local ok, descendants = pcall(function() return root:GetDescendants() end)
+    if ok and descendants then
+        for _, d in ipairs(descendants) do
+            if d:IsA("BasePart") then
+                local k2 = tryExtractKeyword(d.Name)
+                if k2 then return k2 end
+            end
+        end
+    end
+    local fallback = extractKeyword(root.Name)
+    if fallback == "" or isGenericKeyword(fallback) then return nil end
+    return fallback
+end
+
+local function sanitizeNote(val)
+    if val == nil then return "" end
+    val = tostring(val)
+    val = val:gsub("[\r\n]+", " ")
+    if #val > 80 then val = string.sub(val, 1, 80) end
+    return val
+end
+
+-- ==================== 文本显示层 ====================
+local overlayGui = Instance.new("ScreenGui")
+overlayGui.Name = "TargetTracerLabels"
+overlayGui.ResetOnSpawn = false
+overlayGui.IgnoreGuiInset = true
+overlayGui.DisplayOrder = 50
+overlayGui.Parent = _guiParent
+
+local function createNameLabel()
+    local lbl = Instance.new("TextLabel")
+    lbl.BackgroundTransparency = 1
+    lbl.Text = ""
+    lbl.TextColor3 = Color3.fromRGB(255, 255, 180)
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 13
+    lbl.TextStrokeTransparency = 0
+    lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    lbl.TextXAlignment = Enum.TextXAlignment.Center
+    lbl.TextYAlignment = Enum.TextYAlignment.Bottom
+    lbl.AutomaticSize = Enum.AutomaticSize.XY
+    lbl.Size = UDim2.new(0, 0, 0, 18)
+    lbl.AnchorPoint = Vector2.new(0.5, 1)
+    lbl.Visible = false
+    lbl.ZIndex = 5
+    lbl.Parent = overlayGui
+    return lbl
+end
+
+-- ==================== 主 UI ====================
+local WIDTH = 200
+local COLLAPSED_W = 50
+local TITLE_H = 34
+local CONTENT_H = 282
+
+local mainGui = Instance.new("ScreenGui")
+mainGui.Name = "TargetTracer"
+mainGui.ResetOnSpawn = false
+mainGui.IgnoreGuiInset = true
+mainGui.DisplayOrder = 100
+mainGui.Parent = _guiParent
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, WIDTH, 0, TITLE_H + CONTENT_H)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+mainFrame.BackgroundTransparency = 0.08
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = mainGui
+local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0, 8); mc.Parent = mainFrame
+local ms = Instance.new("UIStroke")
+ms.Color = Color3.fromRGB(100, 120, 180); ms.Thickness = 1; ms.Transparency = 0.35
+ms.Parent = mainFrame
+
+local frameX, frameY = 0, 100
+local function setFramePos(x, y) frameX, frameY = x, y; mainFrame.Position = UDim2.fromOffset(x, y) end
+local function getCurrentWidth() return state.expanded and WIDTH or COLLAPSED_W end
+local function clampFramePos(x, y, w, h)
+    local vp = camera.ViewportSize
+    if not w or w <= 0 then w = getCurrentWidth() end
+    if not h or h <= 0 then h = TITLE_H end
+    x = math.clamp(x, 0, math.max(0, vp.X - w))
+    y = math.clamp(y, 0, math.max(0, vp.Y - h))
+    return x, y
+end
+do
+    local vp = camera.ViewportSize
+    frameX = math.max(0, vp.X - WIDTH - 20)
+    frameY = 100
+    setFramePos(frameX, frameY)
+end
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, TITLE_H)
+titleBar.BackgroundColor3 = Color3.fromRGB(48, 55, 78)
+titleBar.BackgroundTransparency = 0.15
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 8); tc.Parent = titleBar
+local tcCover = Instance.new("Frame")
+tcCover.Size = UDim2.new(1, 0, 0, TITLE_H / 2)
+tcCover.Position = UDim2.new(0, 0, 1, -TITLE_H / 2)
+tcCover.BackgroundColor3 = titleBar.BackgroundColor3
+tcCover.BackgroundTransparency = titleBar.BackgroundTransparency
+tcCover.BorderSizePixel = 0
+tcCover.Parent = titleBar
+
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -70, 1, 0)
+titleText.Position = UDim2.new(0, 10, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "🎯 准星追踪"
+titleText.TextColor3 = Color3.fromRGB(220, 230, 255)
+titleText.Font = Enum.Font.GothamBold
+titleText.TextSize = 14
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 26, 0, 26)
+toggleBtn.Position = UDim2.new(1, -30, 0, 4)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(80, 95, 140)
+toggleBtn.Text = "▼"
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 12
+toggleBtn.AutoButtonColor = false
+toggleBtn.Parent = titleBar
+local tcc = Instance.new("UICorner"); tcc.CornerRadius = UDim.new(0, 4); tcc.Parent = toggleBtn
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, 0, 1, -TITLE_H)
+content.Position = UDim2.new(0, 0, 0, TITLE_H)
+content.BackgroundTransparency = 1
+content.Parent = mainFrame
+
+local function makeBtn(y, text, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -16, 0, 30)
+    b.Position = UDim2.new(0, 8, 0, y)
+    b.BackgroundColor3 = color
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Text = text
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.AutoButtonColor = false
+    b.Parent = content
+    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 5); c.Parent = b
+    return b
+end
+
+local crosshairBtn = makeBtn(6, "准星: 关闭", Color3.fromRGB(70, 130, 180))
+local addTargetBtn = makeBtn(40, "➕ 添加目标", Color3.fromRGB(46, 139, 87))
+local targetBtn = makeBtn(74, "🎯 目标管理", Color3.fromRGB(70, 150, 180))
+local protectListBtn = makeBtn(108, "🛡 保护列表 (0)", Color3.fromRGB(150, 100, 60))
+local logBtn = makeBtn(142, "📋 日志 (0)", Color3.fromRGB(140, 90, 180))
+local blackholeBtn = makeBtn(176, "🌌 黑洞吸附", Color3.fromRGB(90, 60, 140))
+local drawToggleBtn = makeBtn(210, "绘制: 关闭", Color3.fromRGB(180, 100, 60))
+local exitBtn = makeBtn(244, "❌ 关闭并退出", Color3.fromRGB(180, 60, 60))
+
+-- ==================== 拖动 ====================
+local dragging, dragInput, dragLastPos, dragStartScreen
+local dragStartFrameX, dragStartFrameY = 0, 0
+local TOUCH_MATCH_THRESHOLD = 150
+
+local function isStartInput(i)
+    return i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch
+end
+
+titleBar.InputBegan:Connect(function(input)
+    if not isStartInput(input) then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    dragging = true; dragInput = input; dragLastPos = input.Position
+    dragStartScreen = Vector2.new(input.Position.X, input.Position.Y)
+    dragStartFrameX = frameX; dragStartFrameY = frameY
+end)
+
+addConn(UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    local matched = false
+    if input == dragInput then matched = true
+    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+        and input.UserInputType == Enum.UserInputType.MouseMovement then matched = true
+    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.Touch
+        and input.UserInputType == Enum.UserInputType.Touch then
+        if dragLastPos then
+            local d = (input.Position - dragLastPos).Magnitude
+            if d < TOUCH_MATCH_THRESHOLD then matched = true end
+        end
+    end
+    if not matched then return end
+    dragLastPos = input.Position
+    local cur = Vector2.new(input.Position.X, input.Position.Y)
+    local d = cur - dragStartScreen
+    local newX, newY = clampFramePos(dragStartFrameX + d.X, dragStartFrameY + d.Y)
+    setFramePos(newX, newY)
+end))
+
+addConn(UserInputService.InputEnded:Connect(function(input)
+    if not dragging then return end
+    if input == dragInput then
+        dragging = false; dragInput = nil; dragLastPos = nil; dragStartScreen = nil
+    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.Touch
+        and input.UserInputType == Enum.UserInputType.Touch then
+        if dragLastPos and (input.Position - dragLastPos).Magnitude < TOUCH_MATCH_THRESHOLD then
+            dragging = false; dragInput = nil; dragLastPos = nil; dragStartScreen = nil
+        end
+    end
+end))
+
+local function setExpanded(expanded)
+    local curW = state.expanded and WIDTH or COLLAPSED_W
+    local rightTopX = frameX + curW
+    local topY = frameY
+    state.expanded = expanded
+    local newW, newH
+    if expanded then
+        newW, newH = WIDTH, TITLE_H + CONTENT_H
+        mainFrame.Size = UDim2.new(0, newW, 0, newH)
+        content.Visible = true; titleText.Visible = true
+        toggleBtn.Text = "▼"; toggleBtn.Position = UDim2.new(1, -30, 0, 4)
+    else
+        newW, newH = COLLAPSED_W, TITLE_H
+        mainFrame.Size = UDim2.new(0, newW, 0, newH)
+        content.Visible = false; titleText.Visible = false
+        toggleBtn.Text = "▲"; toggleBtn.Position = UDim2.new(0.5, -13, 0, 4)
+    end
+    local newX, newY = clampFramePos(rightTopX - newW, topY, newW, newH)
+    setFramePos(newX, newY)
+end
+
+bindSafeClick(toggleBtn, function() setExpanded(not state.expanded) end)
+
+-- ==================== 输入框弹窗 ====================
+local function showInputDialog(title, default, callback)
+    local dlg = Instance.new("ScreenGui")
+    dlg.Name = "InputDialog"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
+    dlg.DisplayOrder = 200
+    dlg.Parent = _guiParent
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0, 280, 0, 150)
+    bg.Position = UDim2.new(0.5, -140, 0.5, -75)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    bg.BackgroundTransparency = 0.08
+    bg.BorderSizePixel = 0
+    bg.Parent = dlg
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, -20, 0, 30)
+    t.Position = UDim2.new(0, 10, 0, 10)
+    t.BackgroundTransparency = 1
+    t.Text = title
+    t.TextColor3 = Color3.fromRGB(220, 230, 255)
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 13
+    t.TextWrapped = true
+    t.Parent = bg
+    local tb = Instance.new("TextBox")
+    tb.Size = UDim2.new(1, -40, 0, 36)
+    tb.Position = UDim2.new(0, 20, 0, 48)
+    tb.BackgroundColor3 = Color3.fromRGB(50, 55, 72)
+    tb.Text = tostring(default or "")
+    tb.TextColor3 = Color3.new(1, 1, 1)
+    tb.Font = Enum.Font.Gotham
+    tb.TextSize = 14
+    tb.ClearTextOnFocus = false
+    tb.TextEditable = true
+    tb.MultiLine = false
+    tb.Parent = bg
+    local tbc = Instance.new("UICorner"); tbc.CornerRadius = UDim.new(0, 4); tbc.Parent = tb
+    local cancel = Instance.new("TextButton")
+    cancel.Size = UDim2.new(0.4, -10, 0, 32)
+    cancel.Position = UDim2.new(0.1, 0, 1, -42)
+    cancel.BackgroundColor3 = Color3.fromRGB(150, 60, 60)
+    cancel.Text = "取消"; cancel.TextColor3 = Color3.new(1, 1, 1)
+    cancel.Font = Enum.Font.GothamBold; cancel.TextSize = 13; cancel.Parent = bg
+    local c3 = Instance.new("UICorner"); c3.CornerRadius = UDim.new(0, 5); c3.Parent = cancel
+    local okb = Instance.new("TextButton")
+    okb.Size = UDim2.new(0.4, -10, 0, 32)
+    okb.Position = UDim2.new(0.5, 0, 1, -42)
+    okb.BackgroundColor3 = Color3.fromRGB(50, 150, 80)
+    okb.Text = "确认"; okb.TextColor3 = Color3.new(1, 1, 1)
+    okb.Font = Enum.Font.GothamBold; okb.TextSize = 13; okb.Parent = bg
+    local c4 = Instance.new("UICorner"); c4.CornerRadius = UDim.new(0, 5); c4.Parent = okb
+    bindSafeClick(cancel, function() dlg:Destroy() end)
+    bindSafeClick(okb, function()
+        local ok, err = pcall(function() callback(tb.Text) end)
+        if not ok then warn("[回调错误] " .. tostring(err)) end
+        dlg:Destroy()
+    end)
+end
+
+-- ==================== 绘制组管理 ====================
+local drawGroups = {}
+local topCountText
+
+local function ensureDrawObjects()
+    if topCountText then return end
+    topCountText = Drawing.new("Text")
+    topCountText.Size = 22
+    topCountText.Center = true
+    topCountText.Outline = true
+    topCountText.Color = Color3.fromRGB(255, 255, 255)
+    topCountText.OutlineColor = Color3.fromRGB(0, 0, 0)
+    topCountText.Visible = false
+end
+
+local function createGroup()
+    local g = {
+        line = Drawing.new("Line"),
+        boxT = Drawing.new("Line"),
+        boxB = Drawing.new("Line"),
+        boxL = Drawing.new("Line"),
+        boxR = Drawing.new("Line"),
+    }
+    for _, obj in pairs(g) do
+        obj.Thickness = 1
+        obj.Transparency = 0.6
+        obj.Visible = false
+    end
+    g.line.Color = Color3.fromRGB(120, 200, 255)
+    g.line.Thickness = 1.5
+    g.line.Transparency = 0.75
+    g.boxT.Color = Color3.fromRGB(255, 255, 255)
+    g.boxB.Color = Color3.fromRGB(255, 255, 255)
+    g.boxL.Color = Color3.fromRGB(255, 255, 255)
+    g.boxR.Color = Color3.fromRGB(255, 255, 255)
+    return g
+end
+
+local function destroyGroup(g)
+    for _, obj in pairs(g) do pcall(function() obj:Remove() end) end
+end
+
+local function destroyEntry(entry)
+    if entry.g then destroyGroup(entry.g) end
+    if entry.label then pcall(function() entry.label:Destroy() end) end
+end
+
+local function updateProtectBtn()
+    local n = 0
+    for t, _ in pairs(state.protectedTargets) do
+        if t and t.Parent then n = n + 1 end
+    end
+    protectListBtn.Text = "🛡 保护列表 (" .. n .. ")"
+end
+
+local lastProtectClean = 0
+local function cleanInvalidProtected()
+    local now = tick()
+    if now - lastProtectClean < 1 then return end
+    lastProtectClean = now
+    local changed = false
+    for t in pairs(state.protectedTargets) do
+        local ok, parent = pcall(function() return t.Parent end)
+        if not ok or not parent then
+            state.protectedTargets[t] = nil
+            changed = true
+        end
+    end
+    if changed then updateProtectBtn() end
+end
+
+-- ★ 暂停扫描的辅助函数
+local function pauseScanTemporarily(duration)
+    state.scanPaused = true
+    scanQueue = nil
+    pendingRoots = {}
+    task.delay(duration or 0.2, function()
+        state.scanPaused = false
+    end)
+end
+
+-- ==================== 黑洞吸附核心 ====================
+local anchoredSaved = {}
+
+local function unfreezeAll()
+    for part, orig in pairs(anchoredSaved) do
+        if part and part.Parent then
+            pcall(function() part.Anchored = orig end)
+        end
+    end
+    anchoredSaved = {}
+end
+
+local function getBlackholeTargetCF()
+    local vp = camera.ViewportSize
+    local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local filterList = {}
+    if player.Character then table.insert(filterList, player.Character) end
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent and isKeywordDrawEnabled(entry.keyword) and not isProtectedTree(target) then
+            table.insert(filterList, target)
+        end
+    end
+    params.FilterDescendantsInstances = filterList
+    params.IgnoreWater = true
+    local hit = workspace:Raycast(ray.Origin, ray.Direction * 100, params)
+    if hit then
+        return CFrame.new(hit.Position - ray.Direction.Unit * 2)
+    else
+        return camera.CFrame * CFrame.new(0, 0, -15)
+    end
+end
+
+local function blackholeSnapOnce()
+    if next(drawGroups) == nil then return 0 end
+    local targetCF = getBlackholeTargetCF()
+    local touched = {}
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent and isKeywordDrawEnabled(entry.keyword) and not isProtectedTree(target) then
+            if target:IsA("Model") then
+                local dOk, descendants = pcall(function() return target:GetDescendants() end)
+                if dOk and descendants then
+                    for _, d in ipairs(descendants) do
+                        if d:IsA("BasePart") then
+                            if anchoredSaved[d] == nil then anchoredSaved[d] = d.Anchored end
+                            if d.Anchored then pcall(function() d.Anchored = false end) end
+                            table.insert(touched, d)
+                        end
+                    end
+                end
+            elseif target:IsA("BasePart") then
+                if anchoredSaved[target] == nil then anchoredSaved[target] = target.Anchored end
+                if target.Anchored then pcall(function() target.Anchored = false end) end
+                table.insert(touched, target)
+            end
+        end
+    end
+    if #touched == 0 then return 0 end
+    task.wait(0.05)
+    local movedCount = 0
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent and isKeywordDrawEnabled(entry.keyword) and not isProtectedTree(target) then
+            if target:IsA("Model") then
+                pcall(function() target:PivotTo(targetCF) end)
+                movedCount = movedCount + 1
+            elseif target:IsA("BasePart") then
+                pcall(function() target.CFrame = targetCF end)
+                movedCount = movedCount + 1
+            end
+        end
+    end
+    task.wait(0.05)
+    for _, d in ipairs(touched) do
+        if d and d.Parent then
+            local orig = anchoredSaved[d]
+            if orig ~= nil then pcall(function() d.Anchored = orig end) end
+        end
+    end
+    for _, d in ipairs(touched) do anchoredSaved[d] = nil end
+    return movedCount
+end
+
+local function blackholeSnapContinuous()
+    if next(drawGroups) == nil then return 0 end
+    local targetCF = getBlackholeTargetCF()
+    local movedCount = 0
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent and isKeywordDrawEnabled(entry.keyword) and not isProtectedTree(target) then
+            if target:IsA("Model") then
+                pcall(function() target:PivotTo(targetCF) end)
+                movedCount = movedCount + 1
+            elseif target:IsA("BasePart") then
+                pcall(function() target.CFrame = targetCF end)
+                movedCount = movedCount + 1
+            end
+        end
+    end
+    return movedCount
+end
+
+-- ==================== 黑洞菜单 ====================
+local blackholeMenu = nil
+local function closeBlackholeMenu()
+    if blackholeMenu and blackholeMenu.Parent then blackholeMenu:Destroy() end
+    blackholeMenu = nil
+end
+
+local function showBlackholeMenu()
+    closeBlackholeMenu()
+    local dlg = Instance.new("ScreenGui")
+    dlg.Name = "BlackholeMenu"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
+    dlg.DisplayOrder = 210
+    dlg.Parent = _guiParent
+    blackholeMenu = dlg
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0, 280, 0, 220)
+    bg.Position = UDim2.new(0.5, -140, 0.5, -110)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    bg.BackgroundTransparency = 0.08
+    bg.BorderSizePixel = 0
+    bg.Parent = dlg
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Text = "🌌 黑洞吸附"
+    title.TextColor3 = Color3.fromRGB(220, 230, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Center
+    title.Parent = bg
+    local hint = Instance.new("TextLabel")
+    hint.Size = UDim2.new(1, -20, 0, 32)
+    hint.Position = UDim2.new(0, 10, 0, 38)
+    hint.BackgroundTransparency = 1
+    hint.Text = "长按主面板「🌌 黑洞吸附」= 快速解冻"
+    hint.TextColor3 = Color3.fromRGB(180, 180, 220)
+    hint.Font = Enum.Font.Gotham
+    hint.TextSize = 10
+    hint.TextWrapped = true
+    hint.Parent = bg
+    local function makeBtn(y, text, color)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -20, 0, 34)
+        b.Position = UDim2.new(0, 10, 0, y)
+        b.BackgroundColor3 = color
+        b.Text = text; b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 13
+        b.AutoButtonColor = false
+        b.Parent = bg
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 5); c.Parent = b
+        return b
+    end
+    local snapBtn = makeBtn(76, "💥 一次性吸附", Color3.fromRGB(150, 80, 60))
+    bindSafeClick(snapBtn, function()
+        closeBlackholeMenu()
+        task.spawn(function()
+            local n = blackholeSnapOnce()
+            addLog("黑洞吸附 " .. n .. " 个目标到准心")
+        end)
+    end)
+    local contBtn = makeBtn(116, "", Color3.fromRGB(90, 90, 130))
+    local function refreshContBtn()
+        if state.blackholeOn then
+            contBtn.Text = "🌀 持续吸附: 开启（点击关闭）"
+            contBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
+        else
+            contBtn.Text = "🌀 持续吸附: 关闭（点击开启）"
+            contBtn.BackgroundColor3 = Color3.fromRGB(90, 90, 130)
+        end
+    end
+    refreshContBtn()
+    bindSafeClick(contBtn, function()
+        state.blackholeOn = not state.blackholeOn
+        if not state.blackholeOn then unfreezeAll() end
+        addLog("持续吸附: " .. (state.blackholeOn and "开启" or "关闭"))
+        closeBlackholeMenu()
+    end)
+    local unfreezeBtn = makeBtn(156, "🔓 解除冻结", Color3.fromRGB(90, 60, 60))
+    bindSafeClick(unfreezeBtn, function()
+        unfreezeAll()
+        state.blackholeOn = false
+        addLog("已解除所有冻结")
+        closeBlackholeMenu()
+    end)
+    local closeBtn = makeBtn(196, "❌ 关闭菜单", Color3.fromRGB(100, 80, 100))
+    bindSafeClick(closeBtn, function() closeBlackholeMenu() end)
+end
+
+-- 黑洞按钮
+local bhPressInput = nil
+local bhPressPos = nil
+local bhPressTime = 0
+local bhLongFired = false
+local BH_LONG_DELAY = 0.55
+
+blackholeBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    bhPressInput = input
+    bhPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    bhPressTime = tick()
+    bhLongFired = false
+end)
+
+task.spawn(function()
+    while blackholeBtn.Parent do
+        task.wait(0.05)
+        if bhPressInput and not bhLongFired and tick() - bhPressTime >= BH_LONG_DELAY then
+            bhLongFired = true
+            unfreezeAll()
+            state.blackholeOn = false
+            if addLog then addLog("长按: 已快速解除冻结") end
+            if blackholeMenu and blackholeMenu.Parent then closeBlackholeMenu() end
+        end
+    end
+end)
+
+blackholeBtn.InputEnded:Connect(function(input)
+    if input ~= bhPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = bhPressPos and (pos - bhPressPos).Magnitude or 999
+    local wasInside = isPointInGui(blackholeBtn, pos.X, pos.Y)
+    local wasLong = bhLongFired
+    bhPressInput = nil
+    bhPressPos = nil
+    if not wasLong and wasInside and d < 30 then
+        if blackholeMenu and blackholeMenu.Parent then
+            closeBlackholeMenu()
+        else
+            showBlackholeMenu()
+        end
+    end
+end)
+
+-- ==================== 日志系统 ====================
+local logWindow = nil
+local function updateLogBtn() logBtn.Text = "📋 日志 (" .. #state.logs .. ")" end
+
+addLog = function(text, keyword, target)
+    table.insert(state.logs, 1, {
+        text = text,
+        time = os.date("%H:%M:%S"),
+        keyword = keyword or nil,
+        target = target or nil,
+    })
+    if #state.logs > 100 then table.remove(state.logs) end
+    updateLogBtn()
+end
+
+local function openLogWindow()
+    if logWindow and logWindow.Parent then logWindow:Destroy() end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "LogWindow"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 110
+    sg.Parent = _guiParent
+    logWindow = sg
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0, 320, 0, 300)
+    bg.Position = UDim2.new(0.5, -160, 0.5, -150)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    bg.BackgroundTransparency = 0.06
+    bg.BorderSizePixel = 0
+    bg.Parent = sg
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -60, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "📋 日志列表"
+    title.TextColor3 = Color3.fromRGB(220, 230, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 15
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = bg
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 34, 0, 28)
+    closeBtn.Position = UDim2.new(1, -40, 0, 6)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+    closeBtn.Text = "✕"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16
+    closeBtn.Parent = bg
+    local ccb = Instance.new("UICorner"); ccb.CornerRadius = UDim.new(0, 4); ccb.Parent = closeBtn
+    bindSafeClick(closeBtn, function() sg:Destroy(); logWindow = nil end)
+    local list = Instance.new("ScrollingFrame")
+    list.Size = UDim2.new(1, -20, 1, -50)
+    list.Position = UDim2.new(0, 10, 0, 40)
+    list.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 5
+    list.CanvasSize = UDim2.new(0, 0, 0, 0)
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.Parent = bg
+    local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(0, 4); lc.Parent = list
+    local layout = Instance.new("UIListLayout"); layout.Padding = UDim.new(0, 4); layout.Parent = list
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 6); pad.PaddingLeft = UDim.new(0, 6)
+    pad.PaddingRight = UDim.new(0, 6); pad.PaddingBottom = UDim.new(0, 6)
+    pad.Parent = list
+    for _, log in ipairs(state.logs) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -4, 0, 52)
+        row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
+        row.BorderSizePixel = 0
+        row.Parent = list
+        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 4); rc.Parent = row
+        local timeLbl = Instance.new("TextLabel")
+        timeLbl.Size = UDim2.new(0, 55, 0, 18)
+        timeLbl.Position = UDim2.new(0, 6, 0, 4)
+        timeLbl.BackgroundTransparency = 1
+        timeLbl.Text = log.time
+        timeLbl.TextColor3 = Color3.fromRGB(150, 200, 255)
+        timeLbl.Font = Enum.Font.Code
+        timeLbl.TextSize = 10
+        timeLbl.TextXAlignment = Enum.TextXAlignment.Left
+        timeLbl.Parent = row
+        local textLbl = Instance.new("TextLabel")
+        textLbl.Size = UDim2.new(1, -70, 0, 18)
+        textLbl.Position = UDim2.new(0, 62, 0, 4)
+        textLbl.BackgroundTransparency = 1
+        textLbl.Text = log.text
+        textLbl.TextColor3 = Color3.fromRGB(220, 220, 240)
+        textLbl.Font = Enum.Font.Gotham
+        textLbl.TextSize = 10
+        textLbl.TextXAlignment = Enum.TextXAlignment.Left
+        textLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        textLbl.Parent = row
+        local noteText = ""
+        if log.keyword and state.keywordNotes[log.keyword]
+            and state.keywordNotes[log.keyword] ~= "" then
+            noteText = "备注[" .. log.keyword .. "]: " .. state.keywordNotes[log.keyword]
+        end
+        local noteLbl = Instance.new("TextLabel")
+        noteLbl.Size = UDim2.new(1, -12, 0, 14)
+        noteLbl.Position = UDim2.new(0, 6, 0, 24)
+        noteLbl.BackgroundTransparency = 1
+        noteLbl.Text = noteText
+        noteLbl.TextColor3 = Color3.fromRGB(200, 220, 150)
+        noteLbl.Font = Enum.Font.Gotham
+        noteLbl.TextSize = 9
+        noteLbl.TextXAlignment = Enum.TextXAlignment.Left
+        noteLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        noteLbl.Parent = row
+        if log.keyword then
+            local noteBtn = Instance.new("TextButton")
+            noteBtn.Size = UDim2.new(0, 42, 0, 18)
+            noteBtn.Position = UDim2.new(1, -94, 0, 30)
+            noteBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+            noteBtn.Text = "改备注"; noteBtn.TextColor3 = Color3.new(1, 1, 1)
+            noteBtn.Font = Enum.Font.GothamBold; noteBtn.TextSize = 10
+            noteBtn.Parent = row
+            local nc = Instance.new("UICorner"); nc.CornerRadius = UDim.new(0, 3); nc.Parent = noteBtn
+            bindSafeClick(noteBtn, function()
+                local curNote = state.keywordNotes[log.keyword] or ""
+                showInputDialog(
+                    "输入备注（应用于所有 [" .. log.keyword .. "] 目标）",
+                    curNote,
+                    function(val)
+                        state.keywordNotes[log.keyword] = sanitizeNote(val)
+                        sg:Destroy(); logWindow = nil
+                        openLogWindow()
+                    end)
+            end)
+        end
+        local delBtn = Instance.new("TextButton")
+        delBtn.Size = UDim2.new(0, 42, 0, 18)
+        delBtn.Position = UDim2.new(1, -48, 0, 30)
+        delBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        delBtn.Text = "删除"; delBtn.TextColor3 = Color3.new(1, 1, 1)
+        delBtn.Font = Enum.Font.GothamBold; delBtn.TextSize = 10
+        delBtn.Parent = row
+        local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 3); dc.Parent = delBtn
+        -- ★ 修复：删除时暂停扫描 200ms，避免扫描线程把刚删掉的目标又加回来
+        bindSafeClick(delBtn, function()
+            pauseScanTemporarily(0.2)
+            if log.target and drawGroups[log.target] then
+                destroyEntry(drawGroups[log.target])
+                drawGroups[log.target] = nil
+            end
+            for i, l in ipairs(state.logs) do
+                if l == log then table.remove(state.logs, i); break end
+            end
+            updateLogBtn()
+            sg:Destroy(); logWindow = nil
+            openLogWindow()
+        end)
+    end
+end
+
+local logPressInput = nil
+local logPressPos = nil
+local logPressTime = 0
+local logLongFired = false
+local LOG_LONG_DELAY = 0.55
+
+logBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    logPressInput = input
+    logPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    logPressTime = tick()
+    logLongFired = false
+end)
+
+task.spawn(function()
+    while logBtn.Parent do
+        task.wait(0.05)
+        if logPressInput and not logLongFired and tick() - logPressTime >= LOG_LONG_DELAY then
+            logLongFired = true
+            state.logs = {}
+            state.keywords = {}
+            state.keywordNotes = {}
+            state.keywordDrawEnabled = {}
+            state.protectedTargets = {}
+            for t, entry in pairs(drawGroups) do destroyEntry(entry) end
+            drawGroups = {}
+            scanQueue = nil
+            pendingRoots = {}
+            updateLogBtn()
+            updateProtectBtn()
+            addLog("日志已全部清空")
+            if logWindow and logWindow.Parent then logWindow:Destroy(); logWindow = nil end
+        end
+    end
+end)
+
+logBtn.InputEnded:Connect(function(input)
+    if input ~= logPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = logPressPos and (pos - logPressPos).Magnitude or 999
+    local wasInside = isPointInGui(logBtn, pos.X, pos.Y)
+    local wasLong = logLongFired
+    logPressInput = nil
+    logPressPos = nil
+    if not wasLong and wasInside and d < 30 then
+        if logWindow and logWindow.Parent then
+            logWindow:Destroy(); logWindow = nil
+        else
+            openLogWindow()
+        end
+    end
+end)
+
+-- ==================== 目标管理窗口 ====================
+local targetWindow = nil
+
+local function openTargetWindow()
+    if targetWindow and targetWindow.Parent then targetWindow:Destroy() end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "TargetWindow"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 115
+    sg.Parent = _guiParent
+    targetWindow = sg
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0, 340, 0, 340)
+    bg.Position = UDim2.new(0.5, -170, 0.5, -170)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    bg.BackgroundTransparency = 0.06
+    bg.BorderSizePixel = 0
+    bg.Parent = sg
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
+    local totalCount = 0
+    for _ in pairs(drawGroups) do totalCount = totalCount + 1 end
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -60, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "🎯 目标管理 (" .. totalCount .. ")"
+    title.TextColor3 = Color3.fromRGB(220, 230, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 15
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = bg
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 34, 0, 28)
+    closeBtn.Position = UDim2.new(1, -40, 0, 6)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+    closeBtn.Text = "✕"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16
+    closeBtn.Parent = bg
+    local ccb = Instance.new("UICorner"); ccb.CornerRadius = UDim.new(0, 4); ccb.Parent = closeBtn
+    bindSafeClick(closeBtn, function() sg:Destroy(); targetWindow = nil end)
+    local list = Instance.new("ScrollingFrame")
+    list.Size = UDim2.new(1, -20, 1, -50)
+    list.Position = UDim2.new(0, 10, 0, 40)
+    list.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 5
+    list.CanvasSize = UDim2.new(0, 0, 0, 0)
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.Parent = bg
+    local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(0, 4); lc.Parent = list
+    local layout = Instance.new("UIListLayout"); layout.Padding = UDim.new(0, 4); layout.Parent = list
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 6); pad.PaddingLeft = UDim.new(0, 6)
+    pad.PaddingRight = UDim.new(0, 6); pad.PaddingBottom = UDim.new(0, 6)
+    pad.Parent = list
+    local groupMap = {}
+    for kw, _ in pairs(state.keywords) do
+        groupMap[kw] = { count = 0, targets = {} }
+    end
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent then
+            local kw = entry.keyword or "?"
+            if not groupMap[kw] then groupMap[kw] = { count = 0, targets = {} } end
+            groupMap[kw].count = groupMap[kw].count + 1
+            table.insert(groupMap[kw].targets, target)
+        end
+    end
+    local kwList = {}
+    for kw, _ in pairs(groupMap) do table.insert(kwList, kw) end
+    table.sort(kwList)
+    if #kwList == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -12, 0, 40)
+        empty.BackgroundTransparency = 1
+        empty.Text = "（暂无目标）"
+        empty.TextColor3 = Color3.fromRGB(150, 150, 180)
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 13
+        empty.Parent = list
+    end
+    for _, kw in ipairs(kwList) do
+        local data = groupMap[kw]
+        local note = state.keywordNotes[kw] or ""
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -4, 0, 88)
+        row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
+        row.BorderSizePixel = 0
+        row.Parent = list
+        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 4); rc.Parent = row
+        local kwLbl = Instance.new("TextLabel")
+        kwLbl.Size = UDim2.new(1, -12, 0, 18)
+        kwLbl.Position = UDim2.new(0, 6, 0, 4)
+        kwLbl.BackgroundTransparency = 1
+        kwLbl.Text = kw .. "   ×" .. data.count
+        kwLbl.TextColor3 = Color3.fromRGB(220, 230, 255)
+        kwLbl.Font = Enum.Font.GothamBold
+        kwLbl.TextSize = 12
+        kwLbl.TextXAlignment = Enum.TextXAlignment.Left
+        kwLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        kwLbl.Parent = row
+        local noteLbl = Instance.new("TextLabel")
+        noteLbl.Size = UDim2.new(1, -12, 0, 14)
+        noteLbl.Position = UDim2.new(0, 6, 0, 24)
+        noteLbl.BackgroundTransparency = 1
+        noteLbl.Text = (note ~= "" and ("备注: " .. note) or "（无备注）")
+        noteLbl.TextColor3 = Color3.fromRGB(200, 220, 150)
+        noteLbl.Font = Enum.Font.Gotham
+        noteLbl.TextSize = 10
+        noteLbl.TextXAlignment = Enum.TextXAlignment.Left
+        noteLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        noteLbl.Parent = row
+        local drawToggleRowBtn = Instance.new("TextButton")
+        drawToggleRowBtn.Size = UDim2.new(1, -12, 0, 20)
+        drawToggleRowBtn.Position = UDim2.new(0, 6, 0, 42)
+        drawToggleRowBtn.TextColor3 = Color3.new(1, 1, 1)
+        drawToggleRowBtn.Font = Enum.Font.GothamBold
+        drawToggleRowBtn.TextSize = 11
+        drawToggleRowBtn.AutoButtonColor = false
+        drawToggleRowBtn.Parent = row
+        local dtrc = Instance.new("UICorner"); dtrc.CornerRadius = UDim.new(0, 3); dtrc.Parent = drawToggleRowBtn
+        local function refreshDrawToggleRowBtn()
+            local en = isKeywordDrawEnabled(kw)
+            if en then
+                drawToggleRowBtn.Text = "👁 绘制: 开启（点击关闭）"
+                drawToggleRowBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
+            else
+                drawToggleRowBtn.Text = "🚫 绘制: 关闭（点击开启）"
+                drawToggleRowBtn.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
+            end
+        end
+        refreshDrawToggleRowBtn()
+        bindSafeClick(drawToggleRowBtn, function()
+            local cur = isKeywordDrawEnabled(kw)
+            state.keywordDrawEnabled[kw] = not cur
+            addLog("[" .. kw .. "] 绘制: " .. (not cur and "开启" or "关闭"))
+            refreshDrawToggleRowBtn()
+        end)
+        local btnY, btnH, bw, gap, padLeft = 66, 20, 96, 6, 6
+        local noteBtn = Instance.new("TextButton")
+        noteBtn.Size = UDim2.new(0, bw, 0, btnH)
+        noteBtn.Position = UDim2.new(0, padLeft, 0, btnY)
+        noteBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+        noteBtn.Text = "改备注"; noteBtn.TextColor3 = Color3.new(1, 1, 1)
+        noteBtn.Font = Enum.Font.GothamBold; noteBtn.TextSize = 10
+        noteBtn.Parent = row
+        local nc = Instance.new("UICorner"); nc.CornerRadius = UDim.new(0, 3); nc.Parent = noteBtn
+        bindSafeClick(noteBtn, function()
+            showInputDialog(
+                "输入备注（应用于所有 [" .. kw .. "] 目标）",
+                note,
+                function(val)
+                    state.keywordNotes[kw] = sanitizeNote(val)
+                    sg:Destroy(); targetWindow = nil
+                    openTargetWindow()
+                end)
+        end)
+        local locBtn = Instance.new("TextButton")
+        locBtn.Size = UDim2.new(0, bw, 0, btnH)
+        locBtn.Position = UDim2.new(0, padLeft + bw + gap, 0, btnY)
+        locBtn.BackgroundColor3 = Color3.fromRGB(90, 130, 90)
+        locBtn.Text = "复制关键词"; locBtn.TextColor3 = Color3.new(1, 1, 1)
+        locBtn.Font = Enum.Font.GothamBold; locBtn.TextSize = 10
+        locBtn.Parent = row
+        local lc2 = Instance.new("UICorner"); lc2.CornerRadius = UDim.new(0, 3); lc2.Parent = locBtn
+        bindSafeClick(locBtn, function()
+            if setclipboard then pcall(setclipboard, kw) end
+        end)
+        local delAllBtn = Instance.new("TextButton")
+        delAllBtn.Size = UDim2.new(0, bw, 0, btnH)
+        delAllBtn.Position = UDim2.new(0, padLeft + (bw + gap) * 2, 0, btnY)
+        delAllBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        delAllBtn.Text = "全部删除"; delAllBtn.TextColor3 = Color3.new(1, 1, 1)
+        delAllBtn.Font = Enum.Font.GothamBold; delAllBtn.TextSize = 10
+        delAllBtn.Parent = row
+        local dc2b = Instance.new("UICorner"); dc2b.CornerRadius = UDim.new(0, 3); dc2b.Parent = delAllBtn
+        -- ★ 修复：删除时暂停扫描 200ms
+        bindSafeClick(delAllBtn, function()
+            pauseScanTemporarily(0.2)
+            for _, t in ipairs(data.targets) do
+                if drawGroups[t] then
+                    destroyEntry(drawGroups[t])
+                    drawGroups[t] = nil
+                end
+            end
+            sg:Destroy(); targetWindow = nil
+            openTargetWindow()
+        end)
+    end
+end
+
+-- ★ 目标管理按钮短按只负责打开/关闭窗口
+bindSafeClick(targetBtn, function()
+    if targetWindow and targetWindow.Parent then
+        targetWindow:Destroy(); targetWindow = nil
+    else
+        openTargetWindow()
+    end
+end)
+
+-- ==================== 保护列表窗口 ====================
+local protectWindow = nil
+
+local function openProtectWindow()
+    if protectWindow and protectWindow.Parent then protectWindow:Destroy() end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "ProtectWindow"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
+    sg.DisplayOrder = 120
+    sg.Parent = _guiParent
+    protectWindow = sg
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0, 340, 0, 340)
+    bg.Position = UDim2.new(0.5, -170, 0.5, -170)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    bg.BackgroundTransparency = 0.06
+    bg.BorderSizePixel = 0
+    bg.Parent = sg
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
+    local validList = {}
+    for target, data in pairs(state.protectedTargets) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent then
+            table.insert(validList, { target = target, data = data })
+        else
+            state.protectedTargets[target] = nil
+        end
+    end
+    table.sort(validList, function(a, b) return (a.target.Name or "") < (b.target.Name or "") end)
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -60, 0, 28)
+    title.Position = UDim2.new(0, 12, 0, 6)
+    title.BackgroundTransparency = 1
+    title.Text = "🛡 保护列表 (" .. #validList .. ")"
+    title.TextColor3 = Color3.fromRGB(220, 230, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 15
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = bg
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 34, 0, 28)
+    closeBtn.Position = UDim2.new(1, -40, 0, 6)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+    closeBtn.Text = "✕"; closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16
+    closeBtn.Parent = bg
+    local ccb = Instance.new("UICorner"); ccb.CornerRadius = UDim.new(0, 4); ccb.Parent = closeBtn
+    bindSafeClick(closeBtn, function() sg:Destroy(); protectWindow = nil end)
+    local list = Instance.new("ScrollingFrame")
+    list.Size = UDim2.new(1, -20, 1, -90)
+    list.Position = UDim2.new(0, 10, 0, 40)
+    list.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 5
+    list.CanvasSize = UDim2.new(0, 0, 0, 0)
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.Parent = bg
+    local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(0, 4); lc.Parent = list
+    local layout = Instance.new("UIListLayout"); layout.Padding = UDim.new(0, 4); layout.Parent = list
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 6); pad.PaddingLeft = UDim.new(0, 6)
+    pad.PaddingRight = UDim.new(0, 6); pad.PaddingBottom = UDim.new(0, 6)
+    pad.Parent = list
+    if #validList == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -12, 0, 40)
+        empty.BackgroundTransparency = 1
+        empty.Text = "（暂无保护对象）"
+        empty.TextColor3 = Color3.fromRGB(150, 150, 180)
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 13
+        empty.Parent = list
+    end
+    for _, item in ipairs(validList) do
+        local target = item.target
+        local data = item.data
+        local note = data.note or ""
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -4, 0, 58)
+        row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
+        row.BorderSizePixel = 0
+        row.Parent = list
+        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 4); rc.Parent = row
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size = UDim2.new(1, -12, 0, 18)
+        nameLbl.Position = UDim2.new(0, 6, 0, 4)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text = target.Name
+        nameLbl.TextColor3 = Color3.fromRGB(255, 220, 180)
+        nameLbl.Font = Enum.Font.GothamBold
+        nameLbl.TextSize = 12
+        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        nameLbl.Parent = row
+        local noteLbl = Instance.new("TextLabel")
+        noteLbl.Size = UDim2.new(1, -12, 0, 14)
+        noteLbl.Position = UDim2.new(0, 6, 0, 24)
+        noteLbl.BackgroundTransparency = 1
+        noteLbl.Text = (note ~= "" and ("备注: " .. note) or "（无备注）")
+        noteLbl.TextColor3 = Color3.fromRGB(200, 220, 150)
+        noteLbl.Font = Enum.Font.Gotham
+        noteLbl.TextSize = 10
+        noteLbl.TextXAlignment = Enum.TextXAlignment.Left
+        noteLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        noteLbl.Parent = row
+        local btnY, btnH, bw, gap, padLeft = 42, 14, 100, 6, 6
+        local noteBtn = Instance.new("TextButton")
+        noteBtn.Size = UDim2.new(0, bw, 0, btnH)
+        noteBtn.Position = UDim2.new(0, padLeft, 0, btnY)
+        noteBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+        noteBtn.Text = "改备注"; noteBtn.TextColor3 = Color3.new(1, 1, 1)
+        noteBtn.Font = Enum.Font.GothamBold; noteBtn.TextSize = 9
+        noteBtn.Parent = row
+        local nc = Instance.new("UICorner"); nc.CornerRadius = UDim.new(0, 3); nc.Parent = noteBtn
+        bindSafeClick(noteBtn, function()
+            showInputDialog(
+                "输入备注 [" .. target.Name .. "]",
+                note,
+                function(val)
+                    if state.protectedTargets[target] then
+                        state.protectedTargets[target].note = sanitizeNote(val)
+                    end
+                    sg:Destroy(); protectWindow = nil
+                    openProtectWindow()
+                end)
+        end)
+        local delBtn = Instance.new("TextButton")
+        delBtn.Size = UDim2.new(0, bw, 0, btnH)
+        delBtn.Position = UDim2.new(0, padLeft + bw + gap, 0, btnY)
+        delBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        delBtn.Text = "取消保护"; delBtn.TextColor3 = Color3.new(1, 1, 1)
+        delBtn.Font = Enum.Font.GothamBold; delBtn.TextSize = 9
+        delBtn.Parent = row
+        local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 3); dc.Parent = delBtn
+        bindSafeClick(delBtn, function()
+            state.protectedTargets[target] = nil
+            addLog("已取消保护: " .. target.Name)
+            updateProtectBtn()
+            sg:Destroy(); protectWindow = nil
+            openProtectWindow()
+        end)
+    end
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Size = UDim2.new(1, -20, 0, 34)
+    clearBtn.Position = UDim2.new(0, 10, 1, -42)
+    clearBtn.BackgroundColor3 = Color3.fromRGB(150, 60, 60)
+    clearBtn.Text = "🗑 清空所有保护"
+    clearBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearBtn.Font = Enum.Font.GothamBold; clearBtn.TextSize = 13
+    clearBtn.Parent = bg
+    local cb = Instance.new("UICorner"); cb.CornerRadius = UDim.new(0, 5); cb.Parent = clearBtn
+    bindSafeClick(clearBtn, function()
+        state.protectedTargets = {}
+        updateProtectBtn()
+        addLog("已清空所有单目标保护")
+        sg:Destroy(); protectWindow = nil
+        openProtectWindow()
+    end)
+end
+
+-- 保护列表：短按窗口，长按对当前准星部件进行保护/取消保护
+local plPressInput = nil
+local plPressPos = nil
+local plPressTime = 0
+local plLongFired = false
+local PL_LONG_DELAY = 0.55
+
+protectListBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    plPressInput = input
+    plPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    plPressTime = tick()
+    plLongFired = false
+end)
+
+task.spawn(function()
+    while protectListBtn.Parent do
+        task.wait(0.05)
+        if plPressInput and not plLongFired and tick() - plPressTime >= PL_LONG_DELAY then
+            plLongFired = true
+            local t = getTargetInCenter(true)
+            if t then
+                if state.protectedTargets[t] then
+                    unprotectTarget(t)
+                else
+                    protectTarget(t)
+                end
+            else
+                addLog("未对准目标")
+            end
+        end
+    end
+end)
+
+protectListBtn.InputEnded:Connect(function(input)
+    if input ~= plPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = plPressPos and (pos - plPressPos).Magnitude or 999
+    local wasInside = isPointInGui(protectListBtn, pos.X, pos.Y)
+    local wasLong = plLongFired
+    plPressInput = nil
+    plPressPos = nil
+    if wasLong then return end
+    if not wasInside or d >= 30 then return end
+    if protectWindow and protectWindow.Parent then
+        protectWindow:Destroy(); protectWindow = nil
+    else
+        openProtectWindow()
+    end
+end)
+
+-- ==================== 射线检测 ====================
+local function isVisibleForRaycast(part)
+    if not part or not part:IsA("BasePart") then return false end
+    if part:IsA("Terrain") then return false end
+    if part.Transparency >= 0.95 then return false end
+    if part.LocalTransparencyModifier >= 0.95 then return false end
+    local n = string.lower(part.Name)
+    if string.find(n, "hitbox", 1, true) then return false end
+    if string.find(n, "trigger", 1, true) then return false end
+    if string.find(n, "zone", 1, true) then return false end
+    if string.find(n, "invisible", 1, true) then return false end
+    if string.find(n, "collision", 1, true) then return false end
+    return true
+end
+
+local function resolveHitPart(part, hitPos)
+    if not part or not part:IsA("BasePart") then return nil end
+    if part:IsA("Terrain") then return nil end
+    if isVisibleForRaycast(part) then return part end
+    local cur = part
+    local depth = 0
+    while cur and cur ~= workspace and depth < 5 do
+        if cur:IsA("Model") then
+            local bestPart = nil
+            local bestDist = math.huge
+            local count = 0
+            local ok, descendants = pcall(function() return cur:GetDescendants() end)
+            if ok and descendants then
+                for _, d in ipairs(descendants) do
+                    count = count + 1
+                    if count > 200 then break end
+                    if d:IsA("BasePart") and not d:IsA("Terrain") and isVisibleForRaycast(d) then
+                        local dist = (d.Position - hitPos).Magnitude
+                        if dist < bestDist then
+                            bestDist = dist
+                            bestPart = d
+                        end
+                    end
+                end
+            end
+            if bestPart then return bestPart end
+        end
+        cur = cur.Parent
+        depth = depth + 1
+    end
+    return nil
+end
+
+local function getTargetInCenter(includeProtected)
+    local vp = camera.ViewportSize
+    local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local filterList = {}
+    if player.Character then table.insert(filterList, player.Character) end
+    if not includeProtected then
+        for t in pairs(state.protectedTargets) do
+            if t then table.insert(filterList, t) end
+        end
+    end
+    for target, entry in pairs(drawGroups) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent and not isKeywordDrawEnabled(entry.keyword) then
+            table.insert(filterList, target)
+        end
+    end
+    params.FilterDescendantsInstances = filterList
+    params.IgnoreWater = true
+    local origin = ray.Origin
+    local direction = ray.Direction.Unit
+    local remainingDist = 1000
+    local attempts = 0
+    while attempts < 15 and remainingDist > 0.5 do
+        attempts = attempts + 1
+        local r = workspace:Raycast(origin, direction * remainingDist, params)
+        if not r then break end
+        local part = r.Instance
+        if part and part:IsA("BasePart") then
+            local resolved = resolveHitPart(part, r.Position)
+            if resolved then return resolved end
+        end
+        local dist = (r.Position - origin).Magnitude
+        if dist <= 0 then break end
+        origin = r.Position + direction * 0.1
+        remainingDist = remainingDist - dist - 0.1
+    end
+    return nil
+end
+
+local function findModelRoot(part)
+    if not part then return nil end
+    if part:IsA("Model") then return part end
+    local cur = part
+    while cur and cur ~= workspace do
+        if cur:IsA("Model") then return cur end
+        cur = cur.Parent
+    end
+    return part
+end
+
+-- ==================== 坐标工具 ====================
+local function isVisiblePart(part)
+    if not part:IsA("BasePart") then return false end
+    if part.Transparency >= 0.95 then return false end
+    if part.LocalTransparencyModifier >= 0.95 then return false end
+    local n = string.lower(part.Name)
+    if string.find(n, "hitbox", 1, true) then return false end
+    if string.find(n, "trigger", 1, true) then return false end
+    if string.find(n, "zone", 1, true) then return false end
+    if string.find(n, "invisible", 1, true) then return false end
+    return true
+end
+
+local function getModelCenter(target)
+    if target:IsA("BasePart") then return target.Position end
+    if target:IsA("Model") then
+        local hrp = target:FindFirstChild("HumanoidRootPart")
+        if hrp and hrp:IsA("BasePart") then return hrp.Position end
+        local sum = Vector3.new(0, 0, 0)
+        local n = 0
+        local ok, descendants = pcall(function() return target:GetDescendants() end)
+        if ok and descendants then
+            for _, d in ipairs(descendants) do
+                if d:IsA("BasePart") and isVisiblePart(d) then
+                    sum = sum + d.Position; n = n + 1
+                end
+            end
+        end
+        if n > 0 then return sum / n end
+        local ok2, cf = pcall(function() return target:GetBoundingBox() end)
+        if ok2 and cf then return cf.Position end
+    end
+    return nil
+end
+
+local function getBBox2D(target)
+    local parts = {}
+    if target:IsA("BasePart") then
+        parts = { target }
+    elseif target:IsA("Model") then
+        local ok, descendants = pcall(function() return target:GetDescendants() end)
+        if ok and descendants then
+            for _, d in ipairs(descendants) do
+                if d:IsA("BasePart") and isVisiblePart(d) then
+                    table.insert(parts, d)
+                end
+            end
+        end
+    end
+    if #parts == 0 then return nil end
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local any = false
+    for _, part in ipairs(parts) do
+        local cf, sz = part.CFrame, part.Size
+        local hx, hy, hz = sz.X / 2, sz.Y / 2, sz.Z / 2
+        local corners = {
+            cf * Vector3.new(-hx, -hy, -hz), cf * Vector3.new(hx, -hy, -hz),
+            cf * Vector3.new(-hx, hy, -hz), cf * Vector3.new(hx, hy, -hz),
+            cf * Vector3.new(-hx, -hy, hz), cf * Vector3.new(hx, -hy, hz),
+            cf * Vector3.new(-hx, hy, hz), cf * Vector3.new(hx, hy, hz),
+        }
+        for _, v in ipairs(corners) do
+            local sp, on = camera:WorldToScreenPoint(v)
+            if on and sp.Z > 0 then
+                any = true
+                local safeX = math.clamp(sp.X, -10000, 10000)
+                local safeY = math.clamp(sp.Y, -10000, 10000)
+                if safeX < minX then minX = safeX end
+                if safeX > maxX then maxX = safeX end
+                if safeY < minY then minY = safeY end
+                if safeY > maxY then maxY = safeY end
+            end
+        end
+    end
+    if not any then return nil end
+    return minX, minY, maxX, maxY
+end
+
+-- ==================== 关键词匹配工具 ====================
+local function buildKws()
+    local kws, hasAny = {}, false
+    for kw, _ in pairs(state.keywords) do
+        kws[kw] = true
+        hasAny = true
+    end
+    return hasAny and kws or nil
+end
+
+-- ★ 收紧匹配：只保留正向（物体名包含关键词），去掉危险的反向匹配
+local function matchKeywordByName(name, kws)
+    if not name then return nil end
+    local extracted = extractKeyword(name)
+    if extracted == "" then return nil end
+    if kws[extracted] then return extracted end
+    if isGenericKeyword(extracted) then return nil end
+    if #extracted < 4 then return nil end
+    -- ★ 只做正向匹配：物体名包含关键词
+    for kw, _ in pairs(kws) do
+        if not isGenericKeyword(kw) and #kw >= 4 then
+            if string.find(extracted, kw, 1, true) then return kw end
+        end
+    end
+    return nil
+end
+
+-- ★ 收紧 matchRoot：只检查 root 名字和 inst 的祖先链，不再遍历后代
+--   findBestKeyword（用户主动添加）依然保留后代遍历，不影响用户主动添加能力
+local function matchRoot(root, inst, kws)
+    local cur = inst
+    local depth = 0
+    while cur and cur ~= workspace and depth < 6 do
+        local m = matchKeywordByName(cur.Name, kws)
+        if m then return m end
+        cur = cur.Parent
+        depth = depth + 1
+    end
+    return nil
+end
+
+-- ==================== 近距离同步扫描 ====================
+local function quickNearbyScan()
+    if state.scanPaused then return 0 end
+    local kws = buildKws()
+    if not kws then return 0 end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local origin = hrp and hrp.Position or camera.CFrame.Position
+
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    if char then params.FilterDescendantsInstances = { char } end
+    params.MaxParts = NEARBY_MAX_PARTS
+
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(origin, NEARBY_RADIUS, params)
+    end)
+    if not ok or not parts then return 0 end
+
+    local added = 0
+    local seenRoot = {}
+    for _, inst in ipairs(parts) do
+        if inst:IsA("BasePart") and not inst:IsA("Terrain") then
+            local root = findModelRoot(inst)
+            if root and not seenRoot[root] and not drawGroups[root] and not isProtectedTree(root) then
+                seenRoot[root] = true
+                local matchedKw = matchRoot(root, inst, kws)
+                if matchedKw then
+                    drawGroups[root] = {
+                        g = createGroup(),
+                        label = createNameLabel(),
+                        name = root.Name,
+                        keyword = matchedKw,
+                    }
+                    added = added + 1
+                end
+            end
+        end
+    end
+    return added
+end
+
+-- ==================== 单目标尝试添加（事件驱动用） ====================
+local function tryAddRoot(root)
+    if state.scanPaused then return false end
+    if not root then return false end
+    local ok, parent = pcall(function() return root.Parent end)
+    if not ok or not parent then return false end
+    if drawGroups[root] then return false end
+    if isProtectedTree(root) then return false end
+
+    local kws = buildKws()
+    if not kws then return false end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local origin = hrp and hrp.Position or camera.CFrame.Position
+    local center
+    if root:IsA("Model") then
+        local ok2, box = pcall(function() return root:GetBoundingBox() end)
+        if ok2 and box then center = box.Position end
+    elseif root:IsA("BasePart") then
+        center = root.Position
+    end
+    if center and (center - origin).Magnitude > MAX_DRAW_DISTANCE then return false end
+
+    local inst = root:IsA("BasePart") and root or root:FindFirstChildWhichIsA("BasePart")
+    if not inst then
+        local ok3, descendants = pcall(function() return root:GetDescendants() end)
+        if ok3 and descendants then
+            for _, d in ipairs(descendants) do
+                if d:IsA("BasePart") then inst = d; break end
+            end
+        end
+    end
+    if not inst then return false end
+
+    for _, pl in ipairs(Players:GetPlayers()) do
+        local ok4, isDesc = pcall(function()
+            return pl.Character and (pl.Character == root
+                or root:IsDescendantOf(pl.Character)
+                or pl.Character:IsDescendantOf(root))
+        end)
+        if ok4 and isDesc then return false end
+    end
+
+    local matchedKw = matchRoot(root, inst, kws)
+    if not matchedKw then return false end
+
+    drawGroups[root] = {
+        g = createGroup(),
+        label = createNameLabel(),
+        name = root.Name,
+        keyword = matchedKw,
+    }
+    return true
+end
+
+-- ==================== 分帧兜底扫描 ====================
+local function startScanByKeywords()
+    if state.scanPaused then return end
+    local kws = buildKws()
+    if not kws then return end
+
+    if scanQueue then scanQueue = nil end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local origin = hrp and hrp.Position or camera.CFrame.Position
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    if char then params.FilterDescendantsInstances = { char } end
+    params.MaxParts = 20000
+
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(origin, state.scanRadius, params)
+    end)
+    if not ok or not parts then return end
+
+    scanQueue = {
+        parts = parts,
+        index = 1,
+        added = 0,
+        seenRoot = {},
+        kws = kws,
+    }
+end
+
+local function processScanQueue()
+    if state.scanPaused then return end
+    if not scanQueue then return end
+    local parts = scanQueue.parts
+    local kws = scanQueue.kws
+    if not kws or not parts then scanQueue = nil; return end
+
+    local stopIdx = math.min(scanQueue.index + SCAN_PARTS_PER_FRAME - 1, #parts)
+
+    local playerChars = {}
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl.Character then playerChars[pl.Character] = true end
+    end
+
+    for i = scanQueue.index, stopIdx do
+        local inst = parts[i]
+        if inst and inst.Parent and inst:IsA("BasePart") and not inst:IsA("Terrain") then
+            local root = findModelRoot(inst)
+            if root and not scanQueue.seenRoot[root] and not drawGroups[root] and not isProtectedTree(root) then
+                if not playerChars[root] then
+                    local matchedKw = matchRoot(root, inst, kws)
+                    if matchedKw then
+                        scanQueue.seenRoot[root] = true
+                        drawGroups[root] = {
+                            g = createGroup(),
+                            label = createNameLabel(),
+                            name = root.Name,
+                            keyword = matchedKw,
+                        }
+                        scanQueue.added = scanQueue.added + 1
+                    end
+                end
+            end
+        end
+    end
+
+    scanQueue.index = stopIdx + 1
+    if scanQueue.index > #parts then
+        local added = scanQueue.added or 0
+        scanQueue = nil
+        if added >= 2 then
+            addLog("扫描补充 " .. added .. " 个目标")
+        end
+    end
+end
+
+-- ==================== 事件驱动 ====================
+local function onNewInstance(inst)
+    if not inst:IsA("BasePart") then return end
+    if inst:IsA("Terrain") then return end
+    local root = findModelRoot(inst)
+    if root then pendingRoots[root] = true end
+end
+
+addConn(workspace.DescendantAdded:Connect(onNewInstance))
+addConn(workspace.ChildAdded:Connect(onNewInstance))
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if not state.scanPaused and next(pendingRoots) then
+            local batch = pendingRoots
+            pendingRoots = {}
+            local count = 0
+            for root in pairs(batch) do
+                if tryAddRoot(root) then count = count + 1 end
+            end
+            if count > 0 then addLog("事件捕获 " .. count .. " 个目标") end
+        end
+    end
+end)
+
+-- 兜底扫描线程
+task.spawn(function()
+    while true do
+        task.wait(FALLBACK_SCAN_INTERVAL)
+        if not state.scanPaused and not scanQueue then startScanByKeywords() end
+    end
+end)
+
+-- ==================== 添加目标 ====================
+local function addTarget(target, autoScan)
+    if not target then return false end
+    local root = findModelRoot(target)
+    if not root then return false end
+    if isProtectedTree(root) then addLog("该目标已被保护"); return false end
+    if drawGroups[root] then addLog("已存在: " .. root.Name); return false end
+
+    local keyword = findBestKeyword(root)
+    if not keyword then
+        addLog("该目标名为通用词无法自动提取关键词: " .. root.Name)
+        return false
+    end
+
+    state.keywords[keyword] = true
+    drawGroups[root] = {
+        g = createGroup(),
+        label = createNameLabel(),
+        name = root.Name,
+        keyword = keyword,
+    }
+    addLog("添加: " .. root.Name .. " [关键词: " .. keyword .. "]", keyword, root)
+
+    if autoScan == true then
+        local nearbyAdded = quickNearbyScan()
+        if nearbyAdded > 0 then
+            addLog("近距离扫描补充 " .. nearbyAdded .. " 个目标")
+        end
+        startScanByKeywords()
+    end
+    return true
+end
+
+local function protectTarget(target)
+    if not target then return false end
+    if state.protectedTargets[target] then
+        addLog("已在保护列表: " .. target.Name)
+        return false
+    end
+    state.protectedTargets[target] = { note = "" }
+
+    local check = target
+    while check and check ~= workspace do
+        if drawGroups[check] then
+            destroyEntry(drawGroups[check])
+            drawGroups[check] = nil
+            break
+        end
+        check = check.Parent
+    end
+
+    updateProtectBtn()
+    addLog("已加入单目标保护: " .. target.Name)
+    return true
+end
+
+local function unprotectTarget(target)
+    if not target then return false end
+    if not state.protectedTargets[target] then
+        addLog("不在保护列表: " .. target.Name)
+        return false
+    end
+    state.protectedTargets[target] = nil
+    updateProtectBtn()
+    addLog("已取消保护: " .. target.Name)
+    addTarget(target, false)
+    return true
+end
+
+-- ==================== 准星 ====================
+local crossH, crossV
+
+local function setCrosshair(on)
+    state.crosshairOn = on
+    if on then
+        if not crossH then
+            crossH = Drawing.new("Line")
+            crossH.Color = Color3.fromRGB(255, 80, 80)
+            crossH.Thickness = 2
+            crossH.Transparency = 1
+            crossH.Visible = false
+        end
+        if not crossV then
+            crossV = Drawing.new("Line")
+            crossV.Color = Color3.fromRGB(255, 80, 80)
+            crossV.Thickness = 2
+            crossV.Transparency = 1
+            crossV.Visible = false
+        end
+    end
+    crosshairBtn.Text = "准星: " .. (on and "开启" or "关闭")
+    crosshairBtn.BackgroundColor3 = on
+        and Color3.fromRGB(70, 180, 90)
+        or Color3.fromRGB(70, 130, 180)
+end
+
+local chPressInput = nil
+local chPressPos = nil
+local chPressTime = 0
+local chLongFired = false
+local CH_LONG_DELAY = 0.55
+
+crosshairBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    chPressInput = input
+    chPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    chPressTime = tick()
+    chLongFired = false
+end)
+
+task.spawn(function()
+    while crosshairBtn.Parent do
+        task.wait(0.05)
+        if chPressInput and not chLongFired and tick() - chPressTime >= CH_LONG_DELAY then
+            chLongFired = true
+            local t = getTargetInCenter(true)
+            if t then
+                if state.protectedTargets[t] then
+                    unprotectTarget(t)
+                else
+                    protectTarget(t)
+                end
+            else
+                addLog("未对准目标")
+            end
+        end
+    end
+end)
+
+crosshairBtn.InputEnded:Connect(function(input)
+    if input ~= chPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = chPressPos and (pos - chPressPos).Magnitude or 999
+    local wasInside = isPointInGui(crosshairBtn, pos.X, pos.Y)
+    local wasLong = chLongFired
+    chPressInput = nil
+    chPressPos = nil
+    if wasLong then return end
+    if not wasInside or d >= 30 then return end
+    setCrosshair(not state.crosshairOn)
+end)
+
+-- 添加目标按钮
+local addPressInput = nil
+local addPressPos = nil
+local addPressTime = 0
+local addLongFired = false
+local ADD_LONG_DELAY = 0.55
+
+addTargetBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    addPressInput = input
+    addPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    addPressTime = tick()
+    addLongFired = false
+end)
+
+task.spawn(function()
+    while addTargetBtn.Parent do
+        task.wait(0.05)
+        if addPressInput and not addLongFired and tick() - addPressTime >= ADD_LONG_DELAY then
+            addLongFired = true
+            local t = getTargetInCenter()
+            if t then
+                addTarget(t, false)
+                addLog("单目标添加: " .. (t.Name or "?"))
+            else
+                addLog("未对准目标")
+            end
+        end
+    end
+end)
+
+addTargetBtn.InputEnded:Connect(function(input)
+    if input ~= addPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = addPressPos and (pos - addPressPos).Magnitude or 999
+    local wasInside = isPointInGui(addTargetBtn, pos.X, pos.Y)
+    local wasLong = addLongFired
+    addPressInput = nil
+    addPressPos = nil
+    if wasLong then return end
+    if not wasInside or d >= 30 then return end
+    local t = getTargetInCenter()
+    if t then addTarget(t, true) else addLog("未对准目标") end
+end)
+
+-- 绘制开关
+local function setDrawing(on)
+    state.drawOn = on
+    drawToggleBtn.Text = "绘制: " .. (on and "开启" or "关闭")
+    drawToggleBtn.BackgroundColor3 = on
+        and Color3.fromRGB(70, 180, 90)
+        or Color3.fromRGB(180, 100, 60)
+    if not on then
+        if topCountText then topCountText.Visible = false end
+        for _, entry in pairs(drawGroups) do
+            for _, obj in pairs(entry.g) do obj.Visible = false end
+            if entry.label then entry.label.Visible = false end
+        end
+    else
+        ensureDrawObjects()
+    end
+end
+
+local dtPressInput = nil
+local dtPressPos = nil
+local dtPressTime = 0
+local dtLongFired = false
+local DT_LONG_DELAY = 0.55
+
+drawToggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch
+        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if input.UserInputState ~= Enum.UserInputState.Begin then return end
+    dtPressInput = input
+    dtPressPos = Vector2.new(input.Position.X, input.Position.Y)
+    dtPressTime = tick()
+    dtLongFired = false
+end)
+
+task.spawn(function()
+    while drawToggleBtn.Parent do
+        task.wait(0.05)
+        if dtPressInput and not dtLongFired and tick() - dtPressTime >= DT_LONG_DELAY then
+            dtLongFired = true
+            state.showDistance = not state.showDistance
+            addLog("距离显示: " .. (state.showDistance and "开启" or "关闭"))
+        end
+    end
+end)
+
+drawToggleBtn.InputEnded:Connect(function(input)
+    if input ~= dtPressInput then return end
+    local pos = Vector2.new(input.Position.X, input.Position.Y)
+    local d = dtPressPos and (pos - dtPressPos).Magnitude or 999
+    local wasInside = isPointInGui(drawToggleBtn, pos.X, pos.Y)
+    local wasLong = dtLongFired
+    dtPressInput = nil
+    dtPressPos = nil
+    if wasLong then return end
+    if not wasInside or d >= 30 then return end
+    setDrawing(not state.drawOn)
+end)
+
+-- ==================== 主渲染循环 ====================
+local lastBHFrame = 0
+addConn(RunService.RenderStepped:Connect(function()
+    local insetOk, inset = pcall(function() return GuiService:GetGuiInset() end)
+    local insetY = (insetOk and inset) and inset.Y or 0
+
+    cleanInvalidProtected()
+    processScanQueue()
+
+    if state.blackholeOn and next(drawGroups) then
+        local now = tick()
+        if now - lastBHFrame >= 1/30 then
+            lastBHFrame = now
+            blackholeSnapContinuous()
+        end
+    end
+
+    if state.crosshairOn and crossH and crossV then
+        local vp = camera.ViewportSize
+        local cx, cy = vp.X / 2, vp.Y / 2
+        crossH.Visible = true; crossV.Visible = true
+        crossH.From = Vector2.new(cx - 10, cy); crossH.To = Vector2.new(cx + 10, cy)
+        crossV.From = Vector2.new(cx, cy - 10); crossV.To = Vector2.new(cx, cy + 10)
+    elseif crossH then
+        crossH.Visible = false; crossV.Visible = false
+    end
+
+    if state.drawOn then
+        ensureDrawObjects()
+        local vp = camera.ViewportSize
+        local cx = vp.X / 2
+        local countTopY = 0 + insetY
+        local camPos = camera.CFrame.Position
+
+        local visible = {}
+        local totalValid = 0
+        local posSeen = {}
+        local toRemove = {}
+
+        for target, entry in pairs(drawGroups) do
+            local ok, parent = pcall(function() return target.Parent end)
+            local isValid = ok and parent and target:IsDescendantOf(workspace)
+
+            if not isValid then
+                table.insert(toRemove, target)
+            else
+                local skipByAncestor = false
+                local anc = target.Parent
+                local ancDepth = 0
+                while anc and anc ~= workspace and ancDepth < 10 do
+                    if drawGroups[anc] then skipByAncestor = true; break end
+                    anc = anc.Parent
+                    ancDepth = ancDepth + 1
+                end
+
+                local skip = skipByAncestor
+                    or (not isKeywordDrawEnabled(entry.keyword))
+                    or isProtectedTree(target)
+
+                if skip then
+                    for _, obj in pairs(entry.g) do obj.Visible = false end
+                    if entry.label then entry.label.Visible = false end
+                else
+                    local center = getModelCenter(target)
+                    if center then
+                        local dist = (center - camPos).Magnitude
+
+                        if dist > MAX_DRAW_DISTANCE then
+                            table.insert(toRemove, target)
+                        else
+                            local posKey = string.format("%d_%d_%d",
+                                math.floor(center.X * 10 + 0.5),
+                                math.floor(center.Y * 10 + 0.5),
+                                math.floor(center.Z * 10 + 0.5))
+                            if posSeen[posKey] then
+                                for _, obj in pairs(entry.g) do obj.Visible = false end
+                                if entry.label then entry.label.Visible = false end
+                            else
+                                posSeen[posKey] = target
+                                totalValid = totalValid + 1
+                                local minX, minY, maxX, maxY = getBBox2D(target)
+
+                                if minX then
+                                    local isOutsideScreen = (maxX < -EDGE_MARGIN) or (minX > vp.X + EDGE_MARGIN) or (maxY < -EDGE_MARGIN) or (minY > vp.Y + EDGE_MARGIN)
+                                    local centerSp, centerOn = camera:WorldToScreenPoint(center)
+                                    local isBehindCamera = (not centerOn) or (centerSp.Z <= 0)
+
+                                    if not isOutsideScreen and not isBehindCamera then
+                                        table.insert(visible, {
+                                            target = target, entry = entry,
+                                            x1 = minX, y1 = minY + insetY,
+                                            x2 = maxX, y2 = maxY + insetY,
+                                            dist = dist,
+                                            center = center,
+                                        })
+                                    else
+                                        for _, obj in pairs(entry.g) do obj.Visible = false end
+                                        if entry.label then entry.label.Visible = false end
+                                    end
+                                else
+                                    for _, obj in pairs(entry.g) do obj.Visible = false end
+                                    if entry.label then entry.label.Visible = false end
+                                end
+                            end
+                        end
+                    else
+                        for _, obj in pairs(entry.g) do obj.Visible = false end
+                        if entry.label then entry.label.Visible = false end
+                    end
+                end
+            end
+        end
+
+        for _, target in ipairs(toRemove) do
+            local entry = drawGroups[target]
+            if entry then
+                destroyEntry(entry)
+                drawGroups[target] = nil
+            end
+        end
+
+        local MERGE_DIST = 40
+        local groups2D = {}
+        for _, item in ipairs(visible) do
+            local cx1 = (item.x1 + item.x2) / 2
+            local cy1 = (item.y1 + item.y2) / 2
+            local merged = false
+            for _, g in ipairs(groups2D) do
+                local gcx = (g.x1 + g.x2) / 2
+                local gcy = (g.y1 + g.y2) / 2
+                if math.abs(cx1 - gcx) < MERGE_DIST and math.abs(cy1 - gcy) < MERGE_DIST
+                    and g.keyword == item.entry.keyword then
+                    g.x1 = math.min(g.x1, item.x1)
+                    g.y1 = math.min(g.y1, item.y1)
+                    g.x2 = math.max(g.x2, item.x2)
+                    g.y2 = math.max(g.y2, item.y2)
+                    g.count = g.count + 1
+                    table.insert(g.entries, item)
+                    merged = true
+                    break
+                end
+            end
+            if not merged then
+                table.insert(groups2D, {
+                    x1 = item.x1, y1 = item.y1,
+                    x2 = item.x2, y2 = item.y2,
+                    count = 1, entries = { item },
+                    keyword = item.entry.keyword,
+                })
+            end
+        end
+
+        local visibleGroups = {}
+        local visibleLabels = {}
+        local placedLabels = {}
+        local LABEL_W = 130
+        local LABEL_H = 20
+
+        for _, g in ipairs(groups2D) do
+            local first = g.entries[1]
+            local entry = first.entry
+            local group = entry.g
+            visibleGroups[group] = true
+            if entry.label then visibleLabels[entry.label] = true end
+            for i = 2, #g.entries do
+                local other = g.entries[i].entry
+                for _, obj in pairs(other.g) do obj.Visible = false end
+                if other.label then other.label.Visible = false end
+            end
+            local x1, y1, x2, y2 = g.x1, g.y1, g.x2, g.y2
+            group.boxT.From = Vector2.new(x1, y1); group.boxT.To = Vector2.new(x2, y1)
+            group.boxB.From = Vector2.new(x1, y2); group.boxB.To = Vector2.new(x2, y2)
+            group.boxL.From = Vector2.new(x1, y1); group.boxL.To = Vector2.new(x1, y2)
+            group.boxR.From = Vector2.new(x2, y1); group.boxR.To = Vector2.new(x2, y2)
+            group.boxT.Visible = true; group.boxB.Visible = true
+            group.boxL.Visible = true; group.boxR.Visible = true
+
+            local centerPos = first.center
+            if centerPos then
+                local sp, on = camera:WorldToScreenPoint(centerPos)
+                if on and sp.Z > 0 then
+                    group.line.From = Vector2.new(cx, countTopY + 24)
+                    group.line.To = Vector2.new(sp.X, sp.Y + insetY)
+                    group.line.Visible = true
+                else
+                    group.line.Visible = false
+                end
+            else
+                group.line.Visible = false
+            end
+
+            if entry.label then
+                local keywordMap = {}
+                local keywordOrder = {}
+                for _, item in ipairs(g.entries) do
+                    local e = item.entry
+                    local kw = e.keyword or "?"
+                    local noteStr = state.keywordNotes[kw]
+                    local displayName
+                    if noteStr and noteStr ~= "" then
+                        displayName = noteStr
+                    else
+                        displayName = e.name or "?"
+                    end
+                    if not keywordMap[kw] then
+                        keywordMap[kw] = { count = 0, name = displayName, minDist = math.huge }
+                        table.insert(keywordOrder, kw)
+                    end
+                    keywordMap[kw].count = keywordMap[kw].count + 1
+                    if item.dist and item.dist < keywordMap[kw].minDist then
+                        keywordMap[kw].minDist = item.dist
+                    end
+                end
+                table.sort(keywordOrder)
+                local lines = {}
+                for _, kw in ipairs(keywordOrder) do
+                    local d = keywordMap[kw]
+                    local line = d.name .. " ×" .. d.count
+                    if state.showDistance and d.minDist ~= math.huge and d.minDist > 5 then
+                        line = line .. " [" .. math.floor(d.minDist) .. "m]"
+                    end
+                    table.insert(lines, line)
+                end
+                entry.label.Text = table.concat(lines, "\n")
+                local baseX = (x1 + x2) / 2
+                local baseY = y1 - 4
+                local actualY = baseY
+                for _ = 1, 8 do
+                    local collided = false
+                    for _, p in ipairs(placedLabels) do
+                        if math.abs(baseX - p.x) < LABEL_W
+                            and math.abs(actualY - p.y) < LABEL_H then
+                            actualY = p.y - LABEL_H
+                            collided = true
+                            break
+                        end
+                    end
+                    if not collided then break end
+                end
+                table.insert(placedLabels, { x = baseX, y = actualY })
+                entry.label.Position = UDim2.fromOffset(baseX, actualY)
+                entry.label.Visible = true
+            end
+        end
+
+        for _, entry in pairs(drawGroups) do
+            if not visibleGroups[entry.g] then
+                for _, obj in pairs(entry.g) do obj.Visible = false end
+            end
+            if entry.label and not visibleLabels[entry.label] then
+                entry.label.Visible = false
+            end
+        end
+
+        topCountText.Center = true
+        topCountText.Position = Vector2.new(cx, countTopY)
+        topCountText.Text = tostring(totalValid)
+        topCountText.Visible = true
+    end
+end))
+
+-- ==================== 退出 ====================
+local function shutdown()
+    state.blackholeOn = false
+    unfreezeAll()
+    scanQueue = nil
+    pendingRoots = {}
+    for _, entry in pairs(drawGroups) do destroyEntry(entry) end
+    drawGroups = {}
+    if topCountText then pcall(function() topCountText:Remove() end); topCountText = nil end
+    if crossH then pcall(function() crossH:Remove() end); crossH = nil end
+    if crossV then pcall(function() crossV:Remove() end); crossV = nil end
+    cleanConns()
+    if mainGui then mainGui:Destroy() end
+    if overlayGui then overlayGui:Destroy() end
+    if logWindow then logWindow:Destroy() end
+    if targetWindow then targetWindow:Destroy() end
+    if protectWindow then protectWindow:Destroy() end
+    if blackholeMenu then blackholeMenu:Destroy() end
+end
+
+bindSafeClick(exitBtn, function() shutdown() end)
+
+updateLogBtn()
+updateProtectBtn()
+setExpanded(true)
+addLog("脚本已加载")
