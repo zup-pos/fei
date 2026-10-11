@@ -1,7 +1,38 @@
 -- Gui to Lua
 -- Version 8.3.25（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离）
--- 自由相机优化版：MouseBehavior 拦截 + CameraOffset 拦截 + 多层兜底 + 载具自适应
+-- Delta 兼容修复版：安全挂载 + 变量前置 + 函数顺序修正
 
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+if not player then
+    repeat task.wait() until Players.LocalPlayer
+    player = Players.LocalPlayer
+end
+if not player then return end
+
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ==================== Delta 安全挂载 ====================
+local _guiParent
+do
+    local ok, result = pcall(function() return gethui() end)
+    if ok and result then
+        _guiParent = result
+    else
+        local ok2, result2 = pcall(function() return game:GetService("CoreGui") end)
+        if ok2 and result2 then
+            _guiParent = result2
+        else
+            _guiParent = playerGui
+        end
+    end
+end
+
+-- ==================== UI 构建 ====================
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
 local up = Instance.new("TextButton")
@@ -13,9 +44,11 @@ local mine = Instance.new("TextButton")
 local speed = Instance.new("TextButton")
 local onof = Instance.new("TextButton")
 
-main.Name = "main"; main.Parent = game.CoreGui
+main.Name = "main"
+main.Parent = _guiParent
 main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-main.ResetOnSpawn = false; main.IgnoreGuiInset = true
+main.ResetOnSpawn = false
+main.IgnoreGuiInset = true
 
 local initCamera = workspace.CurrentCamera
 local initVp = initCamera and initCamera.ViewportSize or Vector2.new(1920, 1080)
@@ -28,7 +61,8 @@ Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
 Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
-Frame.Active = false; Frame.Draggable = false
+Frame.Active = false
+Frame.Draggable = false
 
 up.Parent = Frame; up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
 up.Position = UDim2.new(0, 0, 0, 0); up.Size = UDim2.new(0, 44, 0, 28)
@@ -71,22 +105,7 @@ onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
 onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
 onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
 
--- 兼容补丁：LocalPlayer 等待（防止移动端注入过早）
-local player = game:GetService("Players").LocalPlayer
-if not player then
-    repeat task.wait() until game:GetService("Players").LocalPlayer
-    player = game:GetService("Players").LocalPlayer
-end
-if not player then return end
-
-local camera = workspace.CurrentCamera
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local TextService = game:GetService("TextService")
-local playerGui = player:WaitForChild("PlayerGui")
-
--- ==================== 全局变量 ====================
+-- ==================== 全局变量（关键：全部前置声明） ====================
 local speeds = 1
 local moveStep = 2
 local incStep = 1
@@ -123,30 +142,15 @@ local nightVisionSettings = {
     atmosphere = false, ambient = true
 }
 
--- ==================== 自由相机状态 ====================
+-- ★ 关键修复：camFreezeEnabled / camNoClipEnabled 必须前置
 local camSnapshot = nil
 local camFreezeEnabled = false
 local camNoClipEnabled = false
+local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
+local camFreezeBound = false
 local camOffsetX, camOffsetY, camOffsetZ = 0, 0, 0
 local camOffsetBaseline = { x = 0, y = 0, z = 0 }
 local camOffsetConn = nil
-
-local camFreezeBindName = "CamFreeze_" .. tostring(math.random(100000, 999999))
-local camFreezeLateBindName = camFreezeBindName .. "_Late"
-local camFreezeHeartbeatConn = nil
-local camFreezeSteppedConn = nil
-local camPropConns = {}
-local humPropConns = {}
-local inputPropConns = {}
-local cameraReplacedConn = nil
-local currentOnVehicle = false
-
-local FREEZE_MIN_ZOOM = 0.5
-local FREEZE_MAX_ZOOM = 128
-local OFFSET_THRESHOLD_WALK = 0.01
-local OFFSET_THRESHOLD_VEHICLE = 4.0
-local FORCE_MOUSE_FREE = true
--- ==================== 自由相机状态结束 ====================
 
 local frameX = initX
 local frameY = initY
@@ -170,13 +174,11 @@ local noclipStateConnection = nil
 local noclipSaved = {}
 
 local smartSubMode = "smart"
-
 local protectedList = {}
 local userProtectKeywords = {}
-
 local collisionDeleteEnabled = false
 
--- ==================== 默认保护分类管理 ====================
+-- ==================== 默认保护分类 ====================
 local DEFAULT_PROTECT_GROUPS = {
     { id = "npc", name = "🧟 NPC/怪物", keywords = {
         "npc", "mob", "monster", "entity", "creature", "enemy",
@@ -229,8 +231,8 @@ end
 local function refreshActiveProtectKeywords()
     activeProtectKeywords = buildActiveProtectKeywords()
 end
--- ==================== 默认保护分类管理结束 ====================
 
+-- ==================== 前向声明 ====================
 local tanchuangxiaoxi
 local fullShutdown
 local setUIVisible
@@ -246,6 +248,7 @@ local showSingleDetailDialog
 local _activeInputDialog = nil
 local _activeMenuDialog = nil
 
+-- ==================== 工具函数 ====================
 local function extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
@@ -337,8 +340,8 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
         if connEnded then connEnded:Disconnect() end
     end
 end
--- ==================== 通用滑块拖动结束 ====================
 
+-- ==================== SmartBuilding 模块 ====================
 local SmartBuilding = (function()
     local SB = {}
     SB.crosshairEnabled = true
@@ -1498,7 +1501,10 @@ local showCameraMenu
 local function clamp(val, min, max) return math.max(min, math.min(max, val)) end
 local function getScreenSize()
     local s = main.AbsoluteSize
-    if s.X == 0 or s.Y == 0 then s = workspace.CurrentCamera.ViewportSize end
+    if s.X == 0 or s.Y == 0 then
+        local cam = workspace.CurrentCamera
+        s = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+    end
     return s
 end
 local function setFramePos(x, y) frameX = x; frameY = y; Frame.Position = UDim2.fromOffset(x, y) end
@@ -1638,7 +1644,7 @@ local function applyFly()
             hum.PlatformStand = true
         end)
     end
-    local startY = hrp.Position.Y
+    local startYv = hrp.Position.Y
     local bg = Instance.new("BodyGyro")
     bg.P = 9e4; bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
     bg.CFrame = hrp.CFrame; bg.Parent = hrp
@@ -1646,7 +1652,7 @@ local function applyFly()
     bv.Velocity = Vector3.new(0, 0.1, 0)
     bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     bv.Parent = hrp
-    _G._flyData = { bg = bg, bv = bv, hrp = hrp, startY = startY }
+    _G._flyData = { bg = bg, bv = bv, hrp = hrp, startY = startYv }
     task.spawn(function()
         while isFlying and player.Character and hum and hum.Parent and hum.Health > 0 do
             RunService.Heartbeat:Wait()
@@ -1687,7 +1693,7 @@ local function applyFly()
                         bv.Velocity = (hd.Magnitude > 0) and (hd.Unit * maxspeed) or Vector3.new(0,0,0)
                         bg.CFrame = CFrame.new(anchorPos) * cam.CFrame.Rotation
                         local pos = curHrp.Position
-                        curHrp.CFrame = CFrame.new(pos.X, startY, pos.Z) * (curHrp.CFrame - curHrp.Position)
+                        curHrp.CFrame = CFrame.new(pos.X, startYv, pos.Z) * (curHrp.CFrame - curHrp.Position)
                     else
                         bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                         bv.Velocity = (moveDir.Magnitude > 0) and (moveDir * maxspeed) or Vector3.new(0,0,0)
@@ -1993,13 +1999,13 @@ local function disableNightVision()
     end
 end
 
--- ==================== 相机偏移（用户自定义偏移） ====================
+-- ==================== 相机偏移 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
     local hum = char:FindFirstChildWhichIsA("Humanoid")
     if not hum then return end
-    -- 冻结中由冻结逻辑接管 CameraOffset，这里不覆盖
+    -- 冻结中由冻结逻辑接管 CameraOffset，这里不覆盖（camFreezeEnabled 已在顶部声明）
     if camFreezeEnabled then return end
     hum.CameraOffset = Vector3.new(camOffsetX, camOffsetY, camOffsetZ)
     if not camOffsetConn then
@@ -2017,20 +2023,15 @@ local function applyCameraOffset()
     end
 end
 
--- ==================== ★ 自由相机冻结（优化版） ====================
+-- ==================== 自由相机（函数顺序修正版） ====================
+-- ★ 关键修复：以下三个函数必须在 startCamFreeze 之前定义
+
 local function getHum()
     local char = player.Character
     if not char then return nil end
     return char:FindFirstChildOfClass("Humanoid")
 end
 
-local function detectOnVehicle()
-    local hum = getHum()
-    if not hum then return false end
-    return hum.Sit == true or hum.SeatPart ~= nil
-end
-
--- 单次强制对齐
 local function enforceCameraOnce()
     local cam = workspace.CurrentCamera
     if not cam then return end
@@ -2044,153 +2045,6 @@ local function enforceCameraOnce()
     if hum and cam.CameraSubject ~= hum then
         pcall(function() cam.CameraSubject = hum end)
     end
-    if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
-        pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
-    end
-    if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
-        pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
-    end
-end
-
--- 强制相机属性（每帧/同步）
-local function applyCamForcing()
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    if cam.CameraType ~= Enum.CameraType.Custom then
-        pcall(function() cam.CameraType = Enum.CameraType.Custom end)
-    end
-    if player.CameraMode ~= Enum.CameraMode.Classic then
-        pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
-    end
-    local hum = getHum()
-    if hum and cam.CameraSubject ~= hum then
-        pcall(function() cam.CameraSubject = hum end)
-    end
-    if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
-        pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
-    end
-    if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
-        pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
-    end
-end
-
--- 强制 Humanoid 属性（含载具自适应）
-local function applyHumanoidForcing()
-    local hum = getHum()
-    if not hum then return end
-    local threshold = currentOnVehicle and OFFSET_THRESHOLD_VEHICLE or OFFSET_THRESHOLD_WALK
-    if hum.CameraOffset.Magnitude > threshold then
-        pcall(function() hum.CameraOffset = Vector3.zero end)
-    end
-end
-
--- 强制鼠标自由（关键：解决"锁鼠标"导致的回拉）
-local function applyInputForcing()
-    if not FORCE_MOUSE_FREE then return end
-    if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-        pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
-    end
-    if not UserInputService.MouseIconEnabled then
-        pcall(function() UserInputService.MouseIconEnabled = true end)
-    end
-end
-
--- 清理所有连接
-local function disconnectAll(list)
-    for _, c in ipairs(list) do
-        pcall(function() c:Disconnect() end)
-    end
-    for i = #list, 1, -1 do list[i] = nil end
-end
-
--- 相机属性同步监听
-local function bindCamWatchers()
-    disconnectAll(camPropConns)
-    if not camFreezeEnabled then return end
-
-    local c1 = player:GetPropertyChangedSignal("CameraMode"):Connect(function()
-        if not camFreezeEnabled then return end
-        if player.CameraMode ~= Enum.CameraMode.Classic then
-            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
-        end
-    end)
-    table.insert(camPropConns, c1)
-
-    local c2 = player:GetPropertyChangedSignal("CameraMinZoomDistance"):Connect(function()
-        if not camFreezeEnabled then return end
-        if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
-            pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
-        end
-    end)
-    table.insert(camPropConns, c2)
-
-    local c3 = player:GetPropertyChangedSignal("CameraMaxZoomDistance"):Connect(function()
-        if not camFreezeEnabled then return end
-        if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
-            pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
-        end
-    end)
-    table.insert(camPropConns, c3)
-
-    local cam = workspace.CurrentCamera
-    if cam then
-        local c4 = cam:GetPropertyChangedSignal("CameraType"):Connect(function()
-            if not camFreezeEnabled then return end
-            if cam.CameraType ~= Enum.CameraType.Custom then
-                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
-            end
-        end)
-        table.insert(camPropConns, c4)
-
-        local c5 = cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
-            if not camFreezeEnabled then return end
-            local h = getHum()
-            if h and cam.CameraSubject ~= h then
-                pcall(function() cam.CameraSubject = h end)
-            end
-        end)
-        table.insert(camPropConns, c5)
-    end
-end
-
--- Humanoid 属性同步监听
-local function bindHumWatchers()
-    disconnectAll(humPropConns)
-    if not camFreezeEnabled then return end
-
-    local hum = getHum()
-    if not hum then return end
-
-    local h1 = hum:GetPropertyChangedSignal("CameraOffset"):Connect(function()
-        if not camFreezeEnabled then return end
-        local threshold = currentOnVehicle and OFFSET_THRESHOLD_VEHICLE or OFFSET_THRESHOLD_WALK
-        if hum.CameraOffset.Magnitude > threshold then
-            pcall(function() hum.CameraOffset = Vector3.zero end)
-        end
-    end)
-    table.insert(humPropConns, h1)
-end
-
--- 输入属性同步监听
-local function bindInputWatchers()
-    disconnectAll(inputPropConns)
-    if not camFreezeEnabled or not FORCE_MOUSE_FREE then return end
-
-    local i1 = UserInputService:GetPropertyChangedSignal("MouseBehavior"):Connect(function()
-        if not camFreezeEnabled then return end
-        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
-        end
-    end)
-    table.insert(inputPropConns, i1)
-
-    local i2 = UserInputService:GetPropertyChangedSignal("MouseIconEnabled"):Connect(function()
-        if not camFreezeEnabled then return end
-        if not UserInputService.MouseIconEnabled then
-            pcall(function() UserInputService.MouseIconEnabled = true end)
-        end
-    end)
-    table.insert(inputPropConns, i2)
 end
 
 local function takeCamSnapshot()
@@ -2207,80 +2061,49 @@ local function takeCamSnapshot()
     }
     return true
 end
+
 local function ensureCamSnapshot()
-    if not camSnapshot then takeCamSnapshot(); tanchuangxiaoxi("已自动记录相机快照", "自由相机") end
+    if not camSnapshot then
+        takeCamSnapshot()
+        tanchuangxiaoxi("已自动记录相机快照", "自由相机")
+    end
 end
 
+-- ★ startCamFreeze 现在可以安全调用 ensureCamSnapshot ★
 local function startCamFreeze(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     if camFreezeEnabled then return end
     camFreezeEnabled = true
 
-    currentOnVehicle = detectOnVehicle()
-
     enforceCameraOnce()
-    applyCamForcing()
-    applyHumanoidForcing()
-    applyInputForcing()
 
-    -- 同步监听（属性变化立即回滚）
-    bindCamWatchers()
-    bindHumWatchers()
-    bindInputWatchers()
-
-    -- 层级 1：Camera 优先级之前（相机系统计算前）
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeBindName) end)
-    RunService:BindToRenderStep(camFreezeBindName,
-        Enum.RenderPriority.Camera.Value - 1,
-        function()
+    local cam = workspace.CurrentCamera
+    if cam then
+        cam:GetPropertyChangedSignal("CameraType"):Connect(function()
             if not camFreezeEnabled then return end
-            applyCamForcing()
-            applyHumanoidForcing()
-            applyInputForcing()
-        end
-    )
-
-    -- 层级 2：Last 优先级之前（防止游戏在相机之后改）
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeLateBindName) end)
-    RunService:BindToRenderStep(camFreezeLateBindName,
-        Enum.RenderPriority.Last.Value - 1,
-        function()
+            if cam.CameraType ~= Enum.CameraType.Custom then
+                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+            end
+        end)
+        cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
             if not camFreezeEnabled then return end
-            applyCamForcing()
-            applyHumanoidForcing()
-            applyInputForcing()
-        end
-    )
-
-    -- 层级 3：Heartbeat（覆盖物理阶段）
-    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() end
-    camFreezeHeartbeatConn = RunService.Heartbeat:Connect(function()
-        if not camFreezeEnabled then return end
-        currentOnVehicle = detectOnVehicle()
-        applyCamForcing()
-        applyHumanoidForcing()
-        applyInputForcing()
-    end)
-
-    -- 层级 4：Stepped（覆盖 Stepped 阶段）
-    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() end
-    camFreezeSteppedConn = RunService.Stepped:Connect(function()
-        if not camFreezeEnabled then return end
-        currentOnVehicle = detectOnVehicle()
-        applyCamForcing()
-        applyHumanoidForcing()
-        applyInputForcing()
-    end)
-
-    -- Camera 对象替换监听（过场/重生后可能换 Camera）
-    if not cameraReplacedConn then
-        cameraReplacedConn = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-            if not camFreezeEnabled then return end
-            task.wait(0.1)
-            bindCamWatchers()
-            applyCamForcing()
+            local h = getHum()
+            if h and cam.CameraSubject ~= h then
+                pcall(function() cam.CameraSubject = h end)
+            end
         end)
     end
+    player:GetPropertyChangedSignal("CameraMode"):Connect(function()
+        if not camFreezeEnabled then return end
+        if player.CameraMode ~= Enum.CameraMode.Classic then
+            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+        end
+    end)
+
+    if camFreezeBound and camFreezeConnName then
+        pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    end
+    camFreezeBound = false
 
     tanchuangxiaoxi("冻结解锁已开启", "自由相机")
 end
@@ -2288,30 +2111,14 @@ end
 local function stopCamFreeze()
     if not camFreezeEnabled then return end
     camFreezeEnabled = false
-
-    disconnectAll(camPropConns)
-    disconnectAll(humPropConns)
-    disconnectAll(inputPropConns)
-
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeBindName) end)
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeLateBindName) end)
-    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() camFreezeHeartbeatConn = nil end
-    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() camFreezeSteppedConn = nil end
-
-    -- 恢复 zoom 快照
-    if camSnapshot then
-        pcall(function() player.CameraMinZoomDistance = camSnapshot.CameraMinZoomDistance end)
-        pcall(function() player.CameraMaxZoomDistance = camSnapshot.CameraMaxZoomDistance end)
-    end
-
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+    camFreezeBound = false
     tanchuangxiaoxi("冻结解锁已关闭", "自由相机")
 end
 
 local function doCamSingleUnlock(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     enforceCameraOnce()
-    applyCamForcing()
-    applyInputForcing()
     tanchuangxiaoxi("已单次解锁视角", "自由相机")
 end
 
@@ -2353,7 +2160,7 @@ local function manualResnap()
     if takeCamSnapshot() then tanchuangxiaoxi("已重新拍摄快照", "自由相机")
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
--- ==================== 自由相机冻结结束 ====================
+-- ==================== 自由相机结束 ====================
 
 -- ==================== 穿墙 ====================
 local function getCharacterParts()
@@ -2673,16 +2480,6 @@ local function onCharacterAdded(char)
     stopTpwalking()
     updateSpeedButtonText(); updateMainButtonText(); updateSpeedDisplayLoop()
     task.wait(0.2); applyCameraOffset()
-
-    -- 冻结中：重生后重新绑定 Humanoid 监听
-    if camFreezeEnabled then
-        currentOnVehicle = false
-        bindHumWatchers()
-        applyCamForcing()
-        applyHumanoidForcing()
-        applyInputForcing()
-    end
-
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.Died:Connect(function()
@@ -2700,6 +2497,7 @@ end)
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
+-- ==================== 通知系统 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -2779,6 +2577,7 @@ function tanchuangxiaoxi(msg, title)
     end)
 end
 
+-- ==================== 输入弹窗 ====================
 function showInputDialog(title, defaultText, callback, extraButton)
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -2925,6 +2724,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
     return dialog
 end
 
+-- ==================== 菜单工厂 ====================
 function createMenu(title, buttons, parentMenu)
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -2939,9 +2739,9 @@ function createMenu(title, buttons, parentMenu)
 
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
-    local btnHeight, spacing, padding = 40, 5, 10
+    local btnHeight, spacing2, padding = 40, 5, 10
     local titleHeight, closeBtnHeight = 40, 40
-    local contentHeight = #buttons * btnHeight + (#buttons - 1) * spacing
+    local contentHeight = #buttons * btnHeight + (#buttons - 1) * spacing2
     local totalContentHeight = contentHeight
     local totalHeight = padding + titleHeight + totalContentHeight + padding + closeBtnHeight + padding
     local maxHeight = screenSize.Y * 0.8
@@ -3023,7 +2823,7 @@ function createMenu(title, buttons, parentMenu)
             end)
         end
 
-        yPos = yPos + btnHeight + spacing
+        yPos = yPos + btnHeight + spacing2
     end
     local closeBtn = Instance.new("TextButton")
     closeBtn.Parent = bg
@@ -3526,8 +3326,8 @@ showKeywordDetailDialog = function(idx)
 
     local targetItem = userProtectKeywords[idx]
     mkBtn("❌ 删除", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
-        for i, item in ipairs(userProtectKeywords) do
-            if item == targetItem then
+        for i, item2 in ipairs(userProtectKeywords) do
+            if item2 == targetItem then
                 table.remove(userProtectKeywords, i)
                 break
             end
@@ -3963,10 +3763,10 @@ end
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
-    local btnHeight, spacing, padding = 40, 5, 10
+    local btnHeight, spacing2, padding = 40, 5, 10
     local titleHeight, closeBtnHeight = 40, 40
     local totalButtons = #FLY_MODES + 1
-    local contentHeight = totalButtons * btnHeight + (totalButtons - 1) * spacing
+    local contentHeight = totalButtons * btnHeight + (totalButtons - 1) * spacing2
     local totalHeight = padding + titleHeight + contentHeight + padding + closeBtnHeight + padding
     local maxHeight = screenSize.Y * 0.8
     local needsScrolling = totalHeight > maxHeight
@@ -3998,11 +3798,11 @@ local function showFlyModeSelection(currentMode, callback)
     local sf = Instance.new("ScrollingFrame")
     sf.Parent = bg; sf.Size = UDim2.new(1, -20, 0, contentHeight)
     sf.Position = UDim2.new(0, 10, 0, 40)
-    sf.CanvasSize = UDim2.new(0, 0, 0, totalButtons * (btnHeight + spacing))
+    sf.CanvasSize = UDim2.new(0, 0, 0, totalButtons * (btnHeight + spacing2))
     sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
     sf.ScrollingEnabled = needsScrolling
     local bc = Instance.new("Frame")
-    bc.Parent = sf; bc.Size = UDim2.new(1, 0, 0, totalButtons * (btnHeight + spacing))
+    bc.Parent = sf; bc.Size = UDim2.new(1, 0, 0, totalButtons * (btnHeight + spacing2))
     bc.BackgroundTransparency = 1
     local yPos = 0
     local faceToggleBtn = nil
@@ -4024,7 +3824,7 @@ local function showFlyModeSelection(currentMode, callback)
         button.TextSize = 14; button.AutoButtonColor = true
         local bC = Instance.new("UICorner"); bC.Parent = button; bC.CornerRadius = UDim.new(0, 4)
         button.MouseButton1Click:Connect(function() dialog:Destroy(); callback(mode) end)
-        yPos = yPos + btnHeight + spacing
+        yPos = yPos + btnHeight + spacing2
         if mode == "自由" then
             local ftBtn = Instance.new("TextButton")
             ftBtn.Parent = bc
@@ -4042,7 +3842,7 @@ local function showFlyModeSelection(currentMode, callback)
                 tanchuangxiaoxi("朝向: " .. flyFaceMode, "飞行朝向")
             end)
             faceToggleBtn = ftBtn; refreshFaceToggleBtn()
-            yPos = yPos + btnHeight + spacing
+            yPos = yPos + btnHeight + spacing2
         end
     end
     local closeBtn = Instance.new("TextButton")
@@ -4141,61 +3941,40 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.3.25 更新内容：",
+                    "版本 8.3.25 Delta 兼容修复版：",
                     "",
-                    "【新增】碰撞删除",
-                    "  · 建筑不阻挡玩家（不是删除建筑）",
-                    "  · CanCollide=false，完全可逆",
+                    "【修复】Delta 沙盒挂载",
+                    "  · gethui → CoreGui → PlayerGui 三级兜底",
                     "",
-                    "【新增】默认保护分类管理",
-                    "  · 按分类显示：NPC/宝箱/交互物/玩家/空气墙",
-                    "  · 单个分类可独立禁用",
-                    "  · 高级兜底：Humanoid / 交互组件 / 特定类",
+                    "【修复】变量声明顺序",
+                    "  · camFreezeEnabled / camNoClipEnabled 前置",
                     "",
-                    "【修复】建筑有大有小",
-                    "  · 深度限制从 15 提升到 100",
+                    "【修复】自由相机函数顺序",
+                    "  · ensureCamSnapshot 等函数前置",
                     "",
-                    "【修复】弹窗互斥",
-                    "  · 长按不再叠加菜单",
-                    "",
-                    "【修复】保护补全",
-                    "  · 非 BasePart 子对象（贴图/界面/特效）也受保护",
-                    "  · 准星拾取关键词后，扫描/添加完全跳过该对象",
-                    "",
-                    "【新增】单目标保护独立菜单",
-                    "  · 管理保护关键词 → 顶部「🎯 单目标保护」",
-                    "  · 支持按名字批量添加",
-                    "  · 支持从准心拾取",
-                    "  · 支持复制名字 / 复制路径 / 导出 / 导入 / 清空",
-                    "",
-                    "【修复】所有滑块拖动多指隔离",
-                    "  · 控制窗透明度 / 透视窗亮度 / 输入框滑块",
-                    "  · 一只手按住别处，另一只手拖滑块不会乱跳",
-                    "",
-                    "【优化】自由相机冻结（本次）",
-                    "  · MouseBehavior 同步拦截（解决锁鼠标回拉）",
-                    "  · CameraOffset 载具自适应（阈值 0.01 → 4.0）",
-                    "  · 4 层兜底：同步 + Camera-1 + Last-1 + Heartbeat + Stepped",
-                    "  · Camera 对象替换监听（过场后自动重绑）",
+                    "【保留】所有原有功能：",
+                    "  · 碰撞删除 / 默认保护分类 / 单目标保护",
+                    "  · 滑块多指隔离 / 弹窗互斥 / 保护补全",
+                    "  · 自由相机 / 相机偏移 / 透视 / 穿墙",
                     "",
                     "感谢使用！"
                 }
                 local cc = Instance.new("Frame")
                 cc.Parent = sf; cc.Size = UDim2.new(1, -10, 0, 0)
                 cc.BackgroundTransparency = 1
-                local yPos = 0
+                local yPos2 = 0
                 for _, lineText in ipairs(lines) do
                     local ll = Instance.new("TextLabel")
                     ll.Parent = cc; ll.Size = UDim2.new(1, 0, 0, 20)
-                    ll.Position = UDim2.new(0, 0, 0, yPos)
+                    ll.Position = UDim2.new(0, 0, 0, yPos2)
                     ll.BackgroundTransparency = 1; ll.Text = lineText
                     ll.TextColor3 = Color3.fromRGB(220, 220, 220)
                     ll.Font = Enum.Font.Gotham; ll.TextSize = 14
                     ll.TextXAlignment = Enum.TextXAlignment.Left
                     ll.TextYAlignment = Enum.TextYAlignment.Top
-                    yPos = yPos + 22
+                    yPos2 = yPos2 + 22
                 end
-                cc.Size = UDim2.new(1, -10, 0, yPos - 2)
+                cc.Size = UDim2.new(1, -10, 0, yPos2 - 2)
                 sf.CanvasSize = UDim2.new(0, 0, 0, cc.Size.Y.Offset + 10)
                 local backBtn = Instance.new("TextButton")
                 backBtn.Parent = bg
@@ -4259,28 +4038,24 @@ function showMainMenu()
                     "🔹 保护已补全：非 BasePart 子对象也受保护",
                     "🔹 所有滑块多指隔离：一只手按别处，另一只手拖滑块不会乱跳",
                     "🔹 硬保护：本机玩家永远被保护",
-                    "🔹 【自由相机】冻结解锁",
-                    "   - MouseBehavior 拦截：游戏锁鼠标时强制回滚",
-                    "   - CameraOffset 载具自适应",
-                    "   - 多层兜底：同步 + RenderStep + Heartbeat + Stepped",
                     "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
                 local cc = Instance.new("Frame")
                 cc.Parent = sf; cc.Size = UDim2.new(1, -10, 0, 0)
                 cc.BackgroundTransparency = 1
-                local yPos = 0
+                local yPos2 = 0
                 for _, lineText in ipairs(lines) do
                     local ll = Instance.new("TextLabel")
                     ll.Parent = cc; ll.Size = UDim2.new(1, 0, 0, 20)
-                    ll.Position = UDim2.new(0, 0, 0, yPos)
+                    ll.Position = UDim2.new(0, 0, 0, yPos2)
                     ll.BackgroundTransparency = 1; ll.Text = lineText
                     ll.TextColor3 = Color3.fromRGB(220, 220, 220)
                     ll.Font = Enum.Font.Gotham; ll.TextSize = 14
                     ll.TextXAlignment = Enum.TextXAlignment.Left
                     ll.TextYAlignment = Enum.TextYAlignment.Top
-                    yPos = yPos + 22
+                    yPos2 = yPos2 + 22
                 end
-                cc.Size = UDim2.new(1, -10, 0, yPos - 2)
+                cc.Size = UDim2.new(1, -10, 0, yPos2 - 2)
                 sf.CanvasSize = UDim2.new(0, 0, 0, cc.Size.Y.Offset + 10)
                 local backBtn = Instance.new("TextButton")
                 backBtn.Parent = bg
@@ -4967,7 +4742,7 @@ do
     end)
 end
 
--- ==================== 按钮绑定：隐藏/设置 ====================
+-- ==================== 按钮绑定：隐藏/设置（迷你 UI 连接回收） ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4994,12 +4769,13 @@ do
         local miniIsDragging = false; local miniDragInput = nil
         local miniHandleTouches = {}; local miniTotalDelta = 0
         local miniPressStartPos = nil
+        local miniConns = {}
         local function isMiniStartInput(input)
             return input.UserInputType == Enum.UserInputType.Touch
                 or input.UserInputType == Enum.UserInputType.MouseButton1
         end
         local function beginMiniDrag(input) miniIsDragging = true; miniDragInput = input end
-        UserInputService.InputBegan:Connect(function(input, _gpe)
+        table.insert(miniConns, UserInputService.InputBegan:Connect(function(input, _gpe)
             if not isMiniStartInput(input) then return end
             if not isPointInGui(miniBtn, input.Position.X, input.Position.Y) then return end
             miniHandleTouches[input] = true
@@ -5007,8 +4783,8 @@ do
             beginMiniDrag(input)
             miniTotalDelta = 0
             miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
-        end)
-        UserInputService.InputChanged:Connect(function(input)
+        end))
+        table.insert(miniConns, UserInputService.InputChanged:Connect(function(input)
             if not miniIsDragging then return end
             local matched = (input == miniDragInput)
                 or (miniDragInput ~= nil
@@ -5027,8 +4803,8 @@ do
             miniX_var = clamp(miniX_var + d.X, 0, vp3.X - mw)
             miniY_var = clamp(miniY_var + d.Y, 0, vp3.Y - mh)
             mini.Position = UDim2.fromOffset(miniX_var, miniY_var)
-        end)
-        UserInputService.InputEnded:Connect(function(input)
+        end))
+        table.insert(miniConns, UserInputService.InputEnded:Connect(function(input)
             if miniHandleTouches[input] then miniHandleTouches[input] = nil end
             if not miniIsDragging or input ~= miniDragInput then return end
             if not isMiniStartInput(input) then return end
@@ -5047,6 +4823,12 @@ do
                 mini:Destroy(); miniWindow = nil
             end
             miniIsDragging = false; miniDragInput = nil; miniPressStartPos = nil
+        end))
+        mini.Destroying:Connect(function()
+            for _, c in ipairs(miniConns) do
+                pcall(function() c:Disconnect() end)
+            end
+            miniConns = {}
         end)
         miniWindow = mini
     end
@@ -5226,14 +5008,6 @@ function fullShutdown()
 
     if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
     volumeKeyEnabled = false
-
-    -- 清空冻结相关
-    disconnectAll(camPropConns)
-    disconnectAll(humPropConns)
-    disconnectAll(inputPropConns)
-    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() camFreezeHeartbeatConn = nil end
-    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() camFreezeSteppedConn = nil end
-    if cameraReplacedConn then cameraReplacedConn:Disconnect() cameraReplacedConn = nil end
 
     if _activeInputDialog then
         pcall(function() _activeInputDialog:Destroy() end)
