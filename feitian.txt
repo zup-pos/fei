@@ -1,41 +1,6 @@
 -- Gui to Lua
--- Version 8.4.2（稳定版基础 + 信标系统 + Delta兼容修复）
-
--- ==================== Delta Executor 兼容补丁 ====================
-local HTTP_TIMEOUT = 5
-local _rawHttpFn = nil
-pcall(function() if request then _rawHttpFn = request end end)
-pcall(function() if not _rawHttpFn and http_request then _rawHttpFn = http_request end end)
-pcall(function() if not _rawHttpFn and syn and syn.request then _rawHttpFn = syn.request end end)
-pcall(function() if not _rawHttpFn and http and http.request then _rawHttpFn = http.request end end)
-
-if _rawHttpFn then
-    local function safeRequest(opts)
-        local result, finished = nil, false
-        task.spawn(function()
-            local ok, res = pcall(_rawHttpFn, opts)
-            if ok and type(res) == "table" then result = res end
-            finished = true
-        end)
-        local t0 = tick()
-        while not finished and (tick() - t0) < HTTP_TIMEOUT do
-            task.wait(0.1)
-        end
-        if not finished then
-            return {StatusCode = 0, Body = "", Headers = {}}
-        end
-        return result
-    end
-    if request then request = function(opts) return safeRequest(opts) end end
-    if http_request then http_request = function(opts) return safeRequest(opts) end end
-    if syn and syn.request then syn.request = function(opts) return safeRequest(opts) end end
-    if http and http.request then http.request = function(opts) return safeRequest(opts) end end
-end
-
-if not getgenv then
-    getgenv = function() return getfenv() end
-end
--- ==================== 兼容补丁结束 ====================
+-- Version 8.3.25（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离）
+-- 自由相机优化版：MouseBehavior 拦截 + CameraOffset 拦截 + 多层兜底 + 载具自适应
 
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
@@ -106,13 +71,14 @@ onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
 onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
 onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
 
--- [Delta修复] 等待 LocalPlayer，防止移动端注入过早导致 nil
+-- 兼容补丁：LocalPlayer 等待（防止移动端注入过早）
 local player = game:GetService("Players").LocalPlayer
 if not player then
     repeat task.wait() until game:GetService("Players").LocalPlayer
     player = game:GetService("Players").LocalPlayer
 end
 if not player then return end
+
 local camera = workspace.CurrentCamera
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -120,6 +86,7 @@ local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- ==================== 全局变量 ====================
 local speeds = 1
 local moveStep = 2
 local incStep = 1
@@ -156,14 +123,30 @@ local nightVisionSettings = {
     atmosphere = false, ambient = true
 }
 
+-- ==================== 自由相机状态 ====================
 local camSnapshot = nil
 local camFreezeEnabled = false
 local camNoClipEnabled = false
-local camFreezeConnName = "CamFreeze_" .. tostring(math.random(100000, 999999))
-local camFreezeBound = false
 local camOffsetX, camOffsetY, camOffsetZ = 0, 0, 0
 local camOffsetBaseline = { x = 0, y = 0, z = 0 }
 local camOffsetConn = nil
+
+local camFreezeBindName = "CamFreeze_" .. tostring(math.random(100000, 999999))
+local camFreezeLateBindName = camFreezeBindName .. "_Late"
+local camFreezeHeartbeatConn = nil
+local camFreezeSteppedConn = nil
+local camPropConns = {}
+local humPropConns = {}
+local inputPropConns = {}
+local cameraReplacedConn = nil
+local currentOnVehicle = false
+
+local FREEZE_MIN_ZOOM = 0.5
+local FREEZE_MAX_ZOOM = 128
+local OFFSET_THRESHOLD_WALK = 0.01
+local OFFSET_THRESHOLD_VEHICLE = 4.0
+local FORCE_MOUSE_FREE = true
+-- ==================== 自由相机状态结束 ====================
 
 local frameX = initX
 local frameY = initY
@@ -192,58 +175,6 @@ local protectedList = {}
 local userProtectKeywords = {}
 
 local collisionDeleteEnabled = false
-
--- ==================== 信标系统（v8.4.2 整合版） ====================
-local BEACON_DEFAULT = {
-    enabled = false,
-    showHighlight = true,
-    showBeam = true,
-    showName = true,
-    customName = "",
-    color = Color3.fromRGB(255, 200, 0),
-    beamWidth = 0.5,
-    beamHeight = 250,
-    hlTransparency = 0.9,
-    periodicScan = false,
-    scanInterval = 2.5,
-}
-
--- 单目标信标配置：[obj] = config
-local protectedBeaconMap = {}
-
--- 信标实例缓存
-local beaconInstances = {}
-
--- 是否正在关闭
-local isShuttingDown = false
-
-local function copyBeaconConfig(src)
-    local c = {}
-    local base = src or BEACON_DEFAULT
-    c.enabled = base.enabled or false
-    c.showHighlight = (base.showHighlight ~= false)
-    c.showBeam = (base.showBeam ~= false)
-    c.showName = (base.showName ~= false)
-    c.customName = base.customName or ""
-    c.color = base.color or Color3.fromRGB(255, 200, 0)
-    c.beamWidth = base.beamWidth or 0.5
-    c.beamHeight = base.beamHeight or 250
-    c.hlTransparency = base.hlTransparency or 0.9
-    c.periodicScan = (base.periodicScan == true)
-    c.scanInterval = base.scanInterval or 2.5
-    return c
-end
-
-local function makeBeaconConfig(overrides)
-    local cfg = copyBeaconConfig(BEACON_DEFAULT)
-    if overrides then
-        for k, v in pairs(overrides) do
-            cfg[k] = v
-        end
-    end
-    return cfg
-end
--- ==================== 信标系统配置结束 ====================
 
 -- ==================== 默认保护分类管理 ====================
 local DEFAULT_PROTECT_GROUPS = {
@@ -301,7 +232,6 @@ end
 -- ==================== 默认保护分类管理结束 ====================
 
 local tanchuangxiaoxi
--- 前向声明
 local fullShutdown
 local setUIVisible
 local enableVolumeKey, disableVolumeKey
@@ -312,14 +242,10 @@ local showDefaultProtectMenu
 local showSingleProtectMenu
 local showSingleManageMenu
 local showSingleDetailDialog
-local showBeaconConfigDialog
-local showBrightnessDialog
 
--- 追踪当前活动弹窗，实现互斥
 local _activeInputDialog = nil
 local _activeMenuDialog = nil
 
--- 关键词去尾数
 local function extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
@@ -332,96 +258,34 @@ local function extractKeyword(name)
     return string.lower(s)
 end
 
--- ==================== 序列化 / 反序列化（16字段 "|" 分隔） ====================
-local BEACON_FIELD_COUNT = 16
-
 local function serializeKeywords(keywords)
     local lines = {}
     for _, item in ipairs(keywords) do
         local prefix = item.prefix or ""
         local exact = item.exact or ""
-        local b = item.beacon
-        if b and b.enabled then
-            local c = b.color
-            table.insert(lines, table.concat({
-                prefix, exact,
-                "1",
-                b.enabled and "1" or "0",
-                b.showHighlight and "1" or "0",
-                b.showBeam and "1" or "0",
-                b.showName and "1" or "0",
-                (b.customName or ""):gsub("|", "/"),
-                tostring(math.floor(c.R * 255 + 0.5)),
-                tostring(math.floor(c.G * 255 + 0.5)),
-                tostring(math.floor(c.B * 255 + 0.5)),
-                string.format("%.3f", b.beamWidth or 0.5),
-                string.format("%.3f", b.beamHeight or 250),
-                string.format("%.3f", b.hlTransparency or 0.9),
-                b.periodicScan and "1" or "0",
-                string.format("%.3f", b.scanInterval or 2.5),
-            }, "|"))
-        else
-            table.insert(lines, prefix .. "," .. exact)
-        end
+        table.insert(lines, prefix .. "," .. exact)
     end
     return table.concat(lines, "\n")
-end
-
-local function isBeaconLine(line)
-    local _, count = line:gsub("|", "")
-    return count >= (BEACON_FIELD_COUNT - 1)
 end
 
 local function deserializeKeywords(content)
     local keywords = {}
     for line in string.gmatch(content, "[^\n]+") do
-        if isBeaconLine(line) then
-            local fields = {}
-            for f in string.gmatch(line .. "|", "([^|]*)|") do
-                table.insert(fields, f)
-            end
-            if #fields >= BEACON_FIELD_COUNT then
-                local prefix = fields[1]
-                local exact = fields[2]
-                if prefix ~= "" or exact ~= "" then
-                    local item = { prefix = prefix, exact = (exact ~= "" and exact) or nil }
-                    local b = makeBeaconConfig()
-                    b.enabled = (fields[4] == "1")
-                    b.showHighlight = (fields[5] == "1")
-                    b.showBeam = (fields[6] == "1")
-                    b.showName = (fields[7] == "1")
-                    b.customName = fields[8] or ""
-                    local r = tonumber(fields[9]) or 255
-                    local g = tonumber(fields[10]) or 200
-                    local bl = tonumber(fields[11]) or 0
-                    b.color = Color3.fromRGB(r, g, bl)
-                    b.beamWidth = tonumber(fields[12]) or 0.5
-                    b.beamHeight = tonumber(fields[13]) or 250
-                    b.hlTransparency = tonumber(fields[14]) or 0.9
-                    b.periodicScan = (fields[15] == "1")
-                    b.scanInterval = tonumber(fields[16]) or 2.5
-                    item.beacon = b
-                    table.insert(keywords, item)
-                end
+        local firstComma = string.find(line, ",")
+        if firstComma then
+            local prefix = string.sub(line, 1, firstComma - 1)
+            local exact = string.sub(line, firstComma + 1)
+            if prefix ~= "" then
+                table.insert(keywords, { prefix = prefix, exact = (exact ~= "" and exact) or nil })
             end
         else
-            local firstComma = string.find(line, ",")
-            if firstComma then
-                local prefix = string.sub(line, 1, firstComma - 1)
-                local exact = string.sub(line, firstComma + 1)
-                if prefix ~= "" then
-                    table.insert(keywords, { prefix = prefix, exact = (exact ~= "" and exact) or nil })
-                end
-            else
-                if line ~= "" then
-                    table.insert(keywords, { prefix = line, exact = nil })
-                end
+            if line ~= "" then
+                table.insert(keywords, { prefix = line, exact = nil })
             end
         end
     end
     return keywords
 end
--- ==================== 序列化结束 ====================
 
 -- ==================== 通用滑块拖动（多指隔离） ====================
 local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
@@ -1758,7 +1622,7 @@ local function applyFly()
     if not hum then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-    char.Animate.Disabled = true
+    if char:FindFirstChild("Animate") then char.Animate.Disabled = true end
     for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
         pcall(function() track:AdjustSpeed(0) end)
     end
@@ -2129,15 +1993,18 @@ local function disableNightVision()
     end
 end
 
--- ==================== 相机偏移 / 自由相机 ====================
+-- ==================== 相机偏移（用户自定义偏移） ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
     local hum = char:FindFirstChildWhichIsA("Humanoid")
     if not hum then return end
+    -- 冻结中由冻结逻辑接管 CameraOffset，这里不覆盖
+    if camFreezeEnabled then return end
     hum.CameraOffset = Vector3.new(camOffsetX, camOffsetY, camOffsetZ)
     if not camOffsetConn then
         camOffsetConn = RunService.Heartbeat:Connect(function()
+            if camFreezeEnabled then return end
             local c = player.Character
             if not c then return end
             local h = c:FindFirstChildWhichIsA("Humanoid")
@@ -2150,6 +2017,20 @@ local function applyCameraOffset()
     end
 end
 
+-- ==================== ★ 自由相机冻结（优化版） ====================
+local function getHum()
+    local char = player.Character
+    if not char then return nil end
+    return char:FindFirstChildOfClass("Humanoid")
+end
+
+local function detectOnVehicle()
+    local hum = getHum()
+    if not hum then return false end
+    return hum.Sit == true or hum.SeatPart ~= nil
+end
+
+-- 单次强制对齐
 local function enforceCameraOnce()
     local cam = workspace.CurrentCamera
     if not cam then return end
@@ -2159,14 +2040,159 @@ local function enforceCameraOnce()
     if player.CameraMode ~= Enum.CameraMode.Classic then
         pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
     end
-    local char = player.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum and cam.CameraSubject ~= hum then
-            pcall(function() cam.CameraSubject = hum end)
-        end
+    local hum = getHum()
+    if hum and cam.CameraSubject ~= hum then
+        pcall(function() cam.CameraSubject = hum end)
+    end
+    if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
+        pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
+    end
+    if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
+        pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
     end
 end
+
+-- 强制相机属性（每帧/同步）
+local function applyCamForcing()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    if cam.CameraType ~= Enum.CameraType.Custom then
+        pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+    end
+    if player.CameraMode ~= Enum.CameraMode.Classic then
+        pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+    end
+    local hum = getHum()
+    if hum and cam.CameraSubject ~= hum then
+        pcall(function() cam.CameraSubject = hum end)
+    end
+    if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
+        pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
+    end
+    if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
+        pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
+    end
+end
+
+-- 强制 Humanoid 属性（含载具自适应）
+local function applyHumanoidForcing()
+    local hum = getHum()
+    if not hum then return end
+    local threshold = currentOnVehicle and OFFSET_THRESHOLD_VEHICLE or OFFSET_THRESHOLD_WALK
+    if hum.CameraOffset.Magnitude > threshold then
+        pcall(function() hum.CameraOffset = Vector3.zero end)
+    end
+end
+
+-- 强制鼠标自由（关键：解决"锁鼠标"导致的回拉）
+local function applyInputForcing()
+    if not FORCE_MOUSE_FREE then return end
+    if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+        pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
+    end
+    if not UserInputService.MouseIconEnabled then
+        pcall(function() UserInputService.MouseIconEnabled = true end)
+    end
+end
+
+-- 清理所有连接
+local function disconnectAll(list)
+    for _, c in ipairs(list) do
+        pcall(function() c:Disconnect() end)
+    end
+    for i = #list, 1, -1 do list[i] = nil end
+end
+
+-- 相机属性同步监听
+local function bindCamWatchers()
+    disconnectAll(camPropConns)
+    if not camFreezeEnabled then return end
+
+    local c1 = player:GetPropertyChangedSignal("CameraMode"):Connect(function()
+        if not camFreezeEnabled then return end
+        if player.CameraMode ~= Enum.CameraMode.Classic then
+            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+        end
+    end)
+    table.insert(camPropConns, c1)
+
+    local c2 = player:GetPropertyChangedSignal("CameraMinZoomDistance"):Connect(function()
+        if not camFreezeEnabled then return end
+        if player.CameraMinZoomDistance ~= FREEZE_MIN_ZOOM then
+            pcall(function() player.CameraMinZoomDistance = FREEZE_MIN_ZOOM end)
+        end
+    end)
+    table.insert(camPropConns, c2)
+
+    local c3 = player:GetPropertyChangedSignal("CameraMaxZoomDistance"):Connect(function()
+        if not camFreezeEnabled then return end
+        if player.CameraMaxZoomDistance ~= FREEZE_MAX_ZOOM then
+            pcall(function() player.CameraMaxZoomDistance = FREEZE_MAX_ZOOM end)
+        end
+    end)
+    table.insert(camPropConns, c3)
+
+    local cam = workspace.CurrentCamera
+    if cam then
+        local c4 = cam:GetPropertyChangedSignal("CameraType"):Connect(function()
+            if not camFreezeEnabled then return end
+            if cam.CameraType ~= Enum.CameraType.Custom then
+                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
+            end
+        end)
+        table.insert(camPropConns, c4)
+
+        local c5 = cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
+            if not camFreezeEnabled then return end
+            local h = getHum()
+            if h and cam.CameraSubject ~= h then
+                pcall(function() cam.CameraSubject = h end)
+            end
+        end)
+        table.insert(camPropConns, c5)
+    end
+end
+
+-- Humanoid 属性同步监听
+local function bindHumWatchers()
+    disconnectAll(humPropConns)
+    if not camFreezeEnabled then return end
+
+    local hum = getHum()
+    if not hum then return end
+
+    local h1 = hum:GetPropertyChangedSignal("CameraOffset"):Connect(function()
+        if not camFreezeEnabled then return end
+        local threshold = currentOnVehicle and OFFSET_THRESHOLD_VEHICLE or OFFSET_THRESHOLD_WALK
+        if hum.CameraOffset.Magnitude > threshold then
+            pcall(function() hum.CameraOffset = Vector3.zero end)
+        end
+    end)
+    table.insert(humPropConns, h1)
+end
+
+-- 输入属性同步监听
+local function bindInputWatchers()
+    disconnectAll(inputPropConns)
+    if not camFreezeEnabled or not FORCE_MOUSE_FREE then return end
+
+    local i1 = UserInputService:GetPropertyChangedSignal("MouseBehavior"):Connect(function()
+        if not camFreezeEnabled then return end
+        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
+        end
+    end)
+    table.insert(inputPropConns, i1)
+
+    local i2 = UserInputService:GetPropertyChangedSignal("MouseIconEnabled"):Connect(function()
+        if not camFreezeEnabled then return end
+        if not UserInputService.MouseIconEnabled then
+            pcall(function() UserInputService.MouseIconEnabled = true end)
+        end
+    end)
+    table.insert(inputPropConns, i2)
+end
+
 local function takeCamSnapshot()
     local cam = workspace.CurrentCamera
     if not cam then return false end
@@ -2184,52 +2210,111 @@ end
 local function ensureCamSnapshot()
     if not camSnapshot then takeCamSnapshot(); tanchuangxiaoxi("已自动记录相机快照", "自由相机") end
 end
+
 local function startCamFreeze(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     if camFreezeEnabled then return end
     camFreezeEnabled = true
+
+    currentOnVehicle = detectOnVehicle()
+
     enforceCameraOnce()
-    local cam = workspace.CurrentCamera
-    if cam then
-        cam:GetPropertyChangedSignal("CameraType"):Connect(function()
+    applyCamForcing()
+    applyHumanoidForcing()
+    applyInputForcing()
+
+    -- 同步监听（属性变化立即回滚）
+    bindCamWatchers()
+    bindHumWatchers()
+    bindInputWatchers()
+
+    -- 层级 1：Camera 优先级之前（相机系统计算前）
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeBindName) end)
+    RunService:BindToRenderStep(camFreezeBindName,
+        Enum.RenderPriority.Camera.Value - 1,
+        function()
             if not camFreezeEnabled then return end
-            if cam.CameraType ~= Enum.CameraType.Custom then
-                pcall(function() cam.CameraType = Enum.CameraType.Custom end)
-            end
-        end)
-        cam:GetPropertyChangedSignal("CameraSubject"):Connect(function()
-            if not camFreezeEnabled then return end
-            local c = player.Character
-            local h = c and c:FindFirstChildOfClass("Humanoid")
-            if h and cam.CameraSubject ~= h then
-                pcall(function() cam.CameraSubject = h end)
-            end
-        end)
-    end
-    player:GetPropertyChangedSignal("CameraMode"):Connect(function()
-        if not camFreezeEnabled then return end
-        if player.CameraMode ~= Enum.CameraMode.Classic then
-            pcall(function() player.CameraMode = Enum.CameraMode.Classic end)
+            applyCamForcing()
+            applyHumanoidForcing()
+            applyInputForcing()
         end
+    )
+
+    -- 层级 2：Last 优先级之前（防止游戏在相机之后改）
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeLateBindName) end)
+    RunService:BindToRenderStep(camFreezeLateBindName,
+        Enum.RenderPriority.Last.Value - 1,
+        function()
+            if not camFreezeEnabled then return end
+            applyCamForcing()
+            applyHumanoidForcing()
+            applyInputForcing()
+        end
+    )
+
+    -- 层级 3：Heartbeat（覆盖物理阶段）
+    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() end
+    camFreezeHeartbeatConn = RunService.Heartbeat:Connect(function()
+        if not camFreezeEnabled then return end
+        currentOnVehicle = detectOnVehicle()
+        applyCamForcing()
+        applyHumanoidForcing()
+        applyInputForcing()
     end)
-    if camFreezeBound and camFreezeConnName then
-        pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
+
+    -- 层级 4：Stepped（覆盖 Stepped 阶段）
+    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() end
+    camFreezeSteppedConn = RunService.Stepped:Connect(function()
+        if not camFreezeEnabled then return end
+        currentOnVehicle = detectOnVehicle()
+        applyCamForcing()
+        applyHumanoidForcing()
+        applyInputForcing()
+    end)
+
+    -- Camera 对象替换监听（过场/重生后可能换 Camera）
+    if not cameraReplacedConn then
+        cameraReplacedConn = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+            if not camFreezeEnabled then return end
+            task.wait(0.1)
+            bindCamWatchers()
+            applyCamForcing()
+        end)
     end
-    camFreezeBound = false
+
     tanchuangxiaoxi("冻结解锁已开启", "自由相机")
 end
+
 local function stopCamFreeze()
     if not camFreezeEnabled then return end
     camFreezeEnabled = false
-    pcall(function() RunService:UnbindFromRenderStep(camFreezeConnName) end)
-    camFreezeBound = false
+
+    disconnectAll(camPropConns)
+    disconnectAll(humPropConns)
+    disconnectAll(inputPropConns)
+
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeBindName) end)
+    pcall(function() RunService:UnbindFromRenderStep(camFreezeLateBindName) end)
+    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() camFreezeHeartbeatConn = nil end
+    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() camFreezeSteppedConn = nil end
+
+    -- 恢复 zoom 快照
+    if camSnapshot then
+        pcall(function() player.CameraMinZoomDistance = camSnapshot.CameraMinZoomDistance end)
+        pcall(function() player.CameraMaxZoomDistance = camSnapshot.CameraMaxZoomDistance end)
+    end
+
     tanchuangxiaoxi("冻结解锁已关闭", "自由相机")
 end
+
 local function doCamSingleUnlock(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     enforceCameraOnce()
+    applyCamForcing()
+    applyInputForcing()
     tanchuangxiaoxi("已单次解锁视角", "自由相机")
 end
+
 local function enableCamNoClip()
     if camNoClipEnabled then return end
     camNoClipEnabled = true
@@ -2268,6 +2353,7 @@ local function manualResnap()
     if takeCamSnapshot() then tanchuangxiaoxi("已重新拍摄快照", "自由相机")
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
+-- ==================== 自由相机冻结结束 ====================
 
 -- ==================== 穿墙 ====================
 local function getCharacterParts()
@@ -2352,6 +2438,7 @@ local function createNoclipWindow()
     local sg = Instance.new("ScreenGui")
     sg.Name = "NoclipWindow"; sg.Parent = playerGui
     sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
+
     local bg = Instance.new("Frame")
     bg.Parent = sg
     bg.Size = UDim2.new(0, 120, 0, 48)
@@ -2360,6 +2447,7 @@ local function createNoclipWindow()
     bg.BackgroundTransparency = 0.2
     bg.BorderSizePixel = 0
     bg.Active = true
+
     local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 5); corner.Parent = bg
     local title = Instance.new("TextLabel")
     title.Parent = bg; title.Size = UDim2.new(1, -25, 0, 14)
@@ -2585,6 +2673,16 @@ local function onCharacterAdded(char)
     stopTpwalking()
     updateSpeedButtonText(); updateMainButtonText(); updateSpeedDisplayLoop()
     task.wait(0.2); applyCameraOffset()
+
+    -- 冻结中：重生后重新绑定 Humanoid 监听
+    if camFreezeEnabled then
+        currentOnVehicle = false
+        bindHumWatchers()
+        applyCamForcing()
+        applyHumanoidForcing()
+        applyInputForcing()
+    end
+
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.Died:Connect(function()
@@ -2602,316 +2700,6 @@ end)
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
--- ==================== 信标系统核心 ====================
-local function getBeaconAnchor(target)
-    if not target then return nil, nil end
-    local adornee, size = nil, nil
-    if target:IsA("BasePart") then
-        adornee = target
-        size = target.Size
-    elseif target:IsA("Model") or target:IsA("Folder") then
-        local head = target:FindFirstChild("Head")
-        local hrp = target:FindFirstChild("HumanoidRootPart")
-        local primary = target:IsA("Model") and target.PrimaryPart or nil
-        if head and head:IsA("BasePart") then adornee = head
-        elseif hrp and hrp:IsA("BasePart") then adornee = hrp
-        elseif primary then adornee = primary
-        else adornee = target:FindFirstChildWhichIsA("BasePart") end
-        if not adornee then return nil, nil end
-        if target:IsA("Model") then
-            local ok, cf, sz = pcall(function() return target:GetBoundingBox() end)
-            if ok and cf and sz then size = sz else size = adornee.Size end
-        else
-            size = adornee.Size
-        end
-    end
-    return adornee, size
-end
-
-local function createBeaconInstance(target, config)
-    local adornee, size = getBeaconAnchor(target)
-    if not adornee or not size then return nil end
-    local halfHeight = size.Y / 2
-    local inst = {
-        target = target,
-        adornee = adornee,
-        halfHeight = halfHeight,
-        config = config,
-        hl = nil, beamModel = nil, beamSegs = {}, beamHL = nil,
-        billboard = nil, nameLabel = nil, distLabel = nil,
-        segHeight = nil,
-    }
-
-    if config.showHighlight then
-        local hl = Instance.new("Highlight")
-        hl.Name = "BeaconHL"
-        hl.FillColor = config.color
-        hl.FillTransparency = 1
-        hl.OutlineColor = Color3.new(1, 1, 1)
-        hl.OutlineTransparency = config.hlTransparency or 0.9
-        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.Adornee = target
-        hl.Parent = target
-        inst.hl = hl
-    end
-
-    if config.showBeam then
-        local beamModel = Instance.new("Model")
-        beamModel.Name = "BeaconBeam"
-        local bh = config.beamHeight or 250
-        local bw = config.beamWidth or 0.5
-        local segCount = math.max(4, math.floor(bh / 15))
-        local segH = bh / segCount
-        for i = 1, segCount do
-            local seg = Instance.new("Part")
-            seg.Name = "Seg" .. i
-            seg.Shape = Enum.PartType.Cylinder
-            seg.Size = Vector3.new(segH, bw, bw)
-            seg.Anchored = true
-            seg.CanCollide = false; seg.CanQuery = false; seg.CanTouch = false
-            seg.Material = Enum.Material.Neon
-            seg.Color = config.color
-            seg.Transparency = 0.8
-            seg.CastShadow = false
-            seg.Parent = beamModel
-            table.insert(inst.beamSegs, seg)
-        end
-        beamModel.Parent = workspace
-        local beamHL = Instance.new("Highlight")
-        beamHL.Name = "BeaconBeamHL"
-        beamHL.Adornee = beamModel
-        beamHL.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        beamHL.FillColor = config.color
-        beamHL.FillTransparency = 0.8
-        beamHL.OutlineColor = config.color
-        beamHL.OutlineTransparency = 0.25
-        beamHL.Parent = beamModel
-        inst.beamModel = beamModel
-        inst.beamHL = beamHL
-        inst.segHeight = segH
-    end
-
-    if config.showName then
-        local displayName = (config.customName and config.customName ~= "") and config.customName or target.Name
-        local bb = Instance.new("BillboardGui")
-        bb.Name = "BeaconBillboard"
-        bb.Size = UDim2.new(0, 220, 0, 60)
-        bb.StudsOffset = Vector3.new(0, halfHeight + (config.beamHeight or 250) + 5, 0)
-        bb.AlwaysOnTop = true
-        bb.LightInfluence = 0
-        bb.MaxDistance = 10000
-        bb.Parent = adornee
-
-        local bg = Instance.new("Frame")
-        bg.Size = UDim2.new(1, 0, 1, 0)
-        bg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        bg.BackgroundTransparency = 0.25
-        bg.BorderSizePixel = 0
-        bg.Parent = bb
-        local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(0, 8); bgc.Parent = bg
-
-        local nameLbl = Instance.new("TextLabel")
-        nameLbl.Size = UDim2.new(1, -10, 0, 24)
-        nameLbl.Position = UDim2.new(0, 5, 0, 4)
-        nameLbl.BackgroundTransparency = 1
-        nameLbl.Text = displayName
-        nameLbl.TextColor3 = config.color
-        nameLbl.Font = Enum.Font.GothamBold
-        nameLbl.TextSize = 16
-        nameLbl.TextXAlignment = Enum.TextXAlignment.Center
-        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-        nameLbl.Parent = bg
-
-        local distLbl = Instance.new("TextLabel")
-        distLbl.Size = UDim2.new(1, -10, 0, 20)
-        distLbl.Position = UDim2.new(0, 5, 0, 30)
-        distLbl.BackgroundTransparency = 1
-        distLbl.Text = "0.0 m"
-        distLbl.TextColor3 = Color3.fromRGB(210, 210, 220)
-        distLbl.Font = Enum.Font.Gotham
-        distLbl.TextSize = 13
-        distLbl.TextXAlignment = Enum.TextXAlignment.Center
-        distLbl.Parent = bg
-
-        inst.billboard = bb
-        inst.nameLabel = nameLbl
-        inst.distLabel = distLbl
-    end
-
-    return inst
-end
-
-local function destroyBeaconInstance(inst)
-    if not inst then return end
-    if inst.hl and inst.hl.Parent then inst.hl:Destroy() end
-    if inst.billboard and inst.billboard.Parent then inst.billboard:Destroy() end
-    if inst.beamModel and inst.beamModel.Parent then inst.beamModel:Destroy() end
-end
-
-local function updateBeaconInstance(inst, myPos)
-    local target = inst.target
-    if not target or not target.Parent then return false end
-
-    local adornee = inst.adornee
-    if not adornee or not adornee.Parent then
-        local newAdornee, newSize = getBeaconAnchor(target)
-        if not newAdornee then return false end
-        inst.adornee = newAdornee
-        adornee = newAdornee
-        if newSize then inst.halfHeight = newSize.Y / 2 end
-        if inst.billboard then
-            inst.billboard.Parent = adornee
-            inst.billboard.StudsOffset = Vector3.new(
-                0, inst.halfHeight + (inst.config.beamHeight or 250) + 5, 0)
-        end
-    end
-
-    local pos = adornee.Position
-    local topPos = pos + Vector3.new(0, inst.halfHeight or 2, 0)
-
-    if inst.beamSegs and #inst.beamSegs > 0 and inst.segHeight then
-        for i, seg in ipairs(inst.beamSegs) do
-            if seg and seg.Parent then
-                local cy = topPos.Y + inst.segHeight * (i - 0.5)
-                seg.CFrame = CFrame.new(topPos.X, cy, topPos.Z)
-                           * CFrame.Angles(0, 0, math.rad(90))
-            end
-        end
-    end
-
-    if inst.distLabel and inst.distLabel.Parent then
-        local dist = (pos - myPos).Magnitude
-        if dist >= 1000 then
-            inst.distLabel.Text = string.format("%.2f km", dist / 1000)
-        else
-            inst.distLabel.Text = string.format("%.1f m", dist)
-        end
-    end
-
-    return true
-end
-
--- [Delta修复] 分批遍历
-local function findKeywordMatches(kwItem)
-    local matches, count = {}, 0
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        count = count + 1
-        if count % 2000 == 0 then task.wait() end
-        local n = obj.Name
-        if n and n ~= "" then
-            local ln = string.lower(n)
-            local matched = false
-            if kwItem.exact and kwItem.exact ~= "" and string.lower(kwItem.exact) == ln then
-                matched = true
-            elseif kwItem.prefix and kwItem.prefix ~= "" and string.find(ln, string.lower(kwItem.prefix), 1, true) then
-                matched = true
-            end
-            if matched then
-                table.insert(matches, obj)
-            end
-        end
-    end
-    return matches
-end
-
-local function collectBeaconTargets()
-    local result = {}
-    for _, kw in ipairs(userProtectKeywords) do
-        if kw.beacon and kw.beacon.enabled then
-            local matches = findKeywordMatches(kw)
-            for _, obj in ipairs(matches) do
-                result[obj] = kw.beacon
-            end
-        end
-    end
-    for obj, cfg in pairs(protectedBeaconMap) do
-        if cfg and cfg.enabled and obj and obj.Parent then
-            result[obj] = cfg
-        end
-    end
-    return result
-end
-
-local function hasPeriodicScanEnabled()
-    for _, kw in ipairs(userProtectKeywords) do
-        if kw.beacon and kw.beacon.enabled and kw.beacon.periodicScan then
-            return true, kw.beacon.scanInterval or 2.5
-        end
-    end
-    return false, 0
-end
-
-local function syncBeacons()
-    local desired = collectBeaconTargets()
-
-    for target, inst in pairs(beaconInstances) do
-        if not target.Parent or not desired[target] then
-            destroyBeaconInstance(inst)
-            beaconInstances[target] = nil
-        end
-    end
-
-    for target, cfg in pairs(desired) do
-        if target.Parent then
-            local inst = beaconInstances[target]
-            if not inst then
-                local newInst = createBeaconInstance(target, cfg)
-                if newInst then beaconInstances[target] = newInst end
-            elseif inst.config ~= cfg then
-                destroyBeaconInstance(inst)
-                local newInst = createBeaconInstance(target, cfg)
-                if newInst then beaconInstances[target] = newInst
-                else beaconInstances[target] = nil end
-            end
-        end
-    end
-end
-
-local beaconFrameConn = nil
-local beaconScanConn = nil
-local beaconLastScan = 0
-
-local function startBeaconLoop()
-    if beaconFrameConn then beaconFrameConn:Disconnect() end
-    beaconFrameConn = RunService.RenderStepped:Connect(function()
-        if isShuttingDown then return end
-        local char = player.Character
-        local myRoot = char and char:FindFirstChild("HumanoidRootPart")
-        local myPos = myRoot and myRoot.Position or (camera and camera.CFrame.Position)
-        if not myPos then return end
-        for target, inst in pairs(beaconInstances) do
-            local ok = updateBeaconInstance(inst, myPos)
-            if not ok then
-                destroyBeaconInstance(inst)
-                beaconInstances[target] = nil
-            end
-        end
-    end)
-
-    if beaconScanConn then beaconScanConn:Disconnect() end
-    beaconScanConn = RunService.Heartbeat:Connect(function()
-        if isShuttingDown then return end
-        local has, interval = hasPeriodicScanEnabled()
-        if not has then return end
-        local t = tick()
-        if t - beaconLastScan < interval then return end
-        beaconLastScan = t
-        syncBeacons()
-    end)
-end
-
-local function stopBeaconLoop()
-    if beaconFrameConn then beaconFrameConn:Disconnect() beaconFrameConn = nil end
-    if beaconScanConn then beaconScanConn:Disconnect() beaconScanConn = nil end
-    for target, inst in pairs(beaconInstances) do
-        destroyBeaconInstance(inst)
-    end
-    beaconInstances = {}
-    beaconLastScan = 0
-end
--- ==================== 信标系统结束 ====================
-
--- ==================== 通知系统 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -3043,6 +2831,7 @@ function showInputDialog(title, defaultText, callback, extraButton)
         sliderBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
         sliderBg.Parent = bg
         local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(1, 0); sc.Parent = sliderBg
+
         sliderKnob = Instance.new("TextButton")
         sliderKnob.Size = UDim2.new(0, 16, 0, 16)
         local initialVal = tonumber(defaultText) or 0.85
@@ -3051,9 +2840,15 @@ function showInputDialog(title, defaultText, callback, extraButton)
         sliderKnob.Text = ""
         sliderKnob.Parent = sliderBg
         local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = sliderKnob
+
         cleanupSlider = makeSliderDraggable(sliderKnob, sliderBg, -8, -5,
-            function(cp) textBox.Text = string.format("%.2f", cp) end,
-            function(cp) if callback then callback(cp) end end)
+            function(cp)
+                textBox.Text = string.format("%.2f", cp)
+            end,
+            function(cp)
+                if callback then callback(cp) end
+            end
+        )
         dialog.Destroying:Connect(function()
             if cleanupSlider then cleanupSlider() end
         end)
@@ -3246,643 +3041,280 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 信标配置对话框 ====================
-local function colorToHexSafe(c)
-    local r = math.floor(math.clamp(c.R, 0, 1) * 255 + 0.5)
-    local g = math.floor(math.clamp(c.G, 0, 1) * 255 + 0.5)
-    local b = math.floor(math.clamp(c.B, 0, 1) * 255 + 0.5)
-    return string.format("#%02X%02X%02X", r, g, b)
+-- ==================== 音量键 UI 控制 ====================
+function setUIVisible(visible)
+    uiVisible = visible
+    Frame.Visible = uiVisible
+    if miniWindow then miniWindow.Visible = uiVisible end
+    tanchuangxiaoxi(uiVisible and "UI已显示" or "UI已隐藏", "音量键")
 end
 
-local function afterBeaconChange()
-    pcall(syncBeacons)
-end
-
-showBeaconConfigDialog = function(getCfg, setCfg, titleHint, onClose)
-    if _activeInputDialog then
-        pcall(function() _activeInputDialog:Destroy() end)
-        _activeInputDialog = nil
+function enableVolumeKey()
+    local hasVD = pcall(function() return Enum.KeyCode.VolumeDown end)
+    local hasVU = pcall(function() return Enum.KeyCode.VolumeUp end)
+    if not hasVD or not hasVU then
+        tanchuangxiaoxi("您的设备不支持音量键", "提示"); return
     end
-
-    local screenSize = getScreenSize()
-    local W = math.min(340, screenSize.X * 0.92)
-    local H = math.min(520, screenSize.Y * 0.9)
-
-    local dialog = Instance.new("ScreenGui")
-    dialog.Name = "BeaconConfigDialog"
-    dialog.Parent = playerGui
-    dialog.IgnoreGuiInset = true
-    dialog.ResetOnSpawn = false
-    _activeInputDialog = dialog
-    dialog.Destroying:Connect(function()
-        if _activeInputDialog == dialog then _activeInputDialog = nil end
+    if volumeKeyEnabled then return end
+    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.VolumeDown then setUIVisible(false)
+        elseif input.KeyCode == Enum.KeyCode.VolumeUp then setUIVisible(true) end
     end)
+    volumeKeyEnabled = true
+    tanchuangxiaoxi("音量键已启用", "设置")
+end
 
-    local workingCfg = makeBeaconConfig(getCfg() or {})
+function disableVolumeKey()
+    if not volumeKeyEnabled then return end
+    if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
+    volumeKeyEnabled = false
+    tanchuangxiaoxi("音量键已禁用", "设置")
+end
 
-    local bg = Instance.new("Frame")
-    bg.Size = UDim2.new(0, W, 0, H)
-    bg.Position = UDim2.new(0.5, -W/2, 0.5, -H/2)
-    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    bg.BackgroundTransparency = 0.1
-    bg.BorderSizePixel = 0
-    bg.Active = true
-    bg.Parent = dialog
-    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -20, 0, 26)
-    title.Position = UDim2.new(0, 10, 0, 8)
-    title.BackgroundTransparency = 1
-    title.Text = "💡 信标配置"
-    title.TextColor3 = Color3.new(1, 1, 1)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 16
-    title.TextXAlignment = Enum.TextXAlignment.Center
-    title.Parent = bg
-
-    local hint = Instance.new("TextLabel")
-    hint.Size = UDim2.new(1, -20, 0, 16)
-    hint.Position = UDim2.new(0, 10, 0, 32)
-    hint.BackgroundTransparency = 1
-    hint.Text = titleHint or ""
-    hint.TextColor3 = Color3.fromRGB(160, 200, 255)
-    hint.Font = Enum.Font.Gotham
-    hint.TextSize = 11
-    hint.TextXAlignment = Enum.TextXAlignment.Center
-    hint.TextTruncate = Enum.TextTruncate.AtEnd
-    hint.Parent = bg
-
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, -16, 1, -160)
-    scroll.Position = UDim2.new(0, 8, 0, 54)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 6
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(120, 120, 180)
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scroll.Parent = bg
-
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.Padding = UDim.new(0, 6)
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Parent = scroll
-
-    local function makeRow(height)
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, -8, 0, height or 32)
-        row.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-        row.BackgroundTransparency = 0.4
-        row.BorderSizePixel = 0
-        row.Parent = scroll
-        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 5); rc.Parent = row
-        return row
+-- ==================== 默认保护管理菜单 ====================
+showDefaultProtectMenu = function()
+    local buttons = {}
+    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
+        local enabled = protectGroupEnabled[group.id]
+        local status = enabled and "✅" or "❌"
+        table.insert(buttons, {
+            text = status .. " " .. group.name .. " (" .. #group.keywords .. " 词)",
+            bgColor = enabled and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+            callback = function(menu)
+                protectGroupEnabled[group.id] = not protectGroupEnabled[group.id]
+                refreshActiveProtectKeywords()
+                local newState = protectGroupEnabled[group.id]
+                tanchuangxiaoxi(group.name .. (newState and " 已启用" or " 已禁用"), "保护管理")
+                menu:Destroy()
+                showDefaultProtectMenu()
+            end
+        })
     end
-
-    do
-        local row = makeRow(36)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1, -90, 1, 0)
-        lbl.Position = UDim2.new(0, 10, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "🔆 开启信标"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 13
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0, 70, 0, 24)
-        toggle.Position = UDim2.new(1, -80, 0.5, -12)
-        toggle.Font = Enum.Font.GothamBold
-        toggle.TextSize = 12
-        toggle.AutoButtonColor = false
-        toggle.Parent = row
-        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 4); tc.Parent = toggle
-
-        local function refresh()
-            if workingCfg.enabled then
-                toggle.Text = "开启"
-                toggle.BackgroundColor3 = Color3.fromRGB(50, 170, 80)
-            else
-                toggle.Text = "关闭"
-                toggle.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-            end
-            toggle.TextColor3 = Color3.new(1, 1, 1)
+    table.insert(buttons, {
+        text = (advancedProtect.humanoid and "✅" or "❌") .. " 🧬 强制保护含 Humanoid（真 NPC）",
+        bgColor = advancedProtect.humanoid and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.humanoid = not advancedProtect.humanoid
+            tanchuangxiaoxi("Humanoid 兜底: " .. (advancedProtect.humanoid and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
         end
-        refresh()
-        toggle.MouseButton1Click:Connect(function()
-            workingCfg.enabled = not workingCfg.enabled
-            refresh()
-        end)
-    end
-
-    do
-        local row = makeRow(50)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0, 90, 1, 0)
-        lbl.Position = UDim2.new(0, 10, 0, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "⬜ 白描框"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0, 70, 0, 24)
-        toggle.Position = UDim2.new(1, -80, 0.5, -12)
-        toggle.Font = Enum.Font.GothamBold
-        toggle.TextSize = 12
-        toggle.AutoButtonColor = false
-        toggle.Parent = row
-        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 4); tc.Parent = toggle
-        local function refresh()
-            if workingCfg.showHighlight then
-                toggle.Text = "开启"
-                toggle.BackgroundColor3 = Color3.fromRGB(50, 170, 80)
-            else
-                toggle.Text = "关闭"
-                toggle.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-            end
-            toggle.TextColor3 = Color3.new(1, 1, 1)
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.prompt and "✅" or "❌") .. " 🚪 强制保护含交互组件",
+        bgColor = advancedProtect.prompt and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.prompt = not advancedProtect.prompt
+            tanchuangxiaoxi("交互组件兜底: " .. (advancedProtect.prompt and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
         end
-        refresh()
-        toggle.MouseButton1Click:Connect(function()
-            workingCfg.showHighlight = not workingCfg.showHighlight
-            refresh()
-        end)
-
-        local trLbl = Instance.new("TextLabel")
-        trLbl.Size = UDim2.new(0, 80, 1, 0)
-        trLbl.Position = UDim2.new(0, 10, 0, 20)
-        trLbl.BackgroundTransparency = 1
-        trLbl.Text = "透明度:"
-        trLbl.TextColor3 = Color3.fromRGB(180, 180, 220)
-        trLbl.Font = Enum.Font.Gotham
-        trLbl.TextSize = 10
-        trLbl.TextXAlignment = Enum.TextXAlignment.Left
-        trLbl.Parent = row
-
-        local trBox = Instance.new("TextBox")
-        trBox.Size = UDim2.new(1, -110, 0, 18)
-        trBox.Position = UDim2.new(0, 90, 0, 26)
-        trBox.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-        trBox.TextColor3 = Color3.new(1, 1, 1)
-        trBox.Text = string.format("%.2f", workingCfg.hlTransparency or 0.9)
-        trBox.Font = Enum.Font.Gotham
-        trBox.TextSize = 11
-        trBox.ClearTextOnFocus = false
-        trBox.Parent = row
-        local trc = Instance.new("UICorner"); trc.CornerRadius = UDim.new(0, 3); trc.Parent = trBox
-        trBox.FocusLost:Connect(function()
-            local n = tonumber(trBox.Text)
-            if n then
-                workingCfg.hlTransparency = math.clamp(n, 0, 1)
-                trBox.Text = string.format("%.2f", workingCfg.hlTransparency)
-            else
-                trBox.Text = string.format("%.2f", workingCfg.hlTransparency or 0.9)
-            end
-        end)
-    end
-
-    do
-        local row = makeRow(74)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0, 90, 0, 20)
-        lbl.Position = UDim2.new(0, 10, 0, 4)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "🔦 光柱"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0, 70, 0, 24)
-        toggle.Position = UDim2.new(1, -80, 0, 4)
-        toggle.Font = Enum.Font.GothamBold
-        toggle.TextSize = 12
-        toggle.AutoButtonColor = false
-        toggle.Parent = row
-        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 4); tc.Parent = toggle
-        local function refresh()
-            if workingCfg.showBeam then
-                toggle.Text = "开启"
-                toggle.BackgroundColor3 = Color3.fromRGB(50, 170, 80)
-            else
-                toggle.Text = "关闭"
-                toggle.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-            end
-            toggle.TextColor3 = Color3.new(1, 1, 1)
+    })
+    table.insert(buttons, {
+        text = (advancedProtect.classes and "✅" or "❌") .. " 🏷️ 强制保护特定类（Tool/Seat 等）",
+        bgColor = advancedProtect.classes and Color3.fromRGB(50, 130, 80) or Color3.fromRGB(90, 60, 60),
+        callback = function(menu)
+            advancedProtect.classes = not advancedProtect.classes
+            tanchuangxiaoxi("保护类兜底: " .. (advancedProtect.classes and "开启" or "关闭"), "保护管理")
+            menu:Destroy()
+            showDefaultProtectMenu()
         end
-        refresh()
-        toggle.MouseButton1Click:Connect(function()
-            workingCfg.showBeam = not workingCfg.showBeam
-            refresh()
-        end)
-
-        local wLbl = Instance.new("TextLabel")
-        wLbl.Size = UDim2.new(0, 40, 0, 18)
-        wLbl.Position = UDim2.new(0, 10, 0, 30)
-        wLbl.BackgroundTransparency = 1
-        wLbl.Text = "粗细:"
-        wLbl.TextColor3 = Color3.fromRGB(180, 180, 220)
-        wLbl.Font = Enum.Font.Gotham
-        wLbl.TextSize = 10
-        wLbl.TextXAlignment = Enum.TextXAlignment.Left
-        wLbl.Parent = row
-
-        local wBox = Instance.new("TextBox")
-        wBox.Size = UDim2.new(0, 60, 0, 18)
-        wBox.Position = UDim2.new(0, 50, 0, 30)
-        wBox.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-        wBox.TextColor3 = Color3.new(1, 1, 1)
-        wBox.Text = string.format("%.2f", workingCfg.beamWidth or 0.5)
-        wBox.Font = Enum.Font.Gotham
-        wBox.TextSize = 11
-        wBox.ClearTextOnFocus = false
-        wBox.Parent = row
-        local wc = Instance.new("UICorner"); wc.CornerRadius = UDim.new(0, 3); wc.Parent = wBox
-        wBox.FocusLost:Connect(function()
-            local n = tonumber(wBox.Text)
-            if n then
-                workingCfg.beamWidth = math.clamp(n, 0.1, 3)
-                wBox.Text = string.format("%.2f", workingCfg.beamWidth)
-            else
-                wBox.Text = string.format("%.2f", workingCfg.beamWidth or 0.5)
-            end
-        end)
-
-        local hLbl = Instance.new("TextLabel")
-        hLbl.Size = UDim2.new(0, 40, 0, 18)
-        hLbl.Position = UDim2.new(0, 120, 0, 30)
-        hLbl.BackgroundTransparency = 1
-        hLbl.Text = "高度:"
-        hLbl.TextColor3 = Color3.fromRGB(180, 180, 220)
-        hLbl.Font = Enum.Font.Gotham
-        hLbl.TextSize = 10
-        hLbl.TextXAlignment = Enum.TextXAlignment.Left
-        hLbl.Parent = row
-
-        local hBox = Instance.new("TextBox")
-        hBox.Size = UDim2.new(1, -175, 0, 18)
-        hBox.Position = UDim2.new(0, 160, 0, 30)
-        hBox.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-        hBox.TextColor3 = Color3.new(1, 1, 1)
-        hBox.Text = tostring(math.floor(workingCfg.beamHeight or 250))
-        hBox.Font = Enum.Font.Gotham
-        hBox.TextSize = 11
-        hBox.ClearTextOnFocus = false
-        hBox.Parent = row
-        local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(0, 3); hc.Parent = hBox
-        hBox.FocusLost:Connect(function()
-            local n = tonumber(hBox.Text)
-            if n then
-                workingCfg.beamHeight = math.clamp(n, 20, 2000)
-                hBox.Text = tostring(math.floor(workingCfg.beamHeight))
-            else
-                hBox.Text = tostring(math.floor(workingCfg.beamHeight or 250))
-            end
-        end)
-    end
-
-    do
-        local row = makeRow(50)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0, 90, 0, 20)
-        lbl.Position = UDim2.new(0, 10, 0, 4)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "🏷 名字"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0, 70, 0, 24)
-        toggle.Position = UDim2.new(1, -80, 0, 4)
-        toggle.Font = Enum.Font.GothamBold
-        toggle.TextSize = 12
-        toggle.AutoButtonColor = false
-        toggle.Parent = row
-        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 4); tc.Parent = toggle
-        local function refresh()
-            if workingCfg.showName then
-                toggle.Text = "开启"
-                toggle.BackgroundColor3 = Color3.fromRGB(50, 170, 80)
-            else
-                toggle.Text = "关闭"
-                toggle.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-            end
-            toggle.TextColor3 = Color3.new(1, 1, 1)
+    })
+    table.insert(buttons, {
+        text = "🔄 重置为默认",
+        bgColor = Color3.fromRGB(200, 130, 0),
+        callback = function(menu)
+            menu:Destroy()
+            resetProtectDefaults()
+            tanchuangxiaoxi("已重置为默认保护配置", "保护管理")
+            showDefaultProtectMenu()
         end
-        refresh()
-        toggle.MouseButton1Click:Connect(function()
-            workingCfg.showName = not workingCfg.showName
-            refresh()
-        end)
+    })
+    createMenu("🔧 默认保护管理", buttons, showProtectMenu)
+end
 
-        local nameBox = Instance.new("TextBox")
-        nameBox.Size = UDim2.new(1, -30, 0, 20)
-        nameBox.Position = UDim2.new(0, 10, 0, 26)
-        nameBox.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-        nameBox.TextColor3 = Color3.new(1, 1, 1)
-        nameBox.PlaceholderText = "自定义名字（空=目标名）"
-        nameBox.Text = workingCfg.customName or ""
-        nameBox.Font = Enum.Font.Gotham
-        nameBox.TextSize = 11
-        nameBox.ClearTextOnFocus = false
-        nameBox.Parent = row
-        local nc = Instance.new("UICorner"); nc.CornerRadius = UDim.new(0, 3); nc.Parent = nameBox
-        nameBox.FocusLost:Connect(function()
-            workingCfg.customName = nameBox.Text or ""
-        end)
-    end
-
-    do
-        local row = makeRow(140)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0, 90, 0, 20)
-        lbl.Position = UDim2.new(0, 10, 0, 4)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "🎨 颜色"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local swatch = Instance.new("Frame")
-        swatch.Size = UDim2.new(0, 40, 0, 20)
-        swatch.Position = UDim2.new(1, -100, 0, 4)
-        swatch.BackgroundColor3 = workingCfg.color
-        swatch.BorderSizePixel = 0
-        swatch.Parent = row
-        local swc = Instance.new("UICorner"); swc.CornerRadius = UDim.new(0, 4); swc.Parent = swatch
-
-        local hexLbl = Instance.new("TextLabel")
-        hexLbl.Size = UDim2.new(0, 55, 0, 20)
-        hexLbl.Position = UDim2.new(1, -55, 0, 4)
-        hexLbl.BackgroundTransparency = 1
-        hexLbl.Text = colorToHexSafe(workingCfg.color)
-        hexLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
-        hexLbl.Font = Enum.Font.Code
-        hexLbl.TextSize = 10
-        hexLbl.TextXAlignment = Enum.TextXAlignment.Right
-        hexLbl.Parent = row
-
-        local h, s, v = workingCfg.color:ToHSV()
-
-        local function makeBar(yPos, label, initial, gradientColors, onUpdate)
-            local ll = Instance.new("TextLabel")
-            ll.Size = UDim2.new(0, 14, 0, 14)
-            ll.Position = UDim2.new(0, 10, 0, yPos)
-            ll.BackgroundTransparency = 1
-            ll.Text = label
-            ll.TextColor3 = Color3.fromRGB(200, 200, 220)
-            ll.Font = Enum.Font.GothamBold
-            ll.TextSize = 10
-            ll.Parent = row
-
-            local barBg = Instance.new("Frame")
-            barBg.Size = UDim2.new(1, -50, 0, 8)
-            barBg.Position = UDim2.new(0, 30, 0, yPos + 3)
-            barBg.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-            barBg.BorderSizePixel = 0
-            barBg.Parent = row
-            local bbc = Instance.new("UICorner"); bbc.CornerRadius = UDim.new(0, 4); bbc.Parent = barBg
-
-            local grad = Instance.new("UIGradient")
-            grad.Color = ColorSequence.new(gradientColors)
-            grad.Parent = barBg
-
-            local knob = Instance.new("TextButton")
-            knob.Size = UDim2.new(0, 12, 0, 12)
-            knob.Position = UDim2.new(initial, -6, 0, -2)
-            knob.BackgroundColor3 = Color3.new(1, 1, 1)
-            knob.Text = ""
-            knob.AutoButtonColor = false
-            knob.Parent = barBg
-            local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = knob
-            local ks = Instance.new("UIStroke"); ks.Color = Color3.fromRGB(20,20,20); ks.Thickness = 1.2; ks.Parent = knob
-
-            local cleanup = makeSliderDraggable(knob, barBg, -6, -2, function(cp)
-                onUpdate(cp)
-            end)
-            return { grad = grad, cleanup = cleanup }
-        end
-
-        local sBar = nil
-        local vBar = nil
-        local updateGradients = function() end
-
-        local hBar = makeBar(28, "H", h, {
-            ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 0, 0)),
-            ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
-            ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
-            ColorSequenceKeypoint.new(0.67, Color3.fromRGB(0, 0, 255)),
-            ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
-            ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 0, 0)),
-        }, function(cp)
-            h = cp
-            workingCfg.color = Color3.fromHSV(h, s, v)
-            swatch.BackgroundColor3 = workingCfg.color
-            hexLbl.Text = colorToHexSafe(workingCfg.color)
-            updateGradients()
-        end)
-
-        sBar = makeBar(50, "S", s, {
-            ColorSequenceKeypoint.new(0, Color3.fromHSV(h, 0, v)),
-            ColorSequenceKeypoint.new(1, Color3.fromHSV(h, 1, v)),
-        }, function(cp)
-            s = cp
-            workingCfg.color = Color3.fromHSV(h, s, v)
-            swatch.BackgroundColor3 = workingCfg.color
-            hexLbl.Text = colorToHexSafe(workingCfg.color)
-            updateGradients()
-        end)
-
-        vBar = makeBar(72, "V", v, {
-            ColorSequenceKeypoint.new(0, Color3.fromHSV(h, s, 0)),
-            ColorSequenceKeypoint.new(1, Color3.fromHSV(h, s, 1)),
-        }, function(cp)
-            v = cp
-            workingCfg.color = Color3.fromHSV(h, s, v)
-            swatch.BackgroundColor3 = workingCfg.color
-            hexLbl.Text = colorToHexSafe(workingCfg.color)
-            updateGradients()
-        end)
-
-        updateGradients = function()
-            if sBar and sBar.grad then
-                sBar.grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromHSV(h, 0, v)),
-                    ColorSequenceKeypoint.new(1, Color3.fromHSV(h, 1, v)),
-                })
-            end
-            if vBar and vBar.grad then
-                vBar.grad.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromHSV(h, s, 0)),
-                    ColorSequenceKeypoint.new(1, Color3.fromHSV(h, s, 1)),
-                })
-            end
-        end
-
-        local PRESETS = {
-            Color3.fromRGB(255, 200, 0),
-            Color3.fromRGB(255, 70, 70),
-            Color3.fromRGB(70, 255, 100),
-            Color3.fromRGB(80, 180, 255),
-            Color3.fromRGB(200, 100, 255),
-            Color3.fromRGB(255, 255, 255),
-        }
-        local presetY = 96
-        for i, color in ipairs(PRESETS) do
-            local pb = Instance.new("TextButton")
-            pb.Size = UDim2.new(0, 22, 0, 22)
-            pb.Position = UDim2.new(0, 10 + (i-1) * 28, 0, presetY)
-            pb.BackgroundColor3 = color
-            pb.Text = ""
-            pb.AutoButtonColor = false
-            pb.Parent = row
-            local pbc = Instance.new("UICorner"); pbc.CornerRadius = UDim.new(1, 0); pbc.Parent = pb
-            local pbs = Instance.new("UIStroke"); pbs.Color = Color3.fromRGB(80, 80, 80); pbs.Thickness = 1; pbs.Parent = pb
-            pb.MouseButton1Click:Connect(function()
-                if not dialog.Parent then return end
-                workingCfg.color = color
-                h, s, v = color:ToHSV()
-                swatch.BackgroundColor3 = color
-                hexLbl.Text = colorToHexSafe(color)
-                updateGradients()
+-- ==================== 保护设置菜单 ====================
+showProtectMenu = function()
+    local buttons = {}
+    table.insert(buttons, {
+        text = "➕ 添加保护关键词（支持逗号批量）",
+        bgColor = Color3.fromRGB(50, 130, 200),
+        callback = function(menu)
+            menu:Destroy()
+            showInputDialog("输入保护关键词（可用逗号分隔批量导入）", "", function(val)
+                if not val or val == "" then return end
+                val = val:match("^%s*(.-)%s*$")
+                if val == "" then return end
+                local keywords = {}
+                for kw in string.gmatch(val, "([^,]+)") do
+                    local trimmed = kw:match("^%s*(.-)%s*$")
+                    if trimmed ~= "" then table.insert(keywords, trimmed) end
+                end
+                if #keywords == 0 then
+                    tanchuangxiaoxi("未检测到有效关键词", "保护"); return
+                end
+                local addedCount = 0
+                for _, kw in ipairs(keywords) do
+                    local isDuplicate = false
+                    for _, item in ipairs(userProtectKeywords) do
+                        if item.prefix and string.lower(item.prefix) == string.lower(kw) then
+                            isDuplicate = true; break
+                        end
+                    end
+                    if not isDuplicate then
+                        table.insert(userProtectKeywords, { prefix = kw, exact = nil })
+                        addedCount = addedCount + 1
+                    end
+                end
+                if addedCount > 0 then tanchuangxiaoxi("成功导入 " .. addedCount .. " 个关键词", "保护")
+                else tanchuangxiaoxi("没有新增关键词（可能已存在）", "保护") end
             end)
         end
-    end
-
-    do
-        local row = makeRow(50)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(0, 120, 0, 20)
-        lbl.Position = UDim2.new(0, 10, 0, 4)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = "🔄 周期扫描"
-        lbl.TextColor3 = Color3.new(1, 1, 1)
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 12
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.Parent = row
-
-        local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0, 70, 0, 24)
-        toggle.Position = UDim2.new(1, -80, 0, 4)
-        toggle.Font = Enum.Font.GothamBold
-        toggle.TextSize = 12
-        toggle.AutoButtonColor = false
-        toggle.Parent = row
-        local tc = Instance.new("UICorner"); tc.CornerRadius = UDim.new(0, 4); tc.Parent = toggle
-        local function refresh()
-            if workingCfg.periodicScan then
-                toggle.Text = "开启"
-                toggle.BackgroundColor3 = Color3.fromRGB(50, 170, 80)
-            else
-                toggle.Text = "关闭"
-                toggle.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
+    })
+    table.insert(buttons, {
+        text = "🎯 从准心拾取关键词",
+        bgColor = Color3.fromRGB(80, 180, 100),
+        callback = function(menu)
+            menu:Destroy()
+            if not SmartBuilding.getTargetInCenter or not SmartBuilding.getTargetRoot then
+                tanchuangxiaoxi("模块未就绪", "保护"); return
             end
-            toggle.TextColor3 = Color3.new(1, 1, 1)
+            local t = SmartBuilding.getTargetInCenter()
+            if not t then tanchuangxiaoxi("未对准目标", "保护"); return end
+            local root = SmartBuilding.getTargetRoot(t)
+            if not root then tanchuangxiaoxi("无法获取根对象", "保护"); return end
+            local rawName = root.Name
+            local prefix = extractKeyword(rawName)
+            for _, item in ipairs(userProtectKeywords) do
+                if item.exact == rawName then tanchuangxiaoxi("已存在: " .. rawName, "保护"); return end
+            end
+            table.insert(userProtectKeywords, { prefix = prefix, exact = rawName })
+            if prefix == string.lower(rawName) then tanchuangxiaoxi("已添加: " .. rawName, "保护")
+            else tanchuangxiaoxi("已添加: " .. prefix .. " | " .. rawName, "保护") end
         end
-        refresh()
-        toggle.MouseButton1Click:Connect(function()
-            workingCfg.periodicScan = not workingCfg.periodicScan
-            refresh()
-        end)
-
-        local hintLbl = Instance.new("TextLabel")
-        hintLbl.Size = UDim2.new(0, 60, 0, 18)
-        hintLbl.Position = UDim2.new(0, 10, 0, 26)
-        hintLbl.BackgroundTransparency = 1
-        hintLbl.Text = "间隔(秒):"
-        hintLbl.TextColor3 = Color3.fromRGB(180, 180, 220)
-        hintLbl.Font = Enum.Font.Gotham
-        hintLbl.TextSize = 10
-        hintLbl.TextXAlignment = Enum.TextXAlignment.Left
-        hintLbl.Parent = row
-
-        local intBox = Instance.new("TextBox")
-        intBox.Size = UDim2.new(1, -110, 0, 18)
-        intBox.Position = UDim2.new(0, 75, 0, 26)
-        intBox.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-        intBox.TextColor3 = Color3.new(1, 1, 1)
-        intBox.Text = string.format("%.1f", workingCfg.scanInterval or 2.5)
-        intBox.Font = Enum.Font.Gotham
-        intBox.TextSize = 11
-        intBox.ClearTextOnFocus = false
-        intBox.Parent = row
-        local ic = Instance.new("UICorner"); ic.CornerRadius = UDim.new(0, 3); ic.Parent = intBox
-        intBox.FocusLost:Connect(function()
-            local n = tonumber(intBox.Text)
-            if n then
-                workingCfg.scanInterval = math.clamp(n, 0.5, 60)
-                intBox.Text = string.format("%.1f", workingCfg.scanInterval)
-            else
-                intBox.Text = string.format("%.1f", workingCfg.scanInterval or 2.5)
+    })
+    table.insert(buttons, {
+        text = "📋 管理保护关键词 (" .. #userProtectKeywords .. ")",
+        bgColor = Color3.fromRGB(150, 100, 200),
+        callback = function(menu)
+            menu:Destroy()
+            if showKeywordManageMenu then showKeywordManageMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "🔧 默认保护管理",
+        bgColor = Color3.fromRGB(90, 130, 170),
+        callback = function(menu)
+            menu:Destroy()
+            if showDefaultProtectMenu then showDefaultProtectMenu() end
+        end
+    })
+    table.insert(buttons, {
+        text = "📥 从文件导入关键词",
+        bgColor = Color3.fromRGB(46, 139, 87),
+        callback = function(menu)
+            menu:Destroy()
+            if not isfolder("ProtectKeywords") then
+                tanchuangxiaoxi("文件夹 ProtectKeywords 不存在，请先导出一次", "保护"); return
             end
-        end)
-    end
+            local files = listfiles("ProtectKeywords")
+            local btnList = {}
+            for _, file in ipairs(files) do
+                if string.sub(file, -4) == ".txt" then
+                    local fileName = string.match(file, "([^/\\]+)%.txt$") or file
+                    local function renameFile(oldFile, oldName)
+                        showInputDialog("输入新文件名", oldName, function(newName)
+                            if not newName or newName == "" then return end
+                            newName = newName:match("^%s*(.-)%s*$")
+                            if newName == "" then return end
+                            local newFilePath = "ProtectKeywords/" .. newName .. ".txt"
+                            if newFilePath == oldFile then tanchuangxiaoxi("不能覆盖自身！", "保护"); return end
+                            if isfile(newFilePath) then
+                                createMenu("文件已存在", {
+                                    { text = "🔄 覆盖原文件", callback = function(subMenu)
+                                        subMenu:Destroy()
+                                        delfile(newFilePath)
+                                        local content = readfile(oldFile)
+                                        writefile(newFilePath, content)
+                                        delfile(oldFile)
+                                        tanchuangxiaoxi("已重命名并覆盖", "保护")
+                                        if showProtectMenu then showProtectMenu() end
+                                    end },
+                                    { text = "✏️ 重命名", callback = function(subMenu)
+                                        subMenu:Destroy()
+                                        renameFile(oldFile, oldName)
+                                    end },
+                                    { text = "❌ 取消", callback = function(subMenu) subMenu:Destroy() end }
+                                }, nil)
+                            else
+                                local content = readfile(oldFile)
+                                writefile(newFilePath, content)
+                                delfile(oldFile)
+                                tanchuangxiaoxi("已重命名", "保护")
+                                if showProtectMenu then showProtectMenu() end
+                            end
+                        end)
+                    end
 
-    local btnFrame = Instance.new("Frame")
-    btnFrame.Size = UDim2.new(1, -20, 0, 40)
-    btnFrame.Position = UDim2.new(0, 10, 1, -50)
-    btnFrame.BackgroundTransparency = 1
-    btnFrame.Parent = bg
-
-    local function makeBtn3(text, idx, bgColor)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1/3, -6, 1, 0)
-        b.Position = UDim2.new((idx - 1) * (1/3) + 0.005, 0, 0, 0)
-        b.BackgroundColor3 = bgColor; b.Text = text
-        b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.GothamBold
-        b.TextSize = 13; b.AutoButtonColor = false; b.TextScaled = true
-        b.Parent = btnFrame
-        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = b
-        return b
-    end
-
-    local resetBtn = makeBtn3("🔄 重置", 1, Color3.fromRGB(200, 130, 0))
-    local cancelBtn = makeBtn3("取消", 2, Color3.fromRGB(150, 0, 0))
-    local okBtn = makeBtn3("确认", 3, Color3.fromRGB(0, 150, 0))
-
-    local function closeDialog()
-        if dialog and dialog.Parent then dialog:Destroy() end
-    end
-
-    resetBtn.MouseButton1Click:Connect(function()
-        local d = makeBeaconConfig({})
-        for k, v in pairs(d) do workingCfg[k] = v end
-        closeDialog()
-        if onClose then pcall(onClose) end
-        showBeaconConfigDialog(getCfg, setCfg, titleHint, onClose)
-    end)
-
-    cancelBtn.MouseButton1Click:Connect(function()
-        closeDialog()
-        if onClose then pcall(onClose) end
-    end)
-
-    okBtn.MouseButton1Click:Connect(function()
-        setCfg(workingCfg)
-        closeDialog()
-        afterBeaconChange()
-        if onClose then pcall(onClose) end
-    end)
+                    table.insert(btnList, {
+                        text = "📄 " .. fileName,
+                        bgColor = Color3.fromRGB(70, 130, 180),
+                        callback = function(subMenu)
+                            subMenu:Destroy()
+                            local content = readfile(file)
+                            local imported = deserializeKeywords(content)
+                            local addedCount = 0
+                            for _, item in ipairs(imported) do
+                                local isDuplicate = false
+                                for _, existing in ipairs(userProtectKeywords) do
+                                    if item.exact and existing.exact == item.exact then isDuplicate = true; break end
+                                    if not item.exact and existing.prefix == item.prefix and not existing.exact then isDuplicate = true; break end
+                                end
+                                if not isDuplicate then
+                                    table.insert(userProtectKeywords, item)
+                                    addedCount = addedCount + 1
+                                end
+                            end
+                            tanchuangxiaoxi("已从 [" .. fileName .. "] 导入 " .. addedCount .. " 条", "保护")
+                            if showProtectMenu then showProtectMenu() end
+                        end,
+                        onLongPress = function(subMenu)
+                            subMenu:Destroy()
+                            createMenu("文件操作: " .. fileName, {
+                                { text = "✏️ 重命名", callback = function(m) m:Destroy(); renameFile(file, fileName) end },
+                                { text = "🗑️ 删除文件", callback = function(m)
+                                    m:Destroy()
+                                    delfile(file)
+                                    tanchuangxiaoxi("已删除文件: " .. fileName, "保护")
+                                    if showProtectMenu then showProtectMenu() end
+                                end },
+                                { text = "❌ 取消", callback = function(m) m:Destroy() end }
+                            }, nil)
+                        end
+                    })
+                end
+            end
+            if #btnList == 0 then tanchuangxiaoxi("文件夹内暂无 .txt 文件", "保护")
+            else createMenu("选择要导入的文件 (长按管理)", btnList, showProtectMenu) end
+        end
+    })
+    table.insert(buttons, {
+        text = "🗑 清空所有关键词",
+        bgColor = Color3.fromRGB(178, 34, 34),
+        callback = function(menu)
+            menu:Destroy()
+            local kwCount = #userProtectKeywords
+            userProtectKeywords = {}
+            local count = 0
+            for _ in pairs(protectedList) do count = count + 1 end
+            protectedList = {}
+            tanchuangxiaoxi(string.format("已清空所有关键词 (%d) 和单目标保护 (%d)", kwCount, count), "保护")
+        end
+    })
+    createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理 ====================
+-- ==================== 关键词管理（含单目标跳转） ====================
 showKeywordManageMenu = function()
     local buttons = {}
 
@@ -3907,7 +3339,7 @@ showKeywordManageMenu = function()
         })
     else
         table.insert(buttons, {
-            text = "📋 复制所有前缀 (" .. #userProtectKeywords .. ")",
+            text = "📋 复制所有前缀",
             bgColor = Color3.fromRGB(50, 130, 200),
             callback = function(menu)
                 local result = {}
@@ -3922,7 +3354,7 @@ showKeywordManageMenu = function()
             end
         })
         table.insert(buttons, {
-            text = "📋 复制所有完整名 (" .. #userProtectKeywords .. ")",
+            text = "📋 复制所有完整名",
             bgColor = Color3.fromRGB(70, 140, 180),
             callback = function(menu)
                 local result = {}
@@ -3937,7 +3369,7 @@ showKeywordManageMenu = function()
             end
         })
         table.insert(buttons, {
-            text = "📤 导出到文件 (" .. #userProtectKeywords .. ")",
+            text = "📤 导出到文件",
             bgColor = Color3.fromRGB(200, 130, 0),
             callback = function(menu)
                 menu:Destroy()
@@ -3977,24 +3409,12 @@ showKeywordManageMenu = function()
         for i, item in ipairs(userProtectKeywords) do
             local idxCopy = i
             local label = item.prefix or item.exact or "?"
-            local beaconMark = (item.beacon and item.beacon.enabled) and "💡 " or ""
             table.insert(buttons, {
-                text = beaconMark .. "🔍 " .. label .. "（短按查看，长按信标）",
-                bgColor = (item.beacon and item.beacon.enabled) and Color3.fromRGB(120, 140, 90) or Color3.fromRGB(60, 100, 140),
+                text = "🔍 " .. label .. "（点击查看/复制）",
+                bgColor = Color3.fromRGB(60, 100, 140),
                 callback = function(menu)
                     menu:Destroy()
                     if showKeywordDetailDialog then showKeywordDetailDialog(idxCopy) end
-                end,
-                onLongPress = function(menu)
-                    menu:Destroy()
-                    local targetItem = userProtectKeywords[idxCopy]
-                    if not targetItem then return end
-                    showBeaconConfigDialog(
-                        function() return targetItem.beacon or makeBeaconConfig({}) end,
-                        function(cfg) targetItem.beacon = cfg end,
-                        "关键词: " .. (targetItem.prefix or targetItem.exact or "?"),
-                        showKeywordManageMenu
-                    )
                 end
             })
         end
@@ -4002,6 +3422,7 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
+-- ==================== 关键词详情 ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -4082,7 +3503,7 @@ showKeywordDetailDialog = function(idx)
         b.Text = text
         b.TextColor3 = Color3.new(1, 1, 1)
         b.Font = Enum.Font.GothamBold
-        b.TextSize = 11
+        b.TextSize = 12
         b.AutoButtonColor = false
         b.Parent = btnFrame
         local cc = Instance.new("UICorner")
@@ -4093,7 +3514,7 @@ showKeywordDetailDialog = function(idx)
     end
 
     local totalW = dialogWidth - 20
-    local btnW = (totalW - 21) / 4
+    local btnW = (totalW - 14) / 3
 
     mkBtn("📋 复制", 0, btnW, Color3.fromRGB(50, 130, 200), function()
         local text = (item.prefix or "") .. "\n" .. (item.exact or "")
@@ -4103,31 +3524,20 @@ showKeywordDetailDialog = function(idx)
         else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
     end)
 
-    mkBtn("💡 信标", btnW + 7, btnW, Color3.fromRGB(120, 140, 90), function()
-        dialog:Destroy()
-        showBeaconConfigDialog(
-            function() return item.beacon or makeBeaconConfig({}) end,
-            function(cfg) item.beacon = cfg end,
-            "关键词: " .. (item.prefix or item.exact or "?"),
-            function() if showKeywordDetailDialog then showKeywordDetailDialog(idx) end end
-        )
-    end)
-
     local targetItem = userProtectKeywords[idx]
-    mkBtn("❌ 删除", 2 * (btnW + 7), btnW, Color3.fromRGB(178, 34, 34), function()
-        for i, it in ipairs(userProtectKeywords) do
-            if it == targetItem then
+    mkBtn("❌ 删除", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
+        for i, item in ipairs(userProtectKeywords) do
+            if item == targetItem then
                 table.remove(userProtectKeywords, i)
                 break
             end
         end
         dialog:Destroy()
         tanchuangxiaoxi("已删除", "保护")
-        afterBeaconChange()
         if showKeywordManageMenu then showKeywordManageMenu() end
     end)
 
-    mkBtn("返回", 3 * (btnW + 7), btnW, Color3.fromRGB(100, 100, 100), function()
+    mkBtn("返回", 2 * (btnW + 7), btnW, Color3.fromRGB(100, 100, 100), function()
         dialog:Destroy()
         if showKeywordManageMenu then showKeywordManageMenu() end
     end)
@@ -4157,9 +3567,11 @@ showSingleProtectMenu = function()
                 if #names == 0 then
                     tanchuangxiaoxi("未检测到有效名字", "保护"); return
                 end
+
                 local added, scanned = 0, 0
                 local nameSet = {}
                 for _, n in ipairs(names) do nameSet[n] = true end
+
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     scanned = scanned + 1
                     if nameSet[obj.Name] and not protectedList[obj] then
@@ -4185,6 +3597,7 @@ showSingleProtectMenu = function()
             if not t then tanchuangxiaoxi("未对准目标", "保护"); return end
             local root = SmartBuilding.getTargetRoot(t)
             if not root then tanchuangxiaoxi("无法获取根对象", "保护"); return end
+
             if protectedList[root] then
                 tanchuangxiaoxi("已保护: " .. root.Name, "保护")
             else
@@ -4226,7 +3639,8 @@ showSingleProtectMenu = function()
                                 local firstComma = string.find(line, ",")
                                 if firstComma then
                                     local exact = string.sub(line, firstComma + 1)
-                                    if exact ~= "" then table.insert(names, exact)
+                                    if exact ~= "" then
+                                        table.insert(names, exact)
                                     else
                                         local prefix = string.sub(line, 1, firstComma - 1)
                                         if prefix ~= "" then table.insert(names, prefix) end
@@ -4237,6 +3651,7 @@ showSingleProtectMenu = function()
                             end
                             local nameSet = {}
                             for _, n in ipairs(names) do nameSet[n] = true end
+
                             local added = 0
                             for _, obj in ipairs(workspace:GetDescendants()) do
                                 if nameSet[obj.Name] and not protectedList[obj] then
@@ -4261,9 +3676,7 @@ showSingleProtectMenu = function()
         callback = function(menu)
             menu:Destroy()
             protectedList = {}
-            protectedBeaconMap = {}
             tanchuangxiaoxi("已清空 " .. protectedCount .. " 个单目标保护", "保护")
-            afterBeaconChange()
             if showSingleProtectMenu then showSingleProtectMenu() end
         end
     })
@@ -4271,7 +3684,7 @@ showSingleProtectMenu = function()
     createMenu("🎯 单目标保护管理", buttons, showKeywordManageMenu)
 end
 
--- ==================== 管理单目标 ====================
+-- ==================== 管理单目标（子列表） ====================
 showSingleManageMenu = function()
     local buttons = {}
 
@@ -4281,7 +3694,6 @@ showSingleManageMenu = function()
             table.insert(validTargets, obj)
         else
             protectedList[obj] = nil
-            protectedBeaconMap[obj] = nil
         end
     end
     local total = #validTargets
@@ -4303,12 +3715,21 @@ showSingleManageMenu = function()
             menu:Destroy()
             local names = {}
             for _, obj in ipairs(validTargets) do
-                if obj.Name and obj.Name ~= "" then table.insert(names, obj.Name) end
+                local n = obj.Name
+                if n and n ~= "" then
+                    table.insert(names, n)
+                end
             end
-            if #names == 0 then tanchuangxiaoxi("没有有效的名字可复制", "保护"); return end
+            if #names == 0 then
+                tanchuangxiaoxi("没有有效的名字可复制", "保护"); return
+            end
             local text = table.concat(names, ",")
-            if setclipboard then pcall(setclipboard, text); tanchuangxiaoxi("已复制 " .. #names .. " 个名字", "保护")
-            else tanchuangxiaoxi("剪贴板不可用", "保护") end
+            if setclipboard then
+                pcall(setclipboard, text)
+                tanchuangxiaoxi("已复制 " .. #names .. " 个名字", "保护")
+            else
+                tanchuangxiaoxi("剪贴板不可用", "保护")
+            end
         end
     })
 
@@ -4320,12 +3741,20 @@ showSingleManageMenu = function()
             local paths = {}
             for _, obj in ipairs(validTargets) do
                 local p = obj:GetFullName()
-                if p and p ~= "" then table.insert(paths, p) end
+                if p and p ~= "" then
+                    table.insert(paths, p)
+                end
             end
-            if #paths == 0 then tanchuangxiaoxi("没有有效的路径可复制", "保护"); return end
+            if #paths == 0 then
+                tanchuangxiaoxi("没有有效的路径可复制", "保护"); return
+            end
             local text = table.concat(paths, ",")
-            if setclipboard then pcall(setclipboard, text); tanchuangxiaoxi("已复制 " .. #paths .. " 条路径", "保护")
-            else tanchuangxiaoxi("剪贴板不可用", "保护") end
+            if setclipboard then
+                pcall(setclipboard, text)
+                tanchuangxiaoxi("已复制 " .. #paths .. " 条路径", "保护")
+            else
+                tanchuangxiaoxi("剪贴板不可用", "保护")
+            end
         end
     })
 
@@ -4335,36 +3764,19 @@ showSingleManageMenu = function()
         callback = function(menu)
             menu:Destroy()
             if not isfolder("ProtectKeywords") then makefolder("ProtectKeywords") end
+
             local lines = {}
             for _, obj in ipairs(validTargets) do
-                if obj.Name and obj.Name ~= "" then
-                    local cfg = protectedBeaconMap[obj]
-                    if cfg and cfg.enabled then
-                        local c = cfg.color
-                        table.insert(lines, table.concat({
-                            obj.Name, "",
-                            "1",
-                            "1",
-                            cfg.showHighlight and "1" or "0",
-                            cfg.showBeam and "1" or "0",
-                            cfg.showName and "1" or "0",
-                            (cfg.customName or ""):gsub("|", "/"),
-                            tostring(math.floor(c.R * 255 + 0.5)),
-                            tostring(math.floor(c.G * 255 + 0.5)),
-                            tostring(math.floor(c.B * 255 + 0.5)),
-                            string.format("%.3f", cfg.beamWidth or 0.5),
-                            string.format("%.3f", cfg.beamHeight or 250),
-                            string.format("%.3f", cfg.hlTransparency or 0.9),
-                            cfg.periodicScan and "1" or "0",
-                            string.format("%.3f", cfg.scanInterval or 2.5),
-                        }, "|"))
-                    else
-                        table.insert(lines, obj.Name .. ",")
-                    end
+                local n = obj.Name
+                if n and n ~= "" then
+                    table.insert(lines, "," .. n)
                 end
             end
-            if #lines == 0 then tanchuangxiaoxi("没有有效的对象名字可导出", "保护"); return end
+            if #lines == 0 then
+                tanchuangxiaoxi("没有有效的对象名字可导出", "保护"); return
+            end
             local exportText = table.concat(lines, "\n")
+
             showInputDialog("输入导出文件名", "singles_" .. os.date("%Y%m%d_%H%M%S"), function(filename)
                 if not filename or filename == "" then return end
                 filename = filename:match("^%s*(.-)%s*$")
@@ -4405,26 +3817,12 @@ showSingleManageMenu = function()
         local objCopy = obj
         local displayName = obj.Name
         if #displayName > 30 then displayName = string.sub(displayName, 1, 27) .. "..." end
-        local cfg = protectedBeaconMap[obj]
-        local beaconMark = (cfg and cfg.enabled) and "💡 " or ""
         table.insert(buttons, {
-            text = beaconMark .. "🎯 " .. displayName .. "（短按查看，长按信标）",
-            bgColor = (cfg and cfg.enabled) and Color3.fromRGB(120, 140, 90) or Color3.fromRGB(60, 100, 140),
+            text = "🎯 " .. displayName .. "（点击查看）",
+            bgColor = Color3.fromRGB(60, 100, 140),
             callback = function(menu)
                 menu:Destroy()
                 if showSingleDetailDialog then showSingleDetailDialog(objCopy) end
-            end,
-            onLongPress = function(menu)
-                menu:Destroy()
-                if not objCopy or not objCopy.Parent then
-                    tanchuangxiaoxi("对象已不存在", "保护"); return
-                end
-                showBeaconConfigDialog(
-                    function() return protectedBeaconMap[objCopy] or makeBeaconConfig({}) end,
-                    function(cfg2) protectedBeaconMap[objCopy] = cfg2 end,
-                    "单目标: " .. objCopy.Name,
-                    showSingleManageMenu
-                )
             end
         })
     end
@@ -4524,7 +3922,7 @@ showSingleDetailDialog = function(targetObj)
         b.Text = text
         b.TextColor3 = Color3.new(1, 1, 1)
         b.Font = Enum.Font.GothamBold
-        b.TextSize = 11
+        b.TextSize = 12
         b.AutoButtonColor = false
         b.Parent = btnFrame
         local cc = Instance.new("UICorner")
@@ -4535,7 +3933,7 @@ showSingleDetailDialog = function(targetObj)
     end
 
     local totalW = dialogWidth - 20
-    local btnW = (totalW - 21) / 4
+    local btnW = (totalW - 14) / 3
 
     mkBtn("📋 复制名字", 0, btnW, Color3.fromRGB(50, 130, 200), function()
         local nameToCopy = targetObj.Name
@@ -4548,26 +3946,14 @@ showSingleDetailDialog = function(targetObj)
         else tanchuangxiaoxi("剪贴板不可用，请长按文本框手动复制", "保护") end
     end)
 
-    mkBtn("💡 信标", btnW + 7, btnW, Color3.fromRGB(120, 140, 90), function()
-        dialog:Destroy()
-        showBeaconConfigDialog(
-            function() return protectedBeaconMap[targetObj] or makeBeaconConfig({}) end,
-            function(cfg) protectedBeaconMap[targetObj] = cfg end,
-            "单目标: " .. targetObj.Name,
-            function() showSingleDetailDialog(targetObj) end
-        )
-    end)
-
-    mkBtn("❌ 取消保护", 2 * (btnW + 7), btnW, Color3.fromRGB(178, 34, 34), function()
+    mkBtn("❌ 取消保护", btnW + 7, btnW, Color3.fromRGB(178, 34, 34), function()
         protectedList[targetObj] = nil
-        protectedBeaconMap[targetObj] = nil
         dialog:Destroy()
         tanchuangxiaoxi("已取消保护: " .. targetObj.Name, "保护")
-        afterBeaconChange()
         if showSingleManageMenu then showSingleManageMenu() end
     end)
 
-    mkBtn("返回", 3 * (btnW + 7), btnW, Color3.fromRGB(100, 100, 100), function()
+    mkBtn("返回", 2 * (btnW + 7), btnW, Color3.fromRGB(100, 100, 100), function()
         dialog:Destroy()
         if showSingleManageMenu then showSingleManageMenu() end
     end)
@@ -4727,7 +4113,7 @@ function showMainMenu()
                 menu:Destroy()
                 local screenSize = getScreenSize()
                 local dialogWidth = math.min(450, screenSize.X * 0.8)
-                local dialogHeight = math.min(560, screenSize.Y * 0.85)
+                local dialogHeight = math.min(500, screenSize.Y * 0.8)
                 local dialog = Instance.new("ScreenGui")
                 _activeMenuDialog = dialog
                 dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
@@ -4755,26 +4141,42 @@ function showMainMenu()
                 sf.CanvasSize = UDim2.new(0, 0, 0, 0)
                 sf.ScrollBarThickness = 8; sf.BackgroundTransparency = 1; sf.BorderSizePixel = 0
                 local lines = {
-                    "版本 8.4.2（稳定版继承 + Delta 兼容）",
+                    "版本 8.3.25 更新内容：",
                     "",
-                    "【Delta 兼容】",
-                    "  · HTTP request 超时保护（5秒）",
-                    "  · getgenv 回退处理",
-                    "  · 等待 LocalPlayer 防止注入过早",
-                    "  · findKeywordMatches 分批处理防卡死",
+                    "【新增】碰撞删除",
+                    "  · 建筑不阻挡玩家（不是删除建筑）",
+                    "  · CanCollide=false，完全可逆",
                     "",
-                    "【信标系统】",
-                    "  · 白描框 + 光柱 + 名字牌",
-                    "  · 颜色 / 粗细 / 高度 / 透明度全可调",
-                    "  · 支持周期扫描新同名目标",
-                    "  · 短按查看、长按信标设置",
+                    "【新增】默认保护分类管理",
+                    "  · 按分类显示：NPC/宝箱/交互物/玩家/空气墙",
+                    "  · 单个分类可独立禁用",
+                    "  · 高级兜底：Humanoid / 交互组件 / 特定类",
                     "",
-                    "【核心修复】",
-                    "  · 碰撞删除关闭后 CanCollide 恢复",
-                    "  · 单目标导出格式（名字放入 prefix）",
-                    "  · checkIgnored 补上用户关键词检查",
-                    "  · isBeaconLine 字段判断严格化",
-                    "  · showBrightnessDialog 前向声明",
+                    "【修复】建筑有大有小",
+                    "  · 深度限制从 15 提升到 100",
+                    "",
+                    "【修复】弹窗互斥",
+                    "  · 长按不再叠加菜单",
+                    "",
+                    "【修复】保护补全",
+                    "  · 非 BasePart 子对象（贴图/界面/特效）也受保护",
+                    "  · 准星拾取关键词后，扫描/添加完全跳过该对象",
+                    "",
+                    "【新增】单目标保护独立菜单",
+                    "  · 管理保护关键词 → 顶部「🎯 单目标保护」",
+                    "  · 支持按名字批量添加",
+                    "  · 支持从准心拾取",
+                    "  · 支持复制名字 / 复制路径 / 导出 / 导入 / 清空",
+                    "",
+                    "【修复】所有滑块拖动多指隔离",
+                    "  · 控制窗透明度 / 透视窗亮度 / 输入框滑块",
+                    "  · 一只手按住别处，另一只手拖滑块不会乱跳",
+                    "",
+                    "【优化】自由相机冻结（本次）",
+                    "  · MouseBehavior 同步拦截（解决锁鼠标回拉）",
+                    "  · CameraOffset 载具自适应（阈值 0.01 → 4.0）",
+                    "  · 4 层兜底：同步 + Camera-1 + Last-1 + Heartbeat + Stepped",
+                    "  · Camera 对象替换监听（过场后自动重绑）",
                     "",
                     "感谢使用！"
                 }
@@ -4811,8 +4213,8 @@ function showMainMenu()
             callback = function(menu)
                 menu:Destroy()
                 local screenSize = getScreenSize()
-                local dialogWidth = math.min(420, screenSize.X * 0.85)
-                local dialogHeight = math.min(500, screenSize.Y * 0.85)
+                local dialogWidth = math.min(400, screenSize.X * 0.8)
+                local dialogHeight = math.min(450, screenSize.Y * 0.8)
                 local dialog = Instance.new("ScreenGui")
                 _activeMenuDialog = dialog
                 dialog.Parent = playerGui; dialog.IgnoreGuiInset = true; dialog.ResetOnSpawn = false
@@ -4849,18 +4251,18 @@ function showMainMenu()
                     "🔹 【准心添加】短按 = 添加目标，长按 = 开关准心",
                     "🔹 【保护按钮】短按 = 切换单目标保护",
                     "🔹 【保护按钮】长按 = 保护设置菜单",
-                    "🔹 管理保护关键词 / 单目标：",
-                    "   - 短按条目 = 查看详情 / 复制",
-                    "   - 长按条目 = 打开信标设置",
-                    "   - 💡 图标 = 该条目已开启信标",
-                    "🔹 信标系统（独立于透明）：",
-                    "   - 白描框 + 光柱 + 名字牌",
-                    "   - 颜色 / 粗细 / 高度 / 透明度全可调",
-                    "   - 支持周期扫描新同名目标（可调间隔）",
+                    "🔹 管理保护关键词：",
+                    "   - 顶部「🎯 单目标保护」跳转独立菜单",
+                    "   - 单目标：批量添加 / 准心拾取 / 复制名字 / 复制路径 / 导出 / 导入 / 清空",
+                    "   - 关键词：复制 / 导出 / 查看详情",
                     "🔹 【碰撞删除】建筑不阻挡玩家，可逆",
                     "🔹 保护已补全：非 BasePart 子对象也受保护",
-                    "🔹 所有滑块多指隔离",
+                    "🔹 所有滑块多指隔离：一只手按别处，另一只手拖滑块不会乱跳",
                     "🔹 硬保护：本机玩家永远被保护",
+                    "🔹 【自由相机】冻结解锁",
+                    "   - MouseBehavior 拦截：游戏锁鼠标时强制回滚",
+                    "   - CameraOffset 载具自适应",
+                    "   - 多层兜底：同步 + RenderStep + Heartbeat + Stepped",
                     "🔹 结束脚本会彻底还原所有状态再关闭",
                 }
                 local cc = Instance.new("Frame")
@@ -5233,7 +4635,6 @@ function showCamOffsetDialog()
     return dialog
 end
 
--- ==================== 移动向量 ====================
 local function getMoveVector(dir, rootPart)
     local step = dir * moveStep
     if moveMode == "角色上下" then return rootPart.CFrame.UpVector * step
@@ -5267,7 +4668,7 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 按钮绑定：上升 / 下降 ====================
+-- ==================== 按钮绑定：上升 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -5299,6 +4700,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     down.MouseButton1Down:Connect(function()
@@ -5330,7 +4732,7 @@ do
     end)
 end
 
--- ==================== 加速 / 减速 ====================
+-- ==================== 按钮绑定：加速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -5370,6 +4772,7 @@ do
     end)
 end
 
+-- ==================== 按钮绑定：减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
@@ -5413,7 +4816,7 @@ do
     end)
 end
 
--- ==================== speed 多功能按钮 ====================
+-- ==================== 按钮绑定：speed 多功能按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5500,7 +4903,7 @@ do
     end)
 end
 
--- ==================== onof 主按钮 ====================
+-- ==================== 按钮绑定：onof 主按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5564,7 +4967,7 @@ do
     end)
 end
 
--- ==================== hide 隐藏/设置 ====================
+-- ==================== 按钮绑定：隐藏/设置 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -5670,7 +5073,7 @@ do
     end)
 end
 
--- ==================== 亮度设置弹窗 ====================
+-- ==================== 透视亮度设置弹窗 ====================
 function showBrightnessDialog()
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -5730,12 +5133,14 @@ function showBrightnessDialog()
     knob.BackgroundColor3 = Color3.fromRGB(200, 200, 200); knob.Text = ""
     knob.Parent = sliderBg
     local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1, 0); kc.Parent = knob
+
     local cleanupSlider = makeSliderDraggable(knob, sliderBg, -10, -8, function(cp)
         local nb = minBright + cp * (maxBright - minBright)
         nb = math.floor(nb * 100) / 100
         nightVisionBrightness = nb
         if nightVisionEnabled then applyNightVision() end
     end)
+
     local conn
     conn = RunService.RenderStepped:Connect(function()
         local sp = (nightVisionBrightness - minBright) / (maxBright - minBright)
@@ -5794,194 +5199,13 @@ function showBrightnessDialog()
     end)
 end
 
--- ==================== 保护设置菜单 ====================
-showProtectMenu = function()
-    local buttons = {}
-    table.insert(buttons, {
-        text = "🔑 管理保护关键词 (" .. #userProtectKeywords .. ")",
-        bgColor = Color3.fromRGB(80, 140, 200),
-        callback = function(menu)
-            menu:Destroy()
-            if showKeywordManageMenu then showKeywordManageMenu() end
-        end
-    })
-    table.insert(buttons, {
-        text = "🛡 默认保护分类",
-        bgColor = Color3.fromRGB(100, 180, 120),
-        callback = function(menu)
-            menu:Destroy()
-            if showDefaultProtectMenu then showDefaultProtectMenu() end
-        end
-    })
-    table.insert(buttons, {
-        text = "➕ 添加保护关键词",
-        bgColor = Color3.fromRGB(60, 160, 200),
-        callback = function(menu)
-            menu:Destroy()
-            showInputDialog("输入关键词（多个用逗号分隔）", "", function(input)
-                if not input or input == "" then return end
-                local added = 0
-                for kw in string.gmatch(input, "([^,]+)") do
-                    local trimmed = kw:match("^%s*(.-)%s*$")
-                    if trimmed ~= "" then
-                        local exists = false
-                        for _, item in ipairs(userProtectKeywords) do
-                            if (item.prefix == trimmed) or (item.exact == trimmed) then
-                                exists = true; break
-                            end
-                        end
-                        if not exists then
-                            table.insert(userProtectKeywords, { prefix = trimmed, exact = nil })
-                            added = added + 1
-                        end
-                    end
-                end
-                tanchuangxiaoxi("已添加 " .. added .. " 个关键词", "保护")
-                if showProtectMenu then showProtectMenu() end
-            end)
-        end
-    })
-    table.insert(buttons, {
-        text = "📥 从文件导入关键词",
-        bgColor = Color3.fromRGB(120, 100, 180),
-        callback = function(menu)
-            menu:Destroy()
-            if not isfolder("ProtectKeywords") then
-                tanchuangxiaoxi("文件夹 ProtectKeywords 不存在", "保护"); return
-            end
-            local files = listfiles("ProtectKeywords")
-            local btnList = {}
-            for _, file in ipairs(files) do
-                if string.sub(file, -4) == ".txt" then
-                    local fileName = string.match(file, "([^/\\]+)%.txt$") or file
-                    table.insert(btnList, {
-                        text = "📄 " .. fileName,
-                        bgColor = Color3.fromRGB(70, 130, 180),
-                        callback = function(subMenu)
-                            subMenu:Destroy()
-                            local content = readfile(file)
-                            local parsed = deserializeKeywords(content)
-                            local added = 0
-                            for _, item in ipairs(parsed) do
-                                table.insert(userProtectKeywords, item)
-                                added = added + 1
-                            end
-                            tanchuangxiaoxi("已从 [" .. fileName .. "] 导入 " .. added .. " 条", "保护")
-                            afterBeaconChange()
-                            if showProtectMenu then showProtectMenu() end
-                        end
-                    })
-                end
-            end
-            if #btnList == 0 then tanchuangxiaoxi("暂无 .txt 文件", "保护")
-            else createMenu("选择要导入的文件", btnList, showProtectMenu) end
-        end
-    })
-    table.insert(buttons, {
-        text = "🗑 清空所有关键词 (" .. #userProtectKeywords .. ")",
-        bgColor = Color3.fromRGB(180, 50, 50),
-        callback = function(menu)
-            menu:Destroy()
-            local n = #userProtectKeywords
-            userProtectKeywords = {}
-            tanchuangxiaoxi("已清空 " .. n .. " 条关键词", "保护")
-            afterBeaconChange()
-            if showProtectMenu then showProtectMenu() end
-        end
-    })
-    createMenu("🛡 保护设置", buttons, nil)
-end
-
-showDefaultProtectMenu = function()
-    local buttons = {}
-    for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
-        local enabled = protectGroupEnabled[group.id]
-        table.insert(buttons, {
-            text = (enabled and "✅ " or "❌ ") .. group.name,
-            bgColor = enabled and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
-            callback = function(menu)
-                protectGroupEnabled[group.id] = not protectGroupEnabled[group.id]
-                refreshActiveProtectKeywords()
-                menu:Destroy()
-                if showDefaultProtectMenu then showDefaultProtectMenu() end
-            end
-        })
-    end
-    table.insert(buttons, {
-        text = (advancedProtect.humanoid and "✅ " or "❌ ") .. "含 Humanoid 的对象",
-        bgColor = advancedProtect.humanoid and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
-        callback = function(menu)
-            advancedProtect.humanoid = not advancedProtect.humanoid
-            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
-        end
-    })
-    table.insert(buttons, {
-        text = (advancedProtect.prompt and "✅ " or "❌ ") .. "含交互组件 (Prompt/ClickDetector)",
-        bgColor = advancedProtect.prompt and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
-        callback = function(menu)
-            advancedProtect.prompt = not advancedProtect.prompt
-            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
-        end
-    })
-    table.insert(buttons, {
-        text = (advancedProtect.classes and "✅ " or "❌ ") .. "保护特定类 (Spawn/Tool/Seat...)",
-        bgColor = advancedProtect.classes and Color3.fromRGB(60, 140, 80) or Color3.fromRGB(80, 60, 60),
-        callback = function(menu)
-            advancedProtect.classes = not advancedProtect.classes
-            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
-        end
-    })
-    table.insert(buttons, {
-        text = "🔄 重置为默认（全部开启）",
-        bgColor = Color3.fromRGB(200, 130, 0),
-        callback = function(menu)
-            resetProtectDefaults()
-            menu:Destroy(); if showDefaultProtectMenu then showDefaultProtectMenu() end
-        end
-    })
-    createMenu("🛡 默认保护分类", buttons, showProtectMenu)
-end
-
--- ==================== 音量键 ====================
-function setUIVisible(visible)
-    uiVisible = visible
-    Frame.Visible = uiVisible
-    if miniWindow then miniWindow.Visible = uiVisible end
-    tanchuangxiaoxi(uiVisible and "UI已显示" or "UI已隐藏", "音量键")
-end
-
-function enableVolumeKey()
-    local hasVD = pcall(function() return Enum.KeyCode.VolumeDown end)
-    local hasVU = pcall(function() return Enum.KeyCode.VolumeUp end)
-    if not hasVD or not hasVU then
-        tanchuangxiaoxi("您的设备不支持音量键", "提示"); return
-    end
-    if volumeKeyEnabled then return end
-    volumeKeyConnection = UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.VolumeDown then setUIVisible(false)
-        elseif input.KeyCode == Enum.KeyCode.VolumeUp then setUIVisible(true) end
-    end)
-    volumeKeyEnabled = true
-    tanchuangxiaoxi("音量键已启用", "设置")
-end
-
-function disableVolumeKey()
-    if not volumeKeyEnabled then return end
-    if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
-    volumeKeyEnabled = false
-    tanchuangxiaoxi("音量键已禁用", "设置")
-end
-
 -- ==================== 彻底关闭 ====================
 function fullShutdown()
-    isShuttingDown = true
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
     if nightVisionEnabled then pcall(disableNightVision) end
     if SmartBuilding.isActive() then pcall(SmartBuilding.closeUI) end
-
-    pcall(stopBeaconLoop)
 
     pcall(stopCamFreeze)
     pcall(disableCamNoClip)
@@ -6003,6 +5227,14 @@ function fullShutdown()
     if volumeKeyConnection then volumeKeyConnection:Disconnect() volumeKeyConnection = nil end
     volumeKeyEnabled = false
 
+    -- 清空冻结相关
+    disconnectAll(camPropConns)
+    disconnectAll(humPropConns)
+    disconnectAll(inputPropConns)
+    if camFreezeHeartbeatConn then camFreezeHeartbeatConn:Disconnect() camFreezeHeartbeatConn = nil end
+    if camFreezeSteppedConn then camFreezeSteppedConn:Disconnect() camFreezeSteppedConn = nil end
+    if cameraReplacedConn then cameraReplacedConn:Disconnect() cameraReplacedConn = nil end
+
     if _activeInputDialog then
         pcall(function() _activeInputDialog:Destroy() end)
         _activeInputDialog = nil
@@ -6011,7 +5243,6 @@ function fullShutdown()
         pcall(function() _activeMenuDialog:Destroy() end)
         _activeMenuDialog = nil
     end
-    isShuttingDown = false
 end
 
 main.Destroying:Connect(function()
@@ -6030,5 +5261,3 @@ task.spawn(function()
     task.wait(1)
     takeCamSnapshot()
 end)
-
-startBeaconLoop()
