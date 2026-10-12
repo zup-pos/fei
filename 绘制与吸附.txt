@@ -1,17 +1,20 @@
 -- =====================================================
 -- 独立脚本：准星瞄准 + 目标追踪 + 屏幕绘制 + 黑洞吸附
--- v41 定版
+-- v45 定版
 -- 修复：
 --   1. 标签重叠时自动向上错开
---   2. 超出视野（含1200米外）的目标立即隐藏并清理
+--   2. 超出视野（含800米外）的目标立即隐藏并清理
 --   3. 保护列表：长按准星/保护列表保护单件部件
---   4. 关键词状态永不自动清除，到新区域自动重新扫描绘制
+--   4. 关键词状态不会因目标消失而自动清除，到新区域自动重绘
 --   5. 移除目标管理长按循环扫描
 --   6. 不同关键词的目标不合并
 --   7. 清理死代码
 --   8. 收紧关键词匹配：去掉反向匹配 + matchRoot 不再遍历后代
---      → 解决"添加1个 gold_bar 却扫描出8个"的误匹配问题
---   9. 删除操作期间暂停扫描 200ms，避免删除被扫描线程干扰
+--   9. 日志删除 / 目标管理全部删除：同步清除关键词与相关日志
+--  10. 移除暂停扫描机制（不需要）
+--  11. 修复 updateLogBtn 定义顺序
+--  12. 前向声明 addTarget / protectTarget / unprotectTarget / getTargetInCenter
+--      → 消除 Lua 词法作用域隐患（严格 Luau 环境下长按会报 nil）
 -- =====================================================
 
 local Players = game:GetService("Players")
@@ -42,7 +45,7 @@ local SCAN_PARTS_PER_FRAME = 100
 local NEARBY_RADIUS = 60
 local NEARBY_MAX_PARTS = 2000
 local FALLBACK_SCAN_INTERVAL = 5
-local MAX_DRAW_DISTANCE = 1200
+local MAX_DRAW_DISTANCE = 800
 local EDGE_MARGIN = 150
 
 local state = {
@@ -57,13 +60,18 @@ local state = {
     scanRadius = 2000,
     blackholeOn = false,
     showDistance = true,
-    scanPaused = false,  -- ★ 新增：删除操作期间暂停扫描
 }
 
 local scanQueue = nil
 local pendingRoots = {}
 
 local addLog
+
+-- ★ 前向声明：保证后面的 UI 长按处理器可以引用到这些函数
+local getTargetInCenter
+local protectTarget
+local unprotectTarget
+local addTarget
 
 local conns = {}
 local function addConn(c) table.insert(conns, c); return c end
@@ -188,8 +196,6 @@ local function tryExtractKeyword(name)
     return k
 end
 
--- ★ findBestKeyword 保留后代遍历：只在你「主动添加」时才调用
---   帮你从不具名的模型（比如整个模型叫 Model）中挖掘出有意义的关键词
 local function findBestKeyword(root)
     if not root then return nil end
     local kw = tryExtractKeyword(root.Name)
@@ -488,6 +494,22 @@ local function showInputDialog(title, default, callback)
     end)
 end
 
+-- ==================== 日志系统前置声明 ====================
+-- ★ 关键：updateLogBtn 必须在 deleteKeywordGroup 之前定义
+local logWindow = nil
+local function updateLogBtn() logBtn.Text = "📋 日志 (" .. #state.logs .. ")" end
+
+addLog = function(text, keyword, target)
+    table.insert(state.logs, 1, {
+        text = text,
+        time = os.date("%H:%M:%S"),
+        keyword = keyword or nil,
+        target = target or nil,
+    })
+    if #state.logs > 100 then table.remove(state.logs) end
+    updateLogBtn()
+end
+
 -- ==================== 绘制组管理 ====================
 local drawGroups = {}
 local topCountText
@@ -535,6 +557,39 @@ local function destroyEntry(entry)
     if entry.label then pcall(function() entry.label:Destroy() end) end
 end
 
+-- ★ 按关键词整组删除：清绘制 + 清关键词 + 清相关日志
+local function deleteKeywordGroup(kw)
+    if not kw or kw == "" then return end
+
+    -- ① 收集并销毁该关键词的所有绘制条目
+    local removeTargets = {}
+    for target, entry in pairs(drawGroups) do
+        if entry.keyword == kw then
+            table.insert(removeTargets, target)
+        end
+    end
+    for _, target in ipairs(removeTargets) do
+        local entry = drawGroups[target]
+        if entry then
+            destroyEntry(entry)
+            drawGroups[target] = nil
+        end
+    end
+
+    -- ② 删除关键词及相关配置
+    state.keywords[kw] = nil
+    state.keywordNotes[kw] = nil
+    state.keywordDrawEnabled[kw] = nil
+
+    -- ③ 移除该关键词相关的所有日志
+    local newLogs = {}
+    for _, l in ipairs(state.logs) do
+        if l.keyword ~= kw then table.insert(newLogs, l) end
+    end
+    state.logs = newLogs
+    updateLogBtn()
+end
+
 local function updateProtectBtn()
     local n = 0
     for t, _ in pairs(state.protectedTargets) do
@@ -557,16 +612,6 @@ local function cleanInvalidProtected()
         end
     end
     if changed then updateProtectBtn() end
-end
-
--- ★ 暂停扫描的辅助函数
-local function pauseScanTemporarily(duration)
-    state.scanPaused = true
-    scanQueue = nil
-    pendingRoots = {}
-    task.delay(duration or 0.2, function()
-        state.scanPaused = false
-    end)
 end
 
 -- ==================== 黑洞吸附核心 ====================
@@ -811,21 +856,7 @@ blackholeBtn.InputEnded:Connect(function(input)
     end
 end)
 
--- ==================== 日志系统 ====================
-local logWindow = nil
-local function updateLogBtn() logBtn.Text = "📋 日志 (" .. #state.logs .. ")" end
-
-addLog = function(text, keyword, target)
-    table.insert(state.logs, 1, {
-        text = text,
-        time = os.date("%H:%M:%S"),
-        keyword = keyword or nil,
-        target = target or nil,
-    })
-    if #state.logs > 100 then table.remove(state.logs) end
-    updateLogBtn()
-end
-
+-- ==================== 日志窗口 ====================
 local function openLogWindow()
     if logWindow and logWindow.Parent then logWindow:Destroy() end
     local sg = Instance.new("ScreenGui")
@@ -948,17 +979,20 @@ local function openLogWindow()
         delBtn.Font = Enum.Font.GothamBold; delBtn.TextSize = 10
         delBtn.Parent = row
         local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 3); dc.Parent = delBtn
-        -- ★ 修复：删除时暂停扫描 200ms，避免扫描线程把刚删掉的目标又加回来
         bindSafeClick(delBtn, function()
-            pauseScanTemporarily(0.2)
-            if log.target and drawGroups[log.target] then
-                destroyEntry(drawGroups[log.target])
-                drawGroups[log.target] = nil
+            local kw = log.keyword
+            if kw then
+                deleteKeywordGroup(kw)
+            else
+                if log.target and drawGroups[log.target] then
+                    destroyEntry(drawGroups[log.target])
+                    drawGroups[log.target] = nil
+                end
+                for i, l in ipairs(state.logs) do
+                    if l == log then table.remove(state.logs, i); break end
+                end
+                updateLogBtn()
             end
-            for i, l in ipairs(state.logs) do
-                if l == log then table.remove(state.logs, i); break end
-            end
-            updateLogBtn()
             sg:Destroy(); logWindow = nil
             openLogWindow()
         end)
@@ -993,8 +1027,6 @@ task.spawn(function()
             state.protectedTargets = {}
             for t, entry in pairs(drawGroups) do destroyEntry(entry) end
             drawGroups = {}
-            scanQueue = nil
-            pendingRoots = {}
             updateLogBtn()
             updateProtectBtn()
             addLog("日志已全部清空")
@@ -1074,6 +1106,7 @@ local function openTargetWindow()
     pad.PaddingTop = UDim.new(0, 6); pad.PaddingLeft = UDim.new(0, 6)
     pad.PaddingRight = UDim.new(0, 6); pad.PaddingBottom = UDim.new(0, 6)
     pad.Parent = list
+    -- ★ groupMap 只统计 state.keywords 里存在的关键词
     local groupMap = {}
     for kw, _ in pairs(state.keywords) do
         groupMap[kw] = { count = 0, targets = {} }
@@ -1081,10 +1114,11 @@ local function openTargetWindow()
     for target, entry in pairs(drawGroups) do
         local ok, parent = pcall(function() return target.Parent end)
         if ok and parent then
-            local kw = entry.keyword or "?"
-            if not groupMap[kw] then groupMap[kw] = { count = 0, targets = {} } end
-            groupMap[kw].count = groupMap[kw].count + 1
-            table.insert(groupMap[kw].targets, target)
+            local kw = entry.keyword
+            if kw and groupMap[kw] then
+                groupMap[kw].count = groupMap[kw].count + 1
+                table.insert(groupMap[kw].targets, target)
+            end
         end
     end
     local kwList = {}
@@ -1195,22 +1229,14 @@ local function openTargetWindow()
         delAllBtn.Font = Enum.Font.GothamBold; delAllBtn.TextSize = 10
         delAllBtn.Parent = row
         local dc2b = Instance.new("UICorner"); dc2b.CornerRadius = UDim.new(0, 3); dc2b.Parent = delAllBtn
-        -- ★ 修复：删除时暂停扫描 200ms
         bindSafeClick(delAllBtn, function()
-            pauseScanTemporarily(0.2)
-            for _, t in ipairs(data.targets) do
-                if drawGroups[t] then
-                    destroyEntry(drawGroups[t])
-                    drawGroups[t] = nil
-                end
-            end
+            deleteKeywordGroup(kw)
             sg:Destroy(); targetWindow = nil
             openTargetWindow()
         end)
     end
 end
 
--- ★ 目标管理按钮短按只负责打开/关闭窗口
 bindSafeClick(targetBtn, function()
     if targetWindow and targetWindow.Parent then
         targetWindow:Destroy(); targetWindow = nil
@@ -1400,6 +1426,7 @@ task.spawn(function()
         task.wait(0.05)
         if plPressInput and not plLongFired and tick() - plPressTime >= PL_LONG_DELAY then
             plLongFired = true
+            -- ★ 依赖前向声明，确保 getTargetInCenter / protectTarget / unprotectTarget 已绑定
             local t = getTargetInCenter(true)
             if t then
                 if state.protectedTargets[t] then
@@ -1479,7 +1506,8 @@ local function resolveHitPart(part, hitPos)
     return nil
 end
 
-local function getTargetInCenter(includeProtected)
+-- ★ 改为全局（前向声明赋值）：保证前面长按处理器能引用到
+function getTargetInCenter(includeProtected)
     local vp = camera.ViewportSize
     local ray = camera:ViewportPointToRay(vp.X / 2, vp.Y / 2)
     local params = RaycastParams.new()
@@ -1620,7 +1648,6 @@ local function buildKws()
     return hasAny and kws or nil
 end
 
--- ★ 收紧匹配：只保留正向（物体名包含关键词），去掉危险的反向匹配
 local function matchKeywordByName(name, kws)
     if not name then return nil end
     local extracted = extractKeyword(name)
@@ -1628,7 +1655,6 @@ local function matchKeywordByName(name, kws)
     if kws[extracted] then return extracted end
     if isGenericKeyword(extracted) then return nil end
     if #extracted < 4 then return nil end
-    -- ★ 只做正向匹配：物体名包含关键词
     for kw, _ in pairs(kws) do
         if not isGenericKeyword(kw) and #kw >= 4 then
             if string.find(extracted, kw, 1, true) then return kw end
@@ -1637,8 +1663,6 @@ local function matchKeywordByName(name, kws)
     return nil
 end
 
--- ★ 收紧 matchRoot：只检查 root 名字和 inst 的祖先链，不再遍历后代
---   findBestKeyword（用户主动添加）依然保留后代遍历，不影响用户主动添加能力
 local function matchRoot(root, inst, kws)
     local cur = inst
     local depth = 0
@@ -1653,7 +1677,6 @@ end
 
 -- ==================== 近距离同步扫描 ====================
 local function quickNearbyScan()
-    if state.scanPaused then return 0 end
     local kws = buildKws()
     if not kws then return 0 end
 
@@ -1696,7 +1719,6 @@ end
 
 -- ==================== 单目标尝试添加（事件驱动用） ====================
 local function tryAddRoot(root)
-    if state.scanPaused then return false end
     if not root then return false end
     local ok, parent = pcall(function() return root.Parent end)
     if not ok or not parent then return false end
@@ -1752,7 +1774,6 @@ end
 
 -- ==================== 分帧兜底扫描 ====================
 local function startScanByKeywords()
-    if state.scanPaused then return end
     local kws = buildKws()
     if not kws then return end
 
@@ -1781,7 +1802,6 @@ local function startScanByKeywords()
 end
 
 local function processScanQueue()
-    if state.scanPaused then return end
     if not scanQueue then return end
     local parts = scanQueue.parts
     local kws = scanQueue.kws
@@ -1840,7 +1860,7 @@ addConn(workspace.ChildAdded:Connect(onNewInstance))
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if not state.scanPaused and next(pendingRoots) then
+        if next(pendingRoots) then
             local batch = pendingRoots
             pendingRoots = {}
             local count = 0
@@ -1856,12 +1876,13 @@ end)
 task.spawn(function()
     while true do
         task.wait(FALLBACK_SCAN_INTERVAL)
-        if not state.scanPaused and not scanQueue then startScanByKeywords() end
+        if not scanQueue then startScanByKeywords() end
     end
 end)
 
 -- ==================== 添加目标 ====================
-local function addTarget(target, autoScan)
+-- ★ 改为全局（前向声明赋值）：保证前面长按处理器能引用到
+function addTarget(target, autoScan)
     if not target then return false end
     local root = findModelRoot(target)
     if not root then return false end
@@ -1893,7 +1914,8 @@ local function addTarget(target, autoScan)
     return true
 end
 
-local function protectTarget(target)
+-- ★ 改为全局（前向声明赋值）
+function protectTarget(target)
     if not target then return false end
     if state.protectedTargets[target] then
         addLog("已在保护列表: " .. target.Name)
@@ -1916,7 +1938,8 @@ local function protectTarget(target)
     return true
 end
 
-local function unprotectTarget(target)
+-- ★ 改为全局（前向声明赋值）
+function unprotectTarget(target)
     if not target then return false end
     if not state.protectedTargets[target] then
         addLog("不在保护列表: " .. target.Name)
@@ -2140,7 +2163,7 @@ addConn(RunService.RenderStepped:Connect(function()
         ensureDrawObjects()
         local vp = camera.ViewportSize
         local cx = vp.X / 2
-        local countTopY = 0 + insetY
+        local countTopY = 12 + insetY
         local camPos = camera.CFrame.Position
 
         local visible = {}
