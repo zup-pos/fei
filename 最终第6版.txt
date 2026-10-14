@@ -1,6 +1,6 @@
 -- =====================================================
 -- 准星追踪 v48.7：碰撞移除 + 保护列表长按保护
--- + 阶段1：圆角矩形方框
+-- + Drawing池优化版（适配Delta执行器）
 -- =====================================================
 
 local Players = game:GetService("Players")
@@ -1222,83 +1222,53 @@ local function ensureDrawObjects()
     topCountText.Visible = false
 end
 
--- ========== 阶段1：圆角矩形常量与函数 ==========
-local ARC_SEGMENTS = 4
+-- ========== Drawing池：适配Delta执行器 ==========
+local DRAW_POOL_SIZE = 300
+local drawPool = {}
+local drawPoolIndex = 0
 
-local function computeRoundRectPoints(x1, y1, x2, y2, r, segs)
-    local pts = {}
-    table.insert(pts, {x1 + r, y1})
-    table.insert(pts, {x2 - r, y1})
-    local cx, cy = x2 - r, y1 + r
-    for i = 1, segs do
-        local a = math.rad(270 + i * 90 / segs)
-        table.insert(pts, {cx + r * math.cos(a), cy + r * math.sin(a)})
-    end
-    table.insert(pts, {x2, y2 - r})
-    cx, cy = x2 - r, y2 - r
-    for i = 1, segs do
-        local a = math.rad(i * 90 / segs)
-        table.insert(pts, {cx + r * math.cos(a), cy + r * math.sin(a)})
-    end
-    table.insert(pts, {x1 + r, y2})
-    cx, cy = x1 + r, y2 - r
-    for i = 1, segs do
-        local a = math.rad(90 + i * 90 / segs)
-        table.insert(pts, {cx + r * math.cos(a), cy + r * math.sin(a)})
-    end
-    table.insert(pts, {x1, y1 + r})
-    cx, cy = x1 + r, y1 + r
-    for i = 1, segs do
-        local a = math.rad(180 + i * 90 / segs)
-        table.insert(pts, {cx + r * math.cos(a), cy + r * math.sin(a)})
-    end
-    return pts
-end
--- ========== 阶段1 结束 ==========
-
-local function createGroup(kw)
-    local g = {
-        line = Drawing.new("Line"),
-        segs = {},
-    }
-    local lineColor = getStyle(kw, "lineColor")
-    local lineThick = getStyle(kw, "lineThickness")
-    local lineTrans = getStyle(kw, "lineTransparency")
-    local boxColor  = getStyle(kw, "boxColor")
-    local boxThick  = getStyle(kw, "boxThickness")
-    local boxTrans  = getStyle(kw, "boxTransparency")
-    local segCount = 4 + 4 * ARC_SEGMENTS
-    for i = 1, segCount do
-        local s = Drawing.new("Line")
-        s.Color = boxColor
-        s.Thickness = boxThick
-        s.Transparency = boxTrans
-        s.Visible = false
-        g.segs[i] = s
-    end
-    g.line.Color = lineColor
-    g.line.Thickness = lineThick
-    g.line.Transparency = lineTrans
-    g.line.Visible = false
-    return g
-end
-
-local function destroyGroup(g)
-    if not g then return end
-    if g.line then pcall(function() g.line:Remove() end) end
-    if g.segs then
-        for _, s in ipairs(g.segs) do
-            pcall(function() s:Remove() end)
+local function initDrawPool()
+    for i = 1, DRAW_POOL_SIZE do
+        local line = Drawing.new("Line")
+        if line then
+            line.Visible = false
+            line.Thickness = 1
+            line.Transparency = 1
+            drawPool[i] = line
         end
     end
 end
 
-local function hideGroup(g)
-    if not g then return end
-    if g.line then g.line.Visible = false end
-    if g.segs then
-        for _, s in ipairs(g.segs) do s.Visible = false end
+local function getPoolLine()
+    drawPoolIndex = drawPoolIndex + 1
+    if drawPoolIndex > DRAW_POOL_SIZE then drawPoolIndex = 1 end
+    return drawPool[drawPoolIndex]
+end
+
+local function resetPoolIndex()
+    drawPoolIndex = 0
+end
+
+local function destroyDrawPool()
+    for _, line in ipairs(drawPool) do
+        if line then pcall(function() line:Remove() end) end
     end
+    drawPool = {}
+end
+-- ========== Drawing池结束 ==========
+
+local function createGroup(kw)
+    -- 不再为每个目标创建独立的Drawing对象
+    -- 返回一个占位group，实际绘制在RenderStepped中使用池
+    return { line = nil, segs = {} }
+end
+
+local function destroyGroup(g)
+    -- 无需清理，池由全局管理
+end
+
+local function hideGroup(g)
+    -- 无需隐藏，RenderStepped统一管理
 end
 
 -- 收集目标所有 BasePart（在 registerDrawEntry 之前定义）
@@ -1387,7 +1357,7 @@ local function destroyEntry(entry)
         entry.frozenParts = nil
     end
     restoreCollisionsFrom(entry)
-    if entry.g then destroyGroup(entry.g) end
+    -- 不再需要destroyGroup，池由全局管理
     if entry.label then pcall(function() entry.label:Destroy() end) end
 end
 
@@ -1410,22 +1380,10 @@ local function registerDrawEntry(root, entry)
 end
 
 local function refreshAllDrawingStyles()
+    -- 池中的Line在RenderStepped中统一设置样式
+    -- 这里只更新标签
     for _, entry in pairs(drawGroups) do
         local kw = entry.keyword
-        if entry.g then
-            local g = entry.g
-            g.line.Color = getStyle(kw, "lineColor")
-            g.line.Thickness = getStyle(kw, "lineThickness")
-            g.line.Transparency = getStyle(kw, "lineTransparency")
-            local boxColor = getStyle(kw, "boxColor")
-            local boxThick = getStyle(kw, "boxThickness")
-            local boxTrans = getStyle(kw, "boxTransparency")
-            for _, s in ipairs(g.segs) do
-                s.Color = boxColor
-                s.Thickness = boxThick
-                s.Transparency = boxTrans
-            end
-        end
         if entry.label then
             entry.label.TextColor3 = getStyle(kw, "nameColor")
             entry.label.TextTransparency = getStyle(kw, "nameTransparency")
@@ -5018,7 +4976,7 @@ local function setDrawing(on)
     if not on then
         if topCountText then topCountText.Visible = false end
         for _, entry in pairs(drawGroups) do
-            hideGroup(entry.g)
+            for _, obj in pairs(entry.g) do obj.Visible = false end
             if entry.label then entry.label.Visible = false end
         end
     else
@@ -5083,6 +5041,8 @@ addConn(RunService.RenderStepped:Connect(function()
 
         if state.drawOn then
             ensureDrawObjects()
+            -- 重置Drawing池索引
+            resetPoolIndex()
             local vp = camera.ViewportSize
             local cx = vp.X / 2
             local countTopY = insetY
@@ -5111,8 +5071,7 @@ addConn(RunService.RenderStepped:Connect(function()
                         or (not isKeywordDrawEnabled(entry.keyword))
                         or shouldSkipByProtection(target)
                     if skip then
-                        hideGroup(entry.g)
-                        if entry.label then entry.label.Visible = false end
+                        -- 跳过，不占用池
                     else
                         local center = getModelCenter(target)
                         if center then
@@ -5133,18 +5092,9 @@ addConn(RunService.RenderStepped:Connect(function()
                                             x2 = maxX, y2 = maxY + insetY,
                                             dist = dist, center = center,
                                         })
-                                    else
-                                        hideGroup(entry.g)
-                                        if entry.label then entry.label.Visible = false end
                                     end
-                                else
-                                    hideGroup(entry.g)
-                                    if entry.label then entry.label.Visible = false end
                                 end
                             end
-                        else
-                            hideGroup(entry.g)
-                            if entry.label then entry.label.Visible = false end
                         end
                     end
                 end
@@ -5203,50 +5153,59 @@ addConn(RunService.RenderStepped:Connect(function()
             for _, g in ipairs(groups2D) do
                 local first = g.entries[1]
                 local entry = first.entry
-                local group = entry.g
-                visibleGroups[group] = true
+                visibleGroups[entry] = true
                 if entry.label then visibleLabels[entry.label] = true end
                 for i = 2, #g.entries do
                     local other = g.entries[i].entry
-                    hideGroup(other.g)
-                    if other.label then other.label.Visible = false end
+                    -- 合并的目标不绘制
                 end
                 local x1, y1, x2, y2 = g.x1, g.y1, g.x2, g.y2
 
-                -- ===== 阶段1：圆角矩形方框绘制 =====
+                -- ===== 使用Drawing池绘制圆角矩形 =====
                 local showBox = gs.showBox
                 if showBox then
+                    local boxColor = getStyle(entry.keyword, "boxColor")
+                    local boxThick = getStyle(entry.keyword, "boxThickness")
+                    local boxTrans = getStyle(entry.keyword, "boxTransparency")
                     local boxW = x2 - x1
                     local boxH = y2 - y1
                     local rr = math.min(boxW, boxH) * 0.15
                     if rr < 1 then rr = 1 end
                     if rr > 40 then rr = 40 end
                     local rrp = computeRoundRectPoints(x1, y1, x2, y2, rr, ARC_SEGMENTS)
-                    for i = 1, #group.segs do
-                        local s = group.segs[i]
+                    for i = 1, #rrp - 1 do
                         local p1 = rrp[i]
                         local p2 = rrp[i + 1]
-                        if p1 and p2 then
-                            s.From = Vector2.new(p1[1], p1[2])
-                            s.To = Vector2.new(p2[1], p2[2])
-                            s.Visible = true
-                        else
-                            s.Visible = false
+                        local line = getPoolLine()
+                        if line then
+                            line.From = Vector2.new(p1[1], p1[2])
+                            line.To = Vector2.new(p2[1], p2[2])
+                            line.Color = boxColor
+                            line.Thickness = boxThick
+                            line.Transparency = boxTrans
+                            line.Visible = true
                         end
                     end
-                else
-                    for _, s in ipairs(group.segs) do s.Visible = false end
                 end
-                -- ===== 阶段1 结束 =====
+                -- ===== Drawing池绘制结束 =====
 
+                -- 射线
                 if gs.showLine then
-                    group.line.From = Vector2.new(cx + gs.offsetX, countTopY + 24 + gs.offsetY)
-                    group.line.To = Vector2.new((x1 + x2) / 2, (y1 + y2) / 2)
-                    group.line.Visible = true
-                else
-                    group.line.Visible = false
+                    local lineColor = getStyle(entry.keyword, "lineColor")
+                    local lineThick = getStyle(entry.keyword, "lineThickness")
+                    local lineTrans = getStyle(entry.keyword, "lineTransparency")
+                    local poolLine = getPoolLine()
+                    if poolLine then
+                        poolLine.From = Vector2.new(cx + gs.offsetX, countTopY + 24 + gs.offsetY)
+                        poolLine.To = Vector2.new((x1 + x2) / 2, (y1 + y2) / 2)
+                        poolLine.Color = lineColor
+                        poolLine.Thickness = lineThick
+                        poolLine.Transparency = lineTrans
+                        poolLine.Visible = true
+                    end
                 end
 
+                -- 名字标签
                 if entry.label then
                     local keywordMap = {}
                     local keywordOrder = {}
@@ -5316,10 +5275,8 @@ addConn(RunService.RenderStepped:Connect(function()
                 end
             end
 
+            -- 隐藏不可见的标签
             for _, entry in pairs(drawGroups) do
-                if not visibleGroups[entry.g] then
-                    hideGroup(entry.g)
-                end
                 if entry.label and not visibleLabels[entry.label] then
                     entry.label.Visible = false
                 end
@@ -5355,6 +5312,7 @@ local function shutdown()
     if topCountText then pcall(function() topCountText:Remove() end); topCountText = nil end
     if crossH then pcall(function() crossH:Remove() end); crossH = nil end
     if crossV then pcall(function() crossV:Remove() end); crossV = nil end
+    destroyDrawPool()
     cleanConns()
 
     if mainGui then mainGui:Destroy(); mainGui = nil end
@@ -5379,9 +5337,12 @@ end
 
 bindSafeClick(exitBtn, function() shutdown() end)
 
+-- 初始化Drawing池
+initDrawPool()
+
 updateLogBtn()
 updateProtectBtn()
 updateBlockedCamps()
 setExpanded(true)
 refreshTargetBtnText()
-addLog("脚本已加载 (v48.7 + 阶段1 圆角矩形)")
+addLog("脚本已加载 (v48.7 + Drawing池优化)")
