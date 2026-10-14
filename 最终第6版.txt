@@ -1,6 +1,6 @@
 -- =====================================================
 -- 准星追踪 v48.7：碰撞移除 + 保护列表长按保护
--- 新增：弹窗通知系统 + 圆角矩形绘制
+-- + 阶段1：圆角矩形方框
 -- =====================================================
 
 local Players = game:GetService("Players")
@@ -8,8 +8,6 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
-local TweenService = game:GetService("TweenService")
-local TextService = game:GetService("TextService")
 local player = Players.LocalPlayer
 if not player then
     repeat task.wait() until Players.LocalPlayer
@@ -69,210 +67,6 @@ local state = {
     freezeOn = false,
 }
 
--- ==================== 弹窗通知系统 ====================
-local notifyConfig = {
-    position = "topright",
-    width = 0,
-    bgColor = Color3.fromRGB(30, 30, 30),
-    titleColor = Color3.new(1, 1, 1),
-    msgColor = Color3.fromRGB(220, 220, 220),
-    lineColor = Color3.fromRGB(200, 200, 200),
-    lineTransparency = 0.3,
-    bgTransparency = 0.35,
-    titleSize = 14,
-    msgSize = 12,
-    padding = 2,
-    lineHeight = 2,
-    cornerRadius = 6,
-    stayTime = 3,
-    fadeTime = 0.15,
-    offsetX = 10,
-    offsetY = 20,
-    spacing = 5,
-    maxCount = 10,
-}
-
-local notifyCategories = {
-    target = true, keyword = true, collision = true,
-    blackhole = true, freeze = true, protect = true,
-    importexport = true, log = true,
-    scan = false, warn = false, system = true,
-}
-
-local notifyList = {}
-local notifyReadyQueue = {}
-
-local function notifyReposition()
-    local vp = camera.ViewportSize
-    local y = notifyConfig.offsetY
-    for _, n in ipairs(notifyList) do
-        if n.frame and n.frame.Parent then
-            local fw = n.frame.Size.X.Offset
-            local fh = n.height
-            local x, targetY
-            if notifyConfig.position == "topleft" then
-                x = notifyConfig.offsetX
-                targetY = y
-            elseif notifyConfig.position == "bottomright" then
-                x = vp.X - fw - notifyConfig.offsetX
-                targetY = vp.Y - fh - y
-            elseif notifyConfig.position == "bottomleft" then
-                x = notifyConfig.offsetX
-                targetY = vp.Y - fh - y
-            elseif notifyConfig.position == "topcenter" then
-                x = (vp.X - fw) / 2
-                targetY = y
-            else
-                x = vp.X - fw - notifyConfig.offsetX
-                targetY = y
-            end
-            TweenService:Create(n.frame, TweenInfo.new(0.2), {
-                Position = UDim2.fromOffset(x, targetY),
-            }):Play()
-            y = y + fh + notifyConfig.spacing
-        end
-    end
-end
-
-local function notifyRemove(frame)
-    for i, n in ipairs(notifyList) do
-        if n.frame == frame then
-            table.remove(notifyList, i)
-            break
-        end
-    end
-end
-
-local function notifyProcessReady()
-    while #notifyReadyQueue > 0 do
-        local n = table.remove(notifyReadyQueue, 1)
-        if n and n.frame and n.frame.Parent then
-            local f = n.frame
-            local sg = n.sg
-            local ft = notifyConfig.fadeTime
-            local fadeOut = TweenInfo.new(ft, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-            local t1 = TweenService:Create(f, fadeOut, { BackgroundTransparency = 1 })
-            if n.title then
-                TweenService:Create(n.title, fadeOut, { TextTransparency = 1 }):Play()
-            end
-            if n.line then
-                TweenService:Create(n.line, fadeOut, { BackgroundTransparency = 1 }):Play()
-            end
-            if n.msg then
-                TweenService:Create(n.msg, fadeOut, { TextTransparency = 1 }):Play()
-            end
-            t1:Play()
-            t1.Completed:Wait()
-            notifyRemove(f)
-            if sg then pcall(function() sg:Destroy() end) end
-        end
-    end
-    notifyReposition()
-end
-
-local function notify(msg, title, category)
-    if category and notifyCategories[category] == false then return end
-    msg = msg or "空消息"
-    title = title or "提示"
-    msg = tostring(msg)
-    title = tostring(title)
-
-    local titleFont = Enum.Font.GothamBold
-    local msgFont = Enum.Font.Gotham
-    local titleSize = notifyConfig.titleSize
-    local msgSize = notifyConfig.msgSize
-
-    local tSV = TextService:GetTextSize(title, titleSize, titleFont, Vector2.new(1000, 1000))
-    local mSV = TextService:GetTextSize(msg, msgSize, msgFont, Vector2.new(1000, 1000))
-
-    local padding = notifyConfig.padding
-    local lineHeight = notifyConfig.lineHeight
-
-    local cw
-    if notifyConfig.width > 0 then
-        cw = notifyConfig.width - 2 * padding
-    else
-        cw = math.max(tSV.X, mSV.X)
-    end
-
-    local fw = cw + 2 * padding
-    local fh = padding + tSV.Y + lineHeight + mSV.Y + padding
-
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "NotifyGui"
-    sg.ResetOnSpawn = false
-    sg.IgnoreGuiInset = true
-    sg.DisplayOrder = 3000
-    sg:SetAttribute("TracerInstanceId", INSTANCE_ID)
-    sg.Parent = _guiParent
-
-    local f = Instance.new("Frame")
-    f.Parent = sg
-    f.Size = UDim2.fromOffset(fw, fh)
-    f.Position = UDim2.new(1, -fw - notifyConfig.offsetX, 0, -fh)
-    f.BackgroundColor3 = notifyConfig.bgColor
-    f.BackgroundTransparency = notifyConfig.bgTransparency
-    f.BorderSizePixel = 0
-    f.ClipsDescendants = true
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, notifyConfig.cornerRadius)
-    corner.Parent = f
-
-    local titleL = Instance.new("TextLabel")
-    titleL.Parent = f
-    titleL.Size = UDim2.new(0, cw, 0, tSV.Y)
-    titleL.Position = UDim2.fromOffset(padding, padding)
-    titleL.BackgroundTransparency = 1
-    titleL.Text = title
-    titleL.TextColor3 = notifyConfig.titleColor
-    titleL.Font = titleFont
-    titleL.TextSize = titleSize
-    titleL.TextXAlignment = Enum.TextXAlignment.Center
-    titleL.TextYAlignment = Enum.TextYAlignment.Center
-
-    local line = Instance.new("Frame")
-    line.Parent = f
-    line.Size = UDim2.new(0, cw, 0, lineHeight)
-    line.Position = UDim2.fromOffset(padding, padding + tSV.Y)
-    line.BackgroundColor3 = notifyConfig.lineColor
-    line.BackgroundTransparency = notifyConfig.lineTransparency
-    line.BorderSizePixel = 0
-
-    local msgL = Instance.new("TextLabel")
-    msgL.Parent = f
-    msgL.Size = UDim2.new(0, cw, 0, mSV.Y)
-    msgL.Position = UDim2.fromOffset(padding, padding + tSV.Y + lineHeight)
-    msgL.BackgroundTransparency = 1
-    msgL.Text = msg
-    msgL.TextColor3 = notifyConfig.msgColor
-    msgL.Font = msgFont
-    msgL.TextSize = msgSize
-    msgL.TextXAlignment = Enum.TextXAlignment.Center
-    msgL.TextYAlignment = Enum.TextYAlignment.Top
-
-    local notif = {
-        frame = f, sg = sg, title = titleL, line = line, msg = msgL,
-        height = fh,
-    }
-    table.insert(notifyList, 1, notif)
-
-    while #notifyList > notifyConfig.maxCount do
-        local old = table.remove(notifyList)
-        if old and old.sg then pcall(function() old.sg:Destroy() end) end
-    end
-
-    notifyReposition()
-
-    task.delay(notifyConfig.stayTime, function()
-        if notif.frame and notif.frame.Parent then
-            table.insert(notifyReadyQueue, notif)
-            notifyProcessReady()
-        end
-    end)
-end
-
--- ==================== DEFAULT_STYLE ====================
 local DEFAULT_STYLE = {
     showCounter = true, showLine = true, showBox = true,
     showName = true, showDistance = true,
@@ -1352,7 +1146,6 @@ local function makeColorPicker(initialColor, onConfirm)
     cancelBtn.Parent = bg
     local cbc = Instance.new("UICorner"); cbc.CornerRadius = UDim.new(0, 5); cbc.Parent = cancelBtn
     local okBtn = Instance.new("TextButton")
-    okBtn.Size = UDim2.new(0, 0, 0, 36)
     okBtn.Size = UDim2.new(0.45, -10, 0, 36)
     okBtn.Position = UDim2.new(0.5, 0, 1, -48)
     okBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 80)
@@ -1360,9 +1153,7 @@ local function makeColorPicker(initialColor, onConfirm)
     okBtn.Font = Enum.Font.GothamBold; okBtn.TextSize = 13
     okBtn.AutoButtonColor = false
     okBtn.Parent = bg
-    local obc = Instance.new("UICorner")
-    obc.CornerRadius = UDim.new(0, 5)
-    obc.Parent = okBtn
+    local obc = Instance.new("UICorner"); obc.CornerRadius = UDim.new(0, 5); obc.Parent = okBtn
 
     local function cleanup()
         for _, c in ipairs(inputConns) do pcall(function() c:Disconnect() end) end
@@ -1431,7 +1222,7 @@ local function ensureDrawObjects()
     topCountText.Visible = false
 end
 
--- ==================== 圆角矩形 ====================
+-- ========== 阶段1：圆角矩形常量与函数 ==========
 local ARC_SEGMENTS = 4
 
 local function computeRoundRectPoints(x1, y1, x2, y2, r, segs)
@@ -1463,26 +1254,27 @@ local function computeRoundRectPoints(x1, y1, x2, y2, r, segs)
     end
     return pts
 end
+-- ========== 阶段1 结束 ==========
 
 local function createGroup(kw)
     local g = {
         line = Drawing.new("Line"),
         segs = {},
     }
-    for i = 1, 4 + 4 * ARC_SEGMENTS do
-        g.segs[i] = Drawing.new("Line")
-    end
     local lineColor = getStyle(kw, "lineColor")
     local lineThick = getStyle(kw, "lineThickness")
     local lineTrans = getStyle(kw, "lineTransparency")
     local boxColor  = getStyle(kw, "boxColor")
     local boxThick  = getStyle(kw, "boxThickness")
     local boxTrans  = getStyle(kw, "boxTransparency")
-    for _, obj in ipairs(g.segs) do
-        obj.Color = boxColor
-        obj.Thickness = boxThick
-        obj.Transparency = boxTrans
-        obj.Visible = false
+    local segCount = 4 + 4 * ARC_SEGMENTS
+    for i = 1, segCount do
+        local s = Drawing.new("Line")
+        s.Color = boxColor
+        s.Thickness = boxThick
+        s.Transparency = boxTrans
+        s.Visible = false
+        g.segs[i] = s
     end
     g.line.Color = lineColor
     g.line.Thickness = lineThick
@@ -1492,20 +1284,24 @@ local function createGroup(kw)
 end
 
 local function destroyGroup(g)
+    if not g then return end
     if g.line then pcall(function() g.line:Remove() end) end
-    for _, obj in ipairs(g.segs) do pcall(function() obj:Remove() end) end
+    if g.segs then
+        for _, s in ipairs(g.segs) do
+            pcall(function() s:Remove() end)
+        end
+    end
 end
 
 local function hideGroup(g)
+    if not g then return end
     if g.line then g.line.Visible = false end
-    for _, obj in ipairs(g.segs) do obj.Visible = false end
+    if g.segs then
+        for _, s in ipairs(g.segs) do s.Visible = false end
+    end
 end
 
-local function setBoxVisible(g, visible)
-    for _, obj in ipairs(g.segs) do obj.Visible = visible end
-end
-
--- 收集目标所有 BasePart
+-- 收集目标所有 BasePart（在 registerDrawEntry 之前定义）
 local function collectParts(target)
     local parts = {}
     if target:IsA("Model") then
@@ -1521,6 +1317,7 @@ local function collectParts(target)
     return parts
 end
 
+-- 冻结：记录 part 原始 Anchored
 local freezeAnchoredSaved = {}
 
 local collisionRefCount = {}
@@ -1620,13 +1417,13 @@ local function refreshAllDrawingStyles()
             g.line.Color = getStyle(kw, "lineColor")
             g.line.Thickness = getStyle(kw, "lineThickness")
             g.line.Transparency = getStyle(kw, "lineTransparency")
-            local bc = getStyle(kw, "boxColor")
-            local bt = getStyle(kw, "boxThickness")
-            local bp = getStyle(kw, "boxTransparency")
-            for _, obj in ipairs(g.segs) do
-                obj.Color = bc
-                obj.Thickness = bt
-                obj.Transparency = bp
+            local boxColor = getStyle(kw, "boxColor")
+            local boxThick = getStyle(kw, "boxThickness")
+            local boxTrans = getStyle(kw, "boxTransparency")
+            for _, s in ipairs(g.segs) do
+                s.Color = boxColor
+                s.Thickness = boxThick
+                s.Transparency = boxTrans
             end
         end
         if entry.label then
@@ -1949,7 +1746,6 @@ function showBlackholeMenu()
         task.spawn(function()
             local n = blackholeSnapOnce()
             addLog("黑洞吸附 " .. n .. " 个目标到准心")
-            notify("一次性吸附 " .. n .. " 个目标", "黑洞", "blackhole")
         end)
     end)
     local contBtn = makeBtn(116, "", Color3.fromRGB(90, 90, 130))
@@ -1966,7 +1762,6 @@ function showBlackholeMenu()
     bindSafeClick(contBtn, function()
         state.blackholeOn = not state.blackholeOn
         addLog("持续吸附: " .. (state.blackholeOn and "开启" or "关闭"))
-        notify("持续吸附: " .. (state.blackholeOn and "开启" or "关闭"), "黑洞", "blackhole")
         closeBlackholeMenu()
     end)
     local freezeBtn = makeBtn(156, "", Color3.fromRGB(90, 60, 120))
@@ -1987,7 +1782,6 @@ function showBlackholeMenu()
             applyFreeze()
         end
         addLog("冻结: " .. (state.freezeOn and "开启" or "关闭"))
-        notify("冻结: " .. (state.freezeOn and "开启" or "关闭"), "冻结", "freeze")
         closeBlackholeMenu()
     end)
     local closeBtn = makeBtn(196, "❌ 关闭菜单", Color3.fromRGB(100, 80, 100))
@@ -2019,7 +1813,6 @@ task.spawn(function()
             state.blackholeOn = false
             state.freezeOn = false
             if addLog then addLog("长按: 已快速解除冻结") end
-            notify("已快速解除冻结", "冻结", "freeze")
             closeBlackholeMenu()
         end
     end
@@ -2222,7 +2015,6 @@ task.spawn(function()
             updateLogBtn()
             updateProtectBtn()
             addLog("日志已全部清空")
-            notify("日志已全部清空", "日志", "log")
             if logWindow and logWindow.Parent then logWindow:Destroy(); logWindow = nil end
         end
     end
@@ -2601,7 +2393,6 @@ local function openKeywordColorDialog(kw)
         refreshAllDrawingStyles()
         local n = countKeywordOverrides(kw)
         addLog("[" .. kw .. "] 独立颜色已更新（覆盖 " .. n .. " 项）")
-        notify("独立颜色已更新 [" .. kw .. "]", "关键词", "keyword")
         sg:Destroy(); keywordColorDialog = nil
         if targetWindow and targetWindow.Parent then
             targetWindow:Destroy(); targetWindow = nil
@@ -2809,7 +2600,6 @@ function openTargetWindow()
         local dc2b = Instance.new("UICorner"); dc2b.CornerRadius = UDim.new(0, 3); dc2b.Parent = delAllBtn
         bindSafeClick(delAllBtn, function()
             deleteKeywordGroup(kw)
-            notify("删除关键词 [" .. kw .. "]", "目标", "target")
             sg:Destroy(); targetWindow = nil
             openTargetWindow()
         end)
@@ -2944,7 +2734,7 @@ local function fileExists(name)
     return ok and result
 end
 local function applyImportData(data)
-    pauseScanAndResume(3)
+    pauseScanAndResume(1)
     for t, entry in pairs(drawGroups) do destroyEntry(entry) end
     state.keywords = {}
     state.keywordNotes = {}
@@ -3281,7 +3071,6 @@ local function setCollisionRemoval(on)
             applyCollisionRemovalFor(root, entry)
         end
         addLog("碰撞移除: 开启")
-        notify("碰撞移除: 开启", "碰撞", "collision")
     else
         collisionBtn.Text = "🚫 碰撞移除: 关闭"
         collisionBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
@@ -3289,7 +3078,6 @@ local function setCollisionRemoval(on)
             restoreCollisionsFrom(entry)
         end
         addLog("碰撞移除: 关闭")
-        notify("碰撞移除: 关闭", "碰撞", "collision")
     end
 end
 
@@ -3641,7 +3429,6 @@ local function openImportWindow()
             local added, skipped = applyImportData(data)
             addLog("导入 [" .. fileInfo.name .. "]: 成功 " .. added .. " 个"
                 .. (skipped > 0 and ("，跳过 " .. skipped .. " 个") or ""))
-            notify("导入 " .. added .. " 个关键词", "导入", "importexport")
             sg:Destroy(); importWindow = nil
         end)
     end
@@ -4067,7 +3854,6 @@ function openSettingsWindow()
         table.insert(settingsSliderConns, c2)
     end
 
-    -- 多选按钮行
     local function makeMultiChoiceRow(parent, label, options, getter, setter, onChange)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 34)
@@ -4148,143 +3934,6 @@ function openSettingsWindow()
                 function() return state.logCountHidden and "hidden" or "show" end,
                 function(v) state.logCountHidden = (v == "hidden") end,
                 function() updateLogBtn() end)
-        end,
-    })
-
-    registerSection({
-        key = "notify", title = "🔔 弹窗通知", contentHeight = 1102,
-        build = function(content)
-            makeMultiChoiceRow(content, "位置",
-                {
-                    { key = "topright", label = "右上" },
-                    { key = "topleft", label = "左上" },
-                    { key = "bottomright", label = "右下" },
-                    { key = "bottomleft", label = "左下" },
-                },
-                function() return notifyConfig.position end,
-                function(v) notifyConfig.position = v end,
-                function() notifyReposition() end)
-            makeColorRow(content, "背景色",
-                function() return notifyConfig.bgColor end,
-                function(v) notifyConfig.bgColor = v end)
-            makeColorRow(content, "标题色",
-                function() return notifyConfig.titleColor end,
-                function(v) notifyConfig.titleColor = v end)
-            makeColorRow(content, "正文色",
-                function() return notifyConfig.msgColor end,
-                function(v) notifyConfig.msgColor = v end)
-            makeColorRow(content, "分隔线色",
-                function() return notifyConfig.lineColor end,
-                function(v) notifyConfig.lineColor = v end)
-            makeFloatRow(content, "背景透明度",
-                function() return notifyConfig.bgTransparency end,
-                function(v) notifyConfig.bgTransparency = v end, 0, 1)
-            makeFloatRow(content, "分隔线透明度",
-                function() return notifyConfig.lineTransparency end,
-                function(v) notifyConfig.lineTransparency = v end, 0, 1)
-            makeFloatRow(content, "标题字号",
-                function() return notifyConfig.titleSize end,
-                function(v) notifyConfig.titleSize = v end, 8, 24)
-            makeFloatRow(content, "正文字号",
-                function() return notifyConfig.msgSize end,
-                function(v) notifyConfig.msgSize = v end, 8, 24)
-            makeFloatRow(content, "内边距",
-                function() return notifyConfig.padding end,
-                function(v) notifyConfig.padding = v end, 0, 20)
-            makeFloatRow(content, "圆角",
-                function() return notifyConfig.cornerRadius end,
-                function(v) notifyConfig.cornerRadius = v end, 0, 20)
-            makeFloatRow(content, "停留时间",
-                function() return notifyConfig.stayTime end,
-                function(v) notifyConfig.stayTime = v end, 0.5, 10)
-            makeFloatRow(content, "淡出时长",
-                function() return notifyConfig.fadeTime end,
-                function(v) notifyConfig.fadeTime = v end, 0, 2)
-            local cats = {
-                { key = "target", label = "目标增删" },
-                { key = "keyword", label = "关键词" },
-                { key = "collision", label = "碰撞移除" },
-                { key = "blackhole", label = "黑洞吸附" },
-                { key = "freeze", label = "冻结" },
-                { key = "protect", label = "保护列表" },
-                { key = "importexport", label = "导入导出" },
-                { key = "log", label = "日志清空" },
-                { key = "scan", label = "扫描噪音" },
-                { key = "warn", label = "操作提示" },
-                { key = "system", label = "系统" },
-            }
-            for _, c in ipairs(cats) do
-                local b = Instance.new("TextButton")
-                b.Size = UDim2.new(1, 0, 0, 28)
-                b.TextColor3 = Color3.new(1, 1, 1)
-                b.Font = Enum.Font.GothamBold
-                b.TextSize = 11
-                b.AutoButtonColor = false
-                b.Parent = content
-                local c2 = Instance.new("UICorner"); c2.CornerRadius = UDim.new(0, 4); c2.Parent = b
-                local function refresh()
-                    local v = notifyCategories[c.key]
-                    b.Text = (v and "✅ " or "❌ ") .. c.label
-                    b.BackgroundColor3 = v and Color3.fromRGB(60, 160, 90) or Color3.fromRGB(90, 60, 60)
-                end
-                refresh()
-                bindSafeClick(b, function()
-                    notifyCategories[c.key] = not notifyCategories[c.key]
-                    refresh()
-                end)
-            end
-            local previewBtn = Instance.new("TextButton")
-            previewBtn.Size = UDim2.new(1, 0, 0, 30)
-            previewBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
-            previewBtn.Text = "🔔 预览弹窗"
-            previewBtn.TextColor3 = Color3.new(1, 1, 1)
-            previewBtn.Font = Enum.Font.GothamBold
-            previewBtn.TextSize = 12
-            previewBtn.AutoButtonColor = false
-            previewBtn.Parent = content
-            local pbc = Instance.new("UICorner"); pbc.CornerRadius = UDim.new(0, 4); pbc.Parent = previewBtn
-            bindSafeClick(previewBtn, function()
-                notify("这是一条预览弹窗", "预览", "system")
-            end)
-            local resetNotifyBtn = Instance.new("TextButton")
-            resetNotifyBtn.Size = UDim2.new(1, 0, 0, 30)
-            resetNotifyBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 60)
-            resetNotifyBtn.Text = "🔄 弹窗恢复默认"
-            resetNotifyBtn.TextColor3 = Color3.new(1, 1, 1)
-            resetNotifyBtn.Font = Enum.Font.GothamBold
-            resetNotifyBtn.TextSize = 12
-            resetNotifyBtn.AutoButtonColor = false
-            resetNotifyBtn.Parent = content
-            local rnbc = Instance.new("UICorner"); rnbc.CornerRadius = UDim.new(0, 4); rnbc.Parent = resetNotifyBtn
-            bindSafeClick(resetNotifyBtn, function()
-                notifyConfig.position = "topright"
-                notifyConfig.bgColor = Color3.fromRGB(30, 30, 30)
-                notifyConfig.titleColor = Color3.new(1, 1, 1)
-                notifyConfig.msgColor = Color3.fromRGB(220, 220, 220)
-                notifyConfig.lineColor = Color3.fromRGB(200, 200, 200)
-                notifyConfig.bgTransparency = 0.35
-                notifyConfig.lineTransparency = 0.3
-                notifyConfig.titleSize = 14
-                notifyConfig.msgSize = 12
-                notifyConfig.padding = 2
-                notifyConfig.cornerRadius = 6
-                notifyConfig.stayTime = 3
-                notifyConfig.fadeTime = 0.15
-                notifyCategories.target = true
-                notifyCategories.keyword = true
-                notifyCategories.collision = true
-                notifyCategories.blackhole = true
-                notifyCategories.freeze = true
-                notifyCategories.protect = true
-                notifyCategories.importexport = true
-                notifyCategories.log = true
-                notifyCategories.scan = false
-                notifyCategories.warn = false
-                notifyCategories.system = true
-                cleanupSliderConns()
-                sg:Destroy(); settingsWindow = nil
-                openSettingsWindow()
-            end)
         end,
     })
 
@@ -4506,13 +4155,8 @@ function openSettingsWindow()
 
             local function doWrite(name)
                 local ok, err = writeExportFile(name, buildExportData())
-                if ok then
-                    addLog("已导出 " .. countKeywords() .. " 个关键词到 " .. name .. ".json")
-                    notify("已导出 " .. countKeywords() .. " 个关键词", "导出", "importexport")
-                else
-                    addLog("导出失败: " .. tostring(err))
-                    notify("导出失败: " .. tostring(err), "导出", "importexport")
-                end
+                if ok then addLog("已导出 " .. countKeywords() .. " 个关键词到 " .. name .. ".json")
+                else addLog("导出失败: " .. tostring(err)) end
             end
 
             local function runExportFlow(name)
@@ -4593,41 +4237,10 @@ function openSettingsWindow()
                 state.targetCountMode = "keywords"
                 state.protectCountHidden = false
                 state.logCountHidden = false
-                notifyConfig.position = "topright"
-                notifyConfig.width = 0
-                notifyConfig.bgColor = Color3.fromRGB(30, 30, 30)
-                notifyConfig.titleColor = Color3.new(1, 1, 1)
-                notifyConfig.msgColor = Color3.fromRGB(220, 220, 220)
-                notifyConfig.lineColor = Color3.fromRGB(200, 200, 200)
-                notifyConfig.lineTransparency = 0.3
-                notifyConfig.bgTransparency = 0.35
-                notifyConfig.titleSize = 14
-                notifyConfig.msgSize = 12
-                notifyConfig.padding = 2
-                notifyConfig.lineHeight = 2
-                notifyConfig.cornerRadius = 6
-                notifyConfig.stayTime = 3
-                notifyConfig.fadeTime = 0.15
-                notifyConfig.offsetX = 10
-                notifyConfig.offsetY = 20
-                notifyConfig.spacing = 5
-                notifyConfig.maxCount = 10
-                notifyCategories.target = true
-                notifyCategories.keyword = true
-                notifyCategories.collision = true
-                notifyCategories.blackhole = true
-                notifyCategories.freeze = true
-                notifyCategories.protect = true
-                notifyCategories.importexport = true
-                notifyCategories.log = true
-                notifyCategories.scan = false
-                notifyCategories.warn = false
-                notifyCategories.system = true
                 refreshAllDrawingStyles()
                 updateProtectBtn()
                 updateLogBtn()
                 addLog("已恢复默认设置")
-                notify("已恢复默认设置", "系统", "system")
                 cleanupSliderConns()
                 sg:Destroy(); settingsWindow = nil
                 openSettingsWindow()
@@ -4870,7 +4483,6 @@ function openProtectWindow()
         updateBlockedCamps()
         updateProtectBtn()
         addLog("已清空所有单目标保护")
-        notify("已清空所有单目标保护", "保护", "protect")
         sg:Destroy(); protectWindow = nil
         openProtectWindow()
     end)
@@ -5233,7 +4845,6 @@ function addTarget(target, autoScan)
         name = root.Name, keyword = keyword,
     })
     addLog("添加: " .. root.Name .. " [关键词: " .. keyword .. "]", keyword, root)
-    notify("添加: " .. root.Name, "目标", "target")
     if autoScan == true then
         local nearbyAdded = quickNearbyScan()
         if nearbyAdded > 0 then addLog("近距离扫描补充 " .. nearbyAdded .. " 个目标") end
@@ -5257,7 +4868,6 @@ local function addSingleTarget(target)
         isSingle = true,
     })
     addLog("单目标添加: " .. root.Name .. " [" .. kw .. "]")
-    notify("单目标添加: " .. root.Name, "目标", "target")
     return true
 end
 
@@ -5280,7 +4890,6 @@ function protectTarget(target)
     updateProtectBtn()
     updateBlockedCamps()
     addLog("已加入单目标保护: " .. target.Name)
-    notify("已保护: " .. target.Name, "保护", "protect")
     return true
 end
 
@@ -5294,7 +4903,6 @@ function unprotectTarget(target)
     updateProtectBtn()
     updateBlockedCamps()
     addLog("已取消保护: " .. target.Name)
-    notify("已取消保护: " .. target.Name, "保护", "protect")
     return true
 end
 
@@ -5352,13 +4960,11 @@ task.spawn(function()
                         destroyEntry(entry)
                         drawGroups[root] = nil
                         addLog("移除单目标: " .. root.Name)
-                        notify("移除单目标: " .. root.Name, "目标", "target")
                     else
                         local kw = entry.keyword or "?"
                         destroyEntry(entry)
                         drawGroups[root] = nil
                         addLog("移除实例: " .. root.Name .. " [关键词: " .. kw .. "]")
-                        notify("移除: " .. root.Name, "目标", "target")
                     end
                 else
                     addSingleTarget(t)
@@ -5387,7 +4993,6 @@ addTargetBtn.InputEnded:Connect(function(input)
             destroyEntry(entry)
             drawGroups[root] = nil
             addLog("移除单目标: " .. root.Name)
-            notify("移除单目标: " .. root.Name, "目标", "target")
         else
             local kw = entry.keyword
             if not kw then addLog("该目标无有效关键词"); return end
@@ -5398,7 +5003,6 @@ addTargetBtn.InputEnded:Connect(function(input)
             showKeywordDeleteConfirmDialog(kw, count, function()
                 deleteKeywordGroup(kw, 1.0)
                 addLog("已删除关键词 [" .. kw .. "] " .. count .. " 个目标")
-                notify("删除 [" .. kw .. "] " .. count .. " 个目标", "目标", "target")
             end)
         end
     else
@@ -5424,7 +5028,6 @@ end
 
 bindSafeClick(drawToggleBtn, function() setDrawing(not state.drawOn) end)
 
--- 刷新目标管理按钮文字
 local lastTargetBtnText = nil
 local function refreshTargetBtnText()
     local txt
@@ -5609,23 +5212,32 @@ addConn(RunService.RenderStepped:Connect(function()
                     if other.label then other.label.Visible = false end
                 end
                 local x1, y1, x2, y2 = g.x1, g.y1, g.x2, g.y2
+
+                -- ===== 阶段1：圆角矩形方框绘制 =====
                 local showBox = gs.showBox
-                local boxW = x2 - x1
-                local boxH = y2 - y1
-                local r = math.min(boxW, boxH) * 0.15
-                if r < 1 then r = 1 end
-                if r > 40 then r = 40 end
-                local rrp = computeRoundRectPoints(x1, y1, x2, y2, r, ARC_SEGMENTS)
-                for i = 1, #group.segs do
-                    local s = group.segs[i]
-                    local p1 = rrp[i]
-                    local p2 = rrp[i + 1]
-                    if p1 and p2 then
-                        s.From = Vector2.new(p1[1], p1[2])
-                        s.To = Vector2.new(p2[1], p2[2])
-                        s.Visible = showBox
+                if showBox then
+                    local boxW = x2 - x1
+                    local boxH = y2 - y1
+                    local rr = math.min(boxW, boxH) * 0.15
+                    if rr < 1 then rr = 1 end
+                    if rr > 40 then rr = 40 end
+                    local rrp = computeRoundRectPoints(x1, y1, x2, y2, rr, ARC_SEGMENTS)
+                    for i = 1, #group.segs do
+                        local s = group.segs[i]
+                        local p1 = rrp[i]
+                        local p2 = rrp[i + 1]
+                        if p1 and p2 then
+                            s.From = Vector2.new(p1[1], p1[2])
+                            s.To = Vector2.new(p2[1], p2[2])
+                            s.Visible = true
+                        else
+                            s.Visible = false
+                        end
                     end
+                else
+                    for _, s in ipairs(group.segs) do s.Visible = false end
                 end
+                -- ===== 阶段1 结束 =====
 
                 if gs.showLine then
                     group.line.From = Vector2.new(cx + gs.offsetX, countTopY + 24 + gs.offsetY)
@@ -5745,12 +5357,6 @@ local function shutdown()
     if crossV then pcall(function() crossV:Remove() end); crossV = nil end
     cleanConns()
 
-    for _, n in ipairs(notifyList) do
-        if n.sg then pcall(function() n.sg:Destroy() end) end
-    end
-    notifyList = {}
-    notifyReadyQueue = {}
-
     if mainGui then mainGui:Destroy(); mainGui = nil end
     if overlayGui then overlayGui:Destroy(); overlayGui = nil end
     if logWindow then logWindow:Destroy(); logWindow = nil end
@@ -5778,5 +5384,4 @@ updateProtectBtn()
 updateBlockedCamps()
 setExpanded(true)
 refreshTargetBtnText()
-addLog("脚本已加载 (v48.7)")
-notify("脚本已加载 (v48.7)", "系统", "system")
+addLog("脚本已加载 (v48.7 + 阶段1 圆角矩形)")
