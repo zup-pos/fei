@@ -1,7 +1,3 @@
--- Gui to Lua
--- Version 8.3.25（碰撞删除 + 深度修复 + 默认保护分类管理 + 弹窗互斥 + 保护补全 + 单目标菜单 + 滑块多指隔离）
--- Delta 兼容修复版：安全挂载 + 变量前置 + 函数顺序修正
-
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 if not player then
@@ -16,7 +12,6 @@ local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ==================== Delta 安全挂载 ====================
 local _guiParent
 do
     local ok, result = pcall(function() return gethui() end)
@@ -32,7 +27,6 @@ do
     end
 end
 
--- ==================== UI 构建 ====================
 local main = Instance.new("ScreenGui")
 local Frame = Instance.new("Frame")
 local up = Instance.new("TextButton")
@@ -50,8 +44,7 @@ main.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 main.ResetOnSpawn = false
 main.IgnoreGuiInset = true
 
-local initCamera = workspace.CurrentCamera
-local initVp = initCamera and initCamera.ViewportSize or Vector2.new(1920, 1080)
+local initVp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
 local UI_W, UI_H = 190, 56
 local initX = (initVp.X - UI_W) / 2
 local initY = (initVp.Y - UI_H) / 2
@@ -62,50 +55,96 @@ Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
 Frame.Position = UDim2.fromOffset(initX, initY)
 Frame.Size = UDim2.new(0, UI_W, 0, UI_H)
 Frame.Active = false
-Frame.Draggable = false
 
-up.Parent = Frame; up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
-up.Position = UDim2.new(0, 0, 0, 0); up.Size = UDim2.new(0, 44, 0, 28)
-up.Font = Enum.Font.SourceSans; up.Text = "上升"
-up.TextColor3 = Color3.fromRGB(0,0,0); up.TextScaled = true; up.TextSize = 14; up.Active = true
+up.Parent = Frame
+up.BackgroundColor3 = Color3.fromRGB(79, 255, 152)
+up.Position = UDim2.new(0, 0, 0, 0)
+up.Size = UDim2.new(0, 44, 0, 28)
+up.Font = Enum.Font.SourceSans
+up.Text = "上升"
+up.TextColor3 = Color3.fromRGB(0, 0, 0)
+up.TextScaled = true
+up.TextSize = 14
+up.Active = true
 
-plus.Parent = Frame; plus.BackgroundColor3 = Color3.fromRGB(133, 145, 255)
-plus.Position = UDim2.new(0, 44, 0, 0); plus.Size = UDim2.new(0, 44, 0, 28)
-plus.Font = Enum.Font.SourceSans; plus.Text = "加速"
-plus.TextColor3 = Color3.fromRGB(0,0,0); plus.TextScaled = true; plus.TextSize = 14; plus.Active = true
+plus.Parent = Frame
+plus.BackgroundColor3 = Color3.fromRGB(133, 145, 255)
+plus.Position = UDim2.new(0, 44, 0, 0)
+plus.Size = UDim2.new(0, 44, 0, 28)
+plus.Font = Enum.Font.SourceSans
+plus.Text = "加速"
+plus.TextColor3 = Color3.fromRGB(0, 0, 0)
+plus.TextScaled = true
+plus.TextSize = 14
+plus.Active = true
 
-uiLabel.Parent = Frame; uiLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
-uiLabel.Position = UDim2.new(0, 88, 0, 0); uiLabel.Size = UDim2.new(0, 44, 0, 28)
-uiLabel.Font = Enum.Font.SourceSans; uiLabel.Text = "UI"
-uiLabel.TextColor3 = Color3.fromRGB(0,0,0); uiLabel.TextScaled = true; uiLabel.TextSize = 14; uiLabel.Active = true
+uiLabel.Parent = Frame
+uiLabel.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+uiLabel.Position = UDim2.new(0, 88, 0, 0)
+uiLabel.Size = UDim2.new(0, 44, 0, 28)
+uiLabel.Font = Enum.Font.SourceSans
+uiLabel.Text = "UI"
+uiLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+uiLabel.TextScaled = true
+uiLabel.TextSize = 14
+uiLabel.Active = true
 
-hide.Parent = Frame; hide.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
-hide.Position = UDim2.new(0, 132, 0, 0); hide.Size = UDim2.new(0, 58, 0, 28)
-hide.Font = Enum.Font.SourceSans; hide.Text = "隐藏/设置"
-hide.TextColor3 = Color3.fromRGB(0,0,0); hide.TextScaled = true; hide.TextSize = 14; hide.Active = true
+hide.Parent = Frame
+hide.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+hide.Position = UDim2.new(0, 132, 0, 0)
+hide.Size = UDim2.new(0, 58, 0, 28)
+hide.Font = Enum.Font.SourceSans
+hide.Text = "隐藏/设置"
+hide.TextColor3 = Color3.fromRGB(0, 0, 0)
+hide.TextScaled = true
+hide.TextSize = 14
+hide.Active = true
 
-down.Parent = Frame; down.BackgroundColor3 = Color3.fromRGB(215, 255, 121)
-down.Position = UDim2.new(0, 0, 0, 28); down.Size = UDim2.new(0, 44, 0, 28)
-down.Font = Enum.Font.SourceSans; down.Text = "下降"
-down.TextColor3 = Color3.fromRGB(0,0,0); down.TextScaled = true; down.TextSize = 14; down.Active = true
+down.Parent = Frame
+down.BackgroundColor3 = Color3.fromRGB(215, 255, 121)
+down.Position = UDim2.new(0, 0, 0, 28)
+down.Size = UDim2.new(0, 44, 0, 28)
+down.Font = Enum.Font.SourceSans
+down.Text = "下降"
+down.TextColor3 = Color3.fromRGB(0, 0, 0)
+down.TextScaled = true
+down.TextSize = 14
+down.Active = true
 
-mine.Parent = Frame; mine.BackgroundColor3 = Color3.fromRGB(123, 255, 247)
-mine.Position = UDim2.new(0, 44, 0, 28); mine.Size = UDim2.new(0, 44, 0, 28)
-mine.Font = Enum.Font.SourceSans; mine.Text = "减速"
-mine.TextColor3 = Color3.fromRGB(0,0,0); mine.TextScaled = true; mine.TextSize = 14; mine.Active = true
+mine.Parent = Frame
+mine.BackgroundColor3 = Color3.fromRGB(123, 255, 247)
+mine.Position = UDim2.new(0, 44, 0, 28)
+mine.Size = UDim2.new(0, 44, 0, 28)
+mine.Font = Enum.Font.SourceSans
+mine.Text = "减速"
+mine.TextColor3 = Color3.fromRGB(0, 0, 0)
+mine.TextScaled = true
+mine.TextSize = 14
+mine.Active = true
 
-speed.Parent = Frame; speed.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
-speed.Position = UDim2.new(0, 88, 0, 28); speed.Size = UDim2.new(0, 44, 0, 28)
-speed.Font = Enum.Font.SourceSans; speed.Text = "1"
-speed.TextColor3 = Color3.fromRGB(0,0,0); speed.TextScaled = true; speed.TextSize = 14
-speed.AutoButtonColor = false; speed.Active = true
+speed.Parent = Frame
+speed.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
+speed.Position = UDim2.new(0, 88, 0, 28)
+speed.Size = UDim2.new(0, 44, 0, 28)
+speed.Font = Enum.Font.SourceSans
+speed.Text = "1"
+speed.TextColor3 = Color3.fromRGB(0, 0, 0)
+speed.TextScaled = true
+speed.TextSize = 14
+speed.AutoButtonColor = false
+speed.Active = true
 
-onof.Parent = Frame; onof.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
-onof.Position = UDim2.new(0, 132, 0, 28); onof.Size = UDim2.new(0, 58, 0, 28)
-onof.Font = Enum.Font.SourceSans; onof.Text = "飞天(关闭)"
-onof.TextColor3 = Color3.fromRGB(0,0,0); onof.TextScaled = true; onof.TextSize = 14; onof.Active = true
+onof.Parent = Frame
+onof.BackgroundColor3 = Color3.fromRGB(255, 249, 74)
+onof.Position = UDim2.new(0, 132, 0, 28)
+onof.Size = UDim2.new(0, 58, 0, 28)
+onof.Font = Enum.Font.SourceSans
+onof.Text = "飞天(关闭)"
+onof.TextColor3 = Color3.fromRGB(0, 0, 0)
+onof.TextScaled = true
+onof.TextSize = 14
+onof.Active = true
 
--- ==================== 全局变量（关键：全部前置声明） ====================
 local speeds = 1
 local moveStep = 2
 local incStep = 1
@@ -139,10 +178,10 @@ local nightVisionBrightness = 2.5
 local nightVisionWindow = nil
 local nightVisionSettings = {
     shadows = false, envAo = false, fog = false,
-    atmosphere = false, ambient = true
+    atmosphere = false, ambient = true, handLight = false,
+    weather = false
 }
 
--- ★ 关键修复：camFreezeEnabled / camNoClipEnabled 必须前置
 local camSnapshot = nil
 local camFreezeEnabled = false
 local camNoClipEnabled = false
@@ -178,7 +217,6 @@ local protectedList = {}
 local userProtectKeywords = {}
 local collisionDeleteEnabled = false
 
--- ==================== 默认保护分类 ====================
 local DEFAULT_PROTECT_GROUPS = {
     { id = "npc", name = "🧟 NPC/怪物", keywords = {
         "npc", "mob", "monster", "entity", "creature", "enemy",
@@ -204,7 +242,7 @@ local advancedProtect = {
     classes = true,
 }
 
-local function buildActiveProtectKeywords()
+function buildActiveProtectKeywords()
     local list = {}
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
         if protectGroupEnabled[group.id] then
@@ -218,7 +256,7 @@ end
 
 local activeProtectKeywords = buildActiveProtectKeywords()
 
-local function resetProtectDefaults()
+function resetProtectDefaults()
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
         protectGroupEnabled[group.id] = true
     end
@@ -228,11 +266,10 @@ local function resetProtectDefaults()
     activeProtectKeywords = buildActiveProtectKeywords()
 end
 
-local function refreshActiveProtectKeywords()
+function refreshActiveProtectKeywords()
     activeProtectKeywords = buildActiveProtectKeywords()
 end
 
--- ==================== 前向声明 ====================
 local tanchuangxiaoxi
 local fullShutdown
 local setUIVisible
@@ -248,8 +285,7 @@ local showSingleDetailDialog
 local _activeInputDialog = nil
 local _activeMenuDialog = nil
 
--- ==================== 工具函数 ====================
-local function extractKeyword(name)
+function extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
     s = s:gsub("%s*%(%d+%)%s*$", "")
@@ -261,7 +297,7 @@ local function extractKeyword(name)
     return string.lower(s)
 end
 
-local function serializeKeywords(keywords)
+function serializeKeywords(keywords)
     local lines = {}
     for _, item in ipairs(keywords) do
         local prefix = item.prefix or ""
@@ -271,7 +307,7 @@ local function serializeKeywords(keywords)
     return table.concat(lines, "\n")
 end
 
-local function deserializeKeywords(content)
+function deserializeKeywords(content)
     local keywords = {}
     for line in string.gmatch(content, "[^\n]+") do
         local firstComma = string.find(line, ",")
@@ -290,15 +326,12 @@ local function deserializeKeywords(content)
     return keywords
 end
 
--- ==================== 通用滑块拖动（多指隔离 · Delta 修复版 v2） ====================
-local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
+function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
     local dragging = false
     local dragInput = nil
     local dragInputType = nil
     local lastPos = nil
     local lastCp = 0
-
-    -- Touch 位置连续性阈值（像素）。手机屏幕 1080p 下 150 足够区分手指
     local TOUCH_MATCH_THRESHOLD = 150
 
     local function updateFromInput(input)
@@ -331,14 +364,11 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
     local connChanged = UserInputService.InputChanged:Connect(function(input)
         if not dragging then return end
         local matched = false
-        -- ① 引用匹配优先
         if input == dragInput then
             matched = true
-        -- ② PC 鼠标：MouseButton1 拖动 → MouseMovement 移动
         elseif dragInputType == Enum.UserInputType.MouseButton1
             and input.UserInputType == Enum.UserInputType.MouseMovement then
             matched = true
-        -- ③ Touch：位置连续性判断（★ 多指隔离关键）
         elseif dragInputType == Enum.UserInputType.Touch
             and input.UserInputType == Enum.UserInputType.Touch then
             if isSameTouch(input) then matched = true end
@@ -374,9 +404,7 @@ local function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onU
         if connEnded then connEnded:Disconnect() end
     end
 end
--- ==================== 通用滑块拖动结束 ====================
 
--- ==================== SmartBuilding 模块 ====================
 local SmartBuilding = (function()
     local SB = {}
     SB.crosshairEnabled = true
@@ -579,6 +607,7 @@ local SmartBuilding = (function()
         end
         return false, nil
     end
+
     local function isIgnored(part) return (checkIgnored(part)) end
 
     local function setObjTransparency(obj, trans)
@@ -876,7 +905,8 @@ local SmartBuilding = (function()
             return b
         end
 
-        local y = 4; local gap = btnH + 3
+        local y = 4
+        local gap = btnH + 3
         local scanBtn = makeBtn(y, "🧠 智能扫描", Color3.fromRGB(70, 130, 180)); y = y + gap
         local pickBtn = makeBtn(y, "🎯 准心添加", Color3.fromRGB(46, 139, 87)); y = y + gap
         local protectBtn = makeBtn(y, "🛡 保护目标", Color3.fromRGB(150, 100, 200)); y = y + gap
@@ -1534,6 +1564,7 @@ local createMenu, showInputDialog, showMainMenu
 local showCameraMenu
 
 local function clamp(val, min, max) return math.max(min, math.min(max, val)) end
+
 local function getScreenSize()
     local s = main.AbsoluteSize
     if s.X == 0 or s.Y == 0 then
@@ -1542,7 +1573,9 @@ local function getScreenSize()
     end
     return s
 end
+
 local function setFramePos(x, y) frameX = x; frameY = y; Frame.Position = UDim2.fromOffset(x, y) end
+
 local function isPointInGui(g, x, y)
     if not g or not g.Parent then return false end
     local tl, sz = g.AbsolutePosition, g.AbsoluteSize
@@ -1550,15 +1583,17 @@ local function isPointInGui(g, x, y)
     return x >= tl.X and x <= tl.X + sz.X and y >= tl.Y and y <= tl.Y + sz.Y
 end
 
--- 主 UI 拖拽
 local isDragging = false
 local dragInput = nil
 local handleTouches = {}
+
 local function isDragStartInput(input)
     return input.UserInputType == Enum.UserInputType.Touch
         or input.UserInputType == Enum.UserInputType.MouseButton1
 end
+
 local function beginExpandDrag(input) isDragging = true; dragInput = input end
+
 UserInputService.InputBegan:Connect(function(input, _gpe)
     if not isDragStartInput(input) then return end
     if not isPointInGui(uiLabel, input.Position.X, input.Position.Y) then return end
@@ -1566,6 +1601,7 @@ UserInputService.InputBegan:Connect(function(input, _gpe)
     if isDragging then return end
     beginExpandDrag(input)
 end)
+
 UserInputService.InputChanged:Connect(function(input)
     if not isDragging then return end
     local matched = (input == dragInput)
@@ -1584,6 +1620,7 @@ UserInputService.InputChanged:Connect(function(input)
     local fh = Frame.Size.Y.Offset
     setFramePos(clamp(frameX + d.X, 0, vp.X - fw), clamp(frameY + d.Y, 0, vp.Y - fh))
 end)
+
 UserInputService.InputEnded:Connect(function(input)
     if handleTouches[input] then handleTouches[input] = nil end
     if not isDragging or input ~= dragInput then return end
@@ -1762,9 +1799,11 @@ local function stopPhysAccel()
     if accelAttach then pcall(function() accelAttach:Destroy() end) accelAttach = nil end
     accelLastMethod = nil
 end
+
 local function isPhysMode()
     return speedSubMode == "持续力" or speedSubMode == "物理速度" or speedSubMode == "强制位移"
 end
+
 local function startVectorForce()
     local char = player.Character
     if not char then return false end
@@ -1789,6 +1828,7 @@ local function startVectorForce()
     end)
     return true
 end
+
 local function startBodyVelocity()
     local char = player.Character
     if not char then return false end
@@ -1811,6 +1851,7 @@ local function startBodyVelocity()
     end)
     return true
 end
+
 local function startCFramePush()
     local char = player.Character
     if not char then return false end
@@ -1832,6 +1873,7 @@ local function startCFramePush()
     end)
     return true
 end
+
 local function startPhysAccel()
     stopPhysAccel()
     if speedSubMode == "持续力" then return startVectorForce()
@@ -1852,6 +1894,7 @@ local function forceDisableSpeedMode()
     lockedSpeed = originalWalkSpeed; speedModeEnabled = false
     return true
 end
+
 local function forceDisableFly()
     if not isFlying then return false end
     removeFly(); resetHumanoidAfterFly(); stopTpwalking(); isFlying = false
@@ -1927,7 +1970,6 @@ local function applySpeedMode(enable)
     end
 end
 
--- ==================== 光照 / 夜视 ====================
 local function saveOriginalLighting()
     local Lighting = game:GetService("Lighting")
     originalLighting = {
@@ -1940,6 +1982,8 @@ local function saveOriginalLighting()
         GlobalShadows = Lighting.GlobalShadows,
         EnvironmentDiffuseScale = Lighting.EnvironmentDiffuseScale,
         EnvironmentSpecularScale = Lighting.EnvironmentSpecularScale,
+        ClockTime = Lighting.ClockTime,
+        ExposureCompensation = Lighting.ExposureCompensation,
     }
     atmosphereInstance = Lighting:FindFirstChildOfClass("Atmosphere")
     if atmosphereInstance then
@@ -1953,6 +1997,7 @@ local function saveOriginalLighting()
         }
     end
 end
+
 local function restoreLighting()
     local Lighting = game:GetService("Lighting")
     for prop, val in pairs(originalLighting) do
@@ -1968,34 +2013,222 @@ local function restoreLighting()
     end
     lightingFrozenConnections = {}
 end
+
+-- 👈 防崩溃加固版：防止引擎级报错导致脚本死亡
 local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
-    local connKey = instance:GetFullName() .. "_" .. propName
+    if not instance then return end -- 防 nil
+    local ok, connKey = pcall(function() return instance:GetFullName() .. "_" .. propName end) -- 防 GetFullName 崩溃
+    if not ok or not connKey then return end
+
     if lightingFrozenConnections[connKey] then
-        lightingFrozenConnections[connKey]:Disconnect()
+        pcall(function() lightingFrozenConnections[connKey]:Disconnect() end) -- 防 Disconnect 崩溃
         lightingFrozenConnections[connKey] = nil
     end
     pcall(function() instance[propName] = targetValue end)
     if isFrozen then
-        lightingFrozenConnections[connKey] = instance:GetPropertyChangedSignal(propName):Connect(function()
-            pcall(function()
-                if instance[propName] ~= targetValue then instance[propName] = targetValue end
+        pcall(function()
+            lightingFrozenConnections[connKey] = instance:GetPropertyChangedSignal(propName):Connect(function()
+                pcall(function()
+                    if instance[propName] ~= targetValue then instance[propName] = targetValue end
+                end)
             end)
         end)
     end
 end
+
+local function cleanupHandLight()
+    local char = player.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local old = hrp:FindFirstChild("TracerHandLight")
+            if old then old:Destroy() end
+        end
+    end
+end
+
+local function applyHandLight()
+    if not nightVisionSettings.handLight then
+        cleanupHandLight()
+        return
+    end
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local pl = hrp:FindFirstChild("TracerHandLight")
+    if not pl then
+        pl = Instance.new("PointLight")
+        pl.Name = "TracerHandLight"
+        pl.Parent = hrp
+    end
+    local nb = math.max(0.01, nightVisionBrightness)
+    pl.Brightness = math.sqrt(nb) * 0.25
+    pl.Range = 100
+    pl.Color = Color3.fromRGB(255, 250, 230)
+    pl.Shadows = false
+end
+
+-- ============================================================
+-- 天气特效压制模块（解决沙尘暴/雾霾残留）
+-- ============================================================
+local WeatherSuppressor = (function()
+    local WS = {
+        active = false,
+        savedEmitters = {}, savedPostFX = {},
+        savedAtmospheres = {}, savedFogColor = nil,
+        conns = {}
+    }
+
+    local KEYWORDS = {
+        "sand","dust","fog","mist","haze","smoke","storm","rain","snow",
+        "wind","weather","tornado","cloud","particle","effect","fx","vfx",
+        "沙","尘","雾","霾","烟","风","雨","雪","云","暴","粒","特效","天"
+    }
+
+    local POSTFX_CLASSES = {
+        "ColorCorrectionEffect","BloomEffect","BlurEffect",
+        "SunRaysEffect","DepthOfFieldEffect"
+    }
+
+    local function nameMatch(name)
+        if not name then return false end
+        local n = string.lower(name)
+        for _, kw in ipairs(KEYWORDS) do
+            if string.find(n, kw, 1, true) then return true end
+        end
+        return false
+    end
+
+    local function sweepEmitters()
+        local char = player.Character
+        local containers = { workspace, game:GetService("Lighting") }
+        local cam = workspace.CurrentCamera
+        if cam then table.insert(containers, cam) end
+
+        for _, container in ipairs(containers) do
+            for _, obj in ipairs(container:GetDescendants()) do
+                if char and obj:IsDescendantOf(char) then continue end -- 跳过玩家自身特效
+                if obj:IsA("ParticleEmitter") or obj:IsA("Beam")
+                    or obj:IsA("Trail") or obj:IsA("Smoke")
+                    or obj:IsA("Fire") or obj:IsA("Sparkles") then
+                    if obj.Enabled and nameMatch(obj.Name) then
+                        WS.savedEmitters[obj] = true
+                        pcall(function() obj.Enabled = false end)
+                    end
+                end
+            end
+        end
+    end
+
+    local function sweepPostFX()
+        local Lighting = game:GetService("Lighting")
+        for _, obj in ipairs(Lighting:GetChildren()) do
+            for _, cls in ipairs(POSTFX_CLASSES) do
+                if obj:IsA(cls) and obj.Enabled then
+                    WS.savedPostFX[obj] = true
+                    pcall(function() obj.Enabled = false end)
+                end
+            end
+        end
+    end
+
+    local function sweepAtmospheres()
+        local Lighting = game:GetService("Lighting")
+        for _, atm in ipairs(Lighting:GetChildren()) do
+            if atm:IsA("Atmosphere") then
+                if WS.savedAtmospheres[atm] == nil then
+                    WS.savedAtmospheres[atm] = {
+                        Density = atm.Density, Haze = atm.Haze,
+                        Glare = atm.Glare, Decay = atm.Decay,
+                        Offset = atm.Offset, Color = atm.Color
+                    }
+                end
+                pcall(function()
+                    atm.Density = 0; atm.Haze = 0; atm.Glare = 0; atm.Decay = 0
+                    atm.Offset = 0; atm.Color = Color3.fromRGB(199, 199, 199)
+                end)
+            end
+        end
+        local clouds = Lighting:FindFirstChildOfClass("Clouds")
+        if clouds then
+            pcall(function() clouds.Cover = 0; clouds.Density = 0 end)
+        end
+    end
+
+    function WS.enable()
+        if WS.active then return end
+        WS.active = true
+        local Lighting = game:GetService("Lighting")
+        WS.savedFogColor = Lighting.FogColor
+        pcall(function() Lighting.FogColor = Color3.fromRGB(255, 255, 255) end)
+
+        sweepEmitters(); sweepPostFX(); sweepAtmospheres()
+
+        table.insert(WS.conns, RunService.Heartbeat:Connect(function()
+            if not WS.active then return end
+            -- 降低性能消耗，每5帧压制一次
+            if tick() % 0.1 > 0.03 then return end 
+            sweepEmitters(); sweepPostFX(); sweepAtmospheres()
+            local L = game:GetService("Lighting")
+            if L.FogColor ~= Color3.fromRGB(255,255,255) then
+                pcall(function() L.FogColor = Color3.fromRGB(255,255,255) end)
+            end
+        end))
+    end
+
+    function WS.disable()
+        if not WS.active then return end
+        WS.active = false
+        for _, c in ipairs(WS.conns) do pcall(function() c:Disconnect() end) end
+        WS.conns = {}
+        for obj in pairs(WS.savedEmitters) do
+            if obj and obj.Parent then pcall(function() obj.Enabled = true end) end
+        end
+        WS.savedEmitters = {}
+        for obj in pairs(WS.savedPostFX) do
+            if obj and obj.Parent then pcall(function() obj.Enabled = true end) end
+        end
+        WS.savedPostFX = {}
+        for atm, props in pairs(WS.savedAtmospheres) do
+            if atm and atm.Parent then
+                for k, v in pairs(props) do pcall(function() atm[k] = v end) end
+            end
+        end
+        WS.savedAtmospheres = {}
+        if WS.savedFogColor then
+            pcall(function() game:GetService("Lighting").FogColor = WS.savedFogColor end)
+        end
+        WS.savedFogColor = nil
+    end
+
+    return WS
+end)()
+
 local function applyNightVision()
+    if nightVisionSettings.weather then
+        if not WeatherSuppressor.active then WeatherSuppressor.enable() end
+    else
+        if WeatherSuppressor.active then WeatherSuppressor.disable() end
+    end
     local Lighting = game:GetService("Lighting")
     Lighting.Brightness = nightVisionBrightness
     if nightVisionSettings.ambient then
-        freezeLightingProperty(Lighting, "Ambient", Color3.new(1, 1, 1), true)
-        freezeLightingProperty(Lighting, "OutdoorAmbient", Color3.new(1, 1, 1), true)
+        freezeLightingProperty(Lighting, "Ambient", Color3.fromRGB(120, 120, 120), true)
+        freezeLightingProperty(Lighting, "OutdoorAmbient", Color3.fromRGB(80, 80, 80), true)
         freezeLightingProperty(Lighting, "ColorShift_Bottom", Color3.new(1, 1, 1), true)
         freezeLightingProperty(Lighting, "ColorShift_Top", Color3.new(1, 1, 1), true)
+    if originalLighting.ClockTime and (originalLighting.ClockTime < 6 or originalLighting.ClockTime > 18) then
+        freezeLightingProperty(Lighting, "ClockTime", 12, true)
+    end
+    freezeLightingProperty(Lighting, "ExposureCompensation", 0.3, true)
     else
         if originalLighting.Ambient then freezeLightingProperty(Lighting, "Ambient", originalLighting.Ambient, false) end
         if originalLighting.OutdoorAmbient then freezeLightingProperty(Lighting, "OutdoorAmbient", originalLighting.OutdoorAmbient, false) end
         if originalLighting.ColorShift_Bottom then freezeLightingProperty(Lighting, "ColorShift_Bottom", originalLighting.ColorShift_Bottom, false) end
         if originalLighting.ColorShift_Top then freezeLightingProperty(Lighting, "ColorShift_Top", originalLighting.ColorShift_Top, false) end
+        if originalLighting.ClockTime ~= nil then freezeLightingProperty(Lighting, "ClockTime", originalLighting.ClockTime, false) end
+        if originalLighting.ExposureCompensation ~= nil then freezeLightingProperty(Lighting, "ExposureCompensation", originalLighting.ExposureCompensation, false) end
     end
     if nightVisionSettings.shadows then freezeLightingProperty(Lighting, "GlobalShadows", false, true)
     else if originalLighting.GlobalShadows ~= nil then freezeLightingProperty(Lighting, "GlobalShadows", originalLighting.GlobalShadows, false) end end
@@ -2022,11 +2255,15 @@ local function applyNightVision()
             if originalAtmosphere.Haze then freezeLightingProperty(atmosphereInstance, "Haze", originalAtmosphere.Haze, false) end
         end
     end
+    applyHandLight()
 end
+
 local function disableNightVision()
     if nightVisionEnabled then
+        WeatherSuppressor.disable() -- 👈 改成 disable，并且加上正确缩进
         if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
         if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() nightVisionMaintainConnection = nil end
+        cleanupHandLight()
         restoreLighting()
         nightVisionEnabled = false
         tanchuangxiaoxi("已关闭透视", "透视")
@@ -2034,13 +2271,11 @@ local function disableNightVision()
     end
 end
 
--- ==================== 相机偏移 ====================
 local function applyCameraOffset()
     local char = player.Character
     if not char then return end
     local hum = char:FindFirstChildWhichIsA("Humanoid")
     if not hum then return end
-    -- 冻结中由冻结逻辑接管 CameraOffset，这里不覆盖（camFreezeEnabled 已在顶部声明）
     if camFreezeEnabled then return end
     hum.CameraOffset = Vector3.new(camOffsetX, camOffsetY, camOffsetZ)
     if not camOffsetConn then
@@ -2057,9 +2292,6 @@ local function applyCameraOffset()
         end)
     end
 end
-
--- ==================== 自由相机（函数顺序修正版） ====================
--- ★ 关键修复：以下三个函数必须在 startCamFreeze 之前定义
 
 local function getHum()
     local char = player.Character
@@ -2104,7 +2336,6 @@ local function ensureCamSnapshot()
     end
 end
 
--- ★ startCamFreeze 现在可以安全调用 ensureCamSnapshot ★
 local function startCamFreeze(autoSnap)
     if autoSnap then ensureCamSnapshot() end
     if camFreezeEnabled then return end
@@ -2163,6 +2394,7 @@ local function enableCamNoClip()
     pcall(function() player.DevCameraOcclusionMode = Enum.DevCameraOcclusionMode.Invisicam end)
     tanchuangxiaoxi("相机穿墙已开启", "自由相机")
 end
+
 local function disableCamNoClip()
     if not camNoClipEnabled then return end
     camNoClipEnabled = false
@@ -2173,6 +2405,7 @@ local function disableCamNoClip()
     end
     tanchuangxiaoxi("相机穿墙已关闭", "自由相机")
 end
+
 local function restoreFromCamSnapshot()
     if not camSnapshot then tanchuangxiaoxi("尚无快照", "自由相机"); return end
     stopCamFreeze(); camNoClipEnabled = false
@@ -2191,13 +2424,12 @@ local function restoreFromCamSnapshot()
     end
     tanchuangxiaoxi("已恢复到快照值", "自由相机")
 end
+
 local function manualResnap()
     if takeCamSnapshot() then tanchuangxiaoxi("已重新拍摄快照", "自由相机")
     else tanchuangxiaoxi("快照失败", "自由相机") end
 end
--- ==================== 自由相机结束 ====================
 
--- ==================== 穿墙 ====================
 local function getCharacterParts()
     local char = player.Character
     if not char then return nil end
@@ -2206,6 +2438,7 @@ local function getCharacterParts()
     if not hrp or not hum then return nil end
     return char, hrp, hum
 end
+
 local function applyNoclip()
     local char = player.Character
     if not char then return end
@@ -2218,6 +2451,7 @@ local function applyNoclip()
         end
     end
 end
+
 local function restoreNoclip()
     for part, orig in pairs(noclipSaved) do
         if part and part.Parent then
@@ -2226,6 +2460,7 @@ local function restoreNoclip()
     end
     noclipSaved = {}
 end
+
 local function disableNoclip()
     if not noclipEnabled then return end
     noclipEnabled = false
@@ -2342,7 +2577,7 @@ local function createNightVisionWindow()
     sg.Name = "NightVisionWindow"; sg.Parent = playerGui
     sg.IgnoreGuiInset = true; sg.ResetOnSpawn = false
     local bg = Instance.new("Frame")
-    bg.Parent = sg; bg.Size = UDim2.new(0, 190, 0, 110)
+    bg.Parent = sg; bg.Size = UDim2.new(0, 190, 0, 130)
     bg.Position = UDim2.new(0.5, -95, 0.5, -55)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     bg.BackgroundTransparency = 0.2; bg.BorderSizePixel = 0
@@ -2411,6 +2646,8 @@ local function createNightVisionWindow()
     createToggleBtn("迷雾", "fog", 128, 48)
     createToggleBtn("大气", "atmosphere", 8, 72)
     createToggleBtn("亮光", "ambient", 68, 72)
+    createToggleBtn("补光", "handLight", 8, 96)
+    createToggleBtn("天气", "weather", 68, 96) -- 👈 新增：天气按钮
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = bg; resetBtn.Size = UDim2.new(0, 55, 0, 18)
     resetBtn.Position = UDim2.new(0, 128, 0, 72)
@@ -2419,8 +2656,9 @@ local function createNightVisionWindow()
     resetBtn.Font = Enum.Font.Gotham; resetBtn.TextSize = 9
     local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 3); rc.Parent = resetBtn
     resetBtn.MouseButton1Click:Connect(function()
+        if WeatherSuppressor.active then WeatherSuppressor.disable() end
         restoreLighting()
-        nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true }
+        nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true, handLight = false, weather = false } -- 👈 改成了 false
         for _, item in ipairs(windowButtons) do item.updateUI() end
         if nightVisionEnabled then applyNightVision() end
         tanchuangxiaoxi("已重置所有渲染属性", "透视")
@@ -2472,13 +2710,17 @@ local function enableNoclip()
     noclipWindow = createNoclipWindow()
     updateMainButtonText(); updateSpeedButtonText()
 end
+
 local function enableNightVision()
     if nightVisionEnabled then return end
     saveOriginalLighting()
-    applyNightVision()
+    WeatherSuppressor.enable()
+    
+    pcall(applyNightVision) -- 👈 加上 pcall 防崩，防止脚本卡死
+    
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
     nightVisionMaintainConnection = RunService.Heartbeat:Connect(function()
-        if nightVisionEnabled then applyNightVision() end
+        if nightVisionEnabled then pcall(applyNightVision) end -- 👈 循环里也要防崩
     end)
     nightVisionEnabled = true
     tanchuangxiaoxi("已开启透视", "透视")
@@ -2492,12 +2734,14 @@ local function saveFeatureStates()
     savedFeatureStates.speed = speedModeEnabled
     savedFeatureStates.noclip = noclipEnabled
 end
+
 local function disableAffectedFeatures()
     if isFlying then toggleFly(false) end
     if speedModeEnabled then applySpeedMode(false) end
     if noclipEnabled then disableNoclip() end
     if SmartBuilding.isActive() then SmartBuilding.closeUI(); updateMainButtonText() end
 end
+
 local function restoreFeatureStates()
     task.spawn(function()
         if savedFeatureStates.fly then toggleFly(true) end
@@ -2505,6 +2749,7 @@ local function restoreFeatureStates()
         if savedFeatureStates.noclip then enableNoclip() end
     end)
 end
+
 local function onCharacterAdded(char)
     task.wait(0.7)
     if char:FindFirstChild("Animate") then char.Animate.Disabled = false end
@@ -2525,6 +2770,7 @@ local function onCharacterAdded(char)
         end)
     end
 end
+
 player.CharacterRemoving:Connect(function(character)
     if deathMode == 1 then disableAffectedFeatures()
     elseif deathMode == 2 then saveFeatureStates() disableAffectedFeatures() end
@@ -2532,7 +2778,6 @@ end)
 player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
--- ==================== 通知系统 ====================
 local function reposition()
     local y = startY
     for _, n in ipairs(notifs) do
@@ -2541,11 +2786,13 @@ local function reposition()
         y = y + n.height + spacing
     end
 end
+
 local function remove(f)
     for i, n in ipairs(notifs) do
         if n.frame == f then table.remove(notifs, i) break end
     end
 end
+
 local function processReady()
     while #readyQueue > 0 do
         local n = table.remove(readyQueue, 1)
@@ -2562,6 +2809,7 @@ local function processReady()
     end
     reposition()
 end
+
 function tanchuangxiaoxi(msg, title)
     title = title or "弹窗消息"; msg = msg or "空消息"
     msg = tostring(msg); title = tostring(title)
@@ -2612,7 +2860,6 @@ function tanchuangxiaoxi(msg, title)
     end)
 end
 
--- ==================== 输入弹窗 ====================
 function showInputDialog(title, defaultText, callback, extraButton)
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -2759,7 +3006,6 @@ function showInputDialog(title, defaultText, callback, extraButton)
     return dialog
 end
 
--- ==================== 菜单工厂 ====================
 function createMenu(title, buttons, parentMenu)
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -2876,7 +3122,6 @@ function createMenu(title, buttons, parentMenu)
     return dialog
 end
 
--- ==================== 音量键 UI 控制 ====================
 function setUIVisible(visible)
     uiVisible = visible
     Frame.Visible = uiVisible
@@ -2906,7 +3151,6 @@ function disableVolumeKey()
     tanchuangxiaoxi("音量键已禁用", "设置")
 end
 
--- ==================== 默认保护管理菜单 ====================
 showDefaultProtectMenu = function()
     local buttons = {}
     for _, group in ipairs(DEFAULT_PROTECT_GROUPS) do
@@ -2968,7 +3212,6 @@ showDefaultProtectMenu = function()
     createMenu("🔧 默认保护管理", buttons, showProtectMenu)
 end
 
--- ==================== 保护设置菜单 ====================
 showProtectMenu = function()
     local buttons = {}
     table.insert(buttons, {
@@ -3149,7 +3392,6 @@ showProtectMenu = function()
     createMenu("🛡 保护设置", buttons, nil)
 end
 
--- ==================== 关键词管理（含单目标跳转） ====================
 showKeywordManageMenu = function()
     local buttons = {}
 
@@ -3257,7 +3499,6 @@ showKeywordManageMenu = function()
     createMenu("管理关键词 (" .. #userProtectKeywords .. ")", buttons, showProtectMenu)
 end
 
--- ==================== 关键词详情 ====================
 showKeywordDetailDialog = function(idx)
     local item = userProtectKeywords[idx]
     if not item then return end
@@ -3378,7 +3619,6 @@ showKeywordDetailDialog = function(idx)
     end)
 end
 
--- ==================== 单目标保护主菜单 ====================
 showSingleProtectMenu = function()
     local buttons = {}
 
@@ -3519,7 +3759,6 @@ showSingleProtectMenu = function()
     createMenu("🎯 单目标保护管理", buttons, showKeywordManageMenu)
 end
 
--- ==================== 管理单目标（子列表） ====================
 showSingleManageMenu = function()
     local buttons = {}
 
@@ -3673,7 +3912,6 @@ showSingleManageMenu = function()
     createMenu("📋 管理单目标 (" .. total .. ")", buttons, showSingleProtectMenu)
 end
 
--- ==================== 单目标详情 ====================
 showSingleDetailDialog = function(targetObj)
     if not targetObj or not targetObj.Parent then
         tanchuangxiaoxi("对象已不存在", "保护")
@@ -3794,7 +4032,6 @@ showSingleDetailDialog = function(targetObj)
     end)
 end
 
--- ==================== 飞行模式选择 ====================
 local function showFlyModeSelection(currentMode, callback)
     local screenSize = getScreenSize()
     local menuWidth = math.min(350, screenSize.X * 0.8)
@@ -3939,7 +4176,6 @@ local function showSmartSubMenu()
     createMenu("修改模式", buttons, nil)
 end
 
--- ==================== 主菜单 ====================
 function showMainMenu()
     createMenu("UI菜单", {
         {
@@ -4214,7 +4450,6 @@ function showMainMenu()
     }, nil)
 end
 
--- ==================== 自由相机菜单 ====================
 showCameraMenu = function(parentMenu)
     local function buildCamMenu()
         local freezeText = camFreezeEnabled and "🧊 冻结解锁: 开启中" or "🧊 冻结解锁: 关闭"
@@ -4244,7 +4479,6 @@ showCameraMenu = function(parentMenu)
     buildCamMenu()
 end
 
--- ==================== 相机偏移设置 ====================
 function showCamOffsetDialog()
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -4478,7 +4712,6 @@ local function getMoveVector(dir, rootPart)
     return Vector3.new()
 end
 
--- ==================== 按钮绑定：上升 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     up.MouseButton1Down:Connect(function()
@@ -4510,7 +4743,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：下降 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     down.MouseButton1Down:Connect(function()
@@ -4542,7 +4774,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：加速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     plus.MouseButton1Down:Connect(function()
@@ -4582,7 +4813,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：减速 ====================
 do
     local pressStartTime = 0; local isPressing = false; local lastInterval = 0
     local MIN_SPEED = 0.1; local MIN_LOCKED = 0.1; local MIN_PHYS = 10
@@ -4626,7 +4856,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：speed 多功能按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4713,7 +4942,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：onof 主按钮 ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4777,7 +5005,6 @@ do
     end)
 end
 
--- ==================== 按钮绑定：隐藏/设置（迷你 UI 连接回收） ====================
 do
     local pressStartTime = 0; local isPressing = false
     local longPressTriggered = false; local longPressDelay = 0.3
@@ -4890,7 +5117,6 @@ do
     end)
 end
 
--- ==================== 透视亮度设置弹窗 ====================
 function showBrightnessDialog()
     if _activeInputDialog then
         local d = _activeInputDialog
@@ -5016,8 +5242,8 @@ function showBrightnessDialog()
     end)
 end
 
--- ==================== 彻底关闭 ====================
 function fullShutdown()
+    WeatherSuppressor.disable()
     if isFlying then pcall(toggleFly, false) end
     if speedModeEnabled then pcall(applySpeedMode, false) end
     if noclipEnabled then pcall(disableNoclip) end
@@ -5061,7 +5287,6 @@ main.Destroying:Connect(function()
     if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
 end)
 
--- ==================== 初始化 ====================
 updateButtonText()
 updateMainButtonText()
 updateSpeedButtonText()
