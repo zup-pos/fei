@@ -41,11 +41,11 @@ local scanResumeToken = 0
 
 local SINGLE_PREFIX = "__single__"
 local singleCounter = 0
-functionmakeSingleKeyword()
+function  makeSingleKeyword()
     singleCounter = singleCounter + 1
     return SINGLE_PREFIX .. singleCounter
 end
-functionisSingleKeyword(kw)
+function  isSingleKeyword(kw)
     return kw and type(kw) == "string" and kw:sub(1, #SINGLE_PREFIX) == SINGLE_PREFIX
 end
 
@@ -86,7 +86,7 @@ local DEFAULT_STYLE = {
     blackholeHitBackDist = 2,
 }
 
-functiondeepCopy(t)
+function  deepCopy(t)
     local r = {}
     for k, v in pairs(t) do
         if type(v) == "table" then r[k] = deepCopy(v) else r[k] = v end
@@ -100,7 +100,7 @@ state.keywordStyle = {}
 local drawGroups = {}
 local topCountText
 
-functiongetStyle(kw, field)
+function  getStyle(kw, field)
     if kw then
         local ks = state.keywordStyle[kw]
         if ks and ks[field] ~= nil then return ks[field] end
@@ -122,7 +122,7 @@ local importActionMenu = nil
 local keywordDeleteDialog = nil
 local keywordDeleteDialogKw = nil
 
-functioncloseKeywordDeleteDialog()
+function  closeKeywordDeleteDialog()
     if keywordDeleteDialog and keywordDeleteDialog.Parent then
         keywordDeleteDialog:Destroy()
     end
@@ -145,20 +145,20 @@ closeAllMainWindows = function()
 end
 
 local conns = {}
-functionaddConn(c) table.insert(conns, c); return c end
-functioncleanConns()
+function  addConn(c) table.insert(conns, c); return c end
+function  cleanConns()
     for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
     conns = {}
 end
 
-functionisPointInGui(g, x, y)
+function  isPointInGui(g, x, y)
     if not g or not g.Parent then return false end
     local tl, sz = g.AbsolutePosition, g.AbsoluteSize
     if sz.X <= 0 or sz.Y <= 0 then return false end
     return x >= tl.X and x <= tl.X + sz.X and y >= tl.Y and y <= tl.Y + sz.Y
 end
 
-functionbindSafeClick(btn, callback)
+function  bindSafeClick(btn, callback)
     local pressInput, pressPos
     btn.InputBegan:Connect(function(input)
         if input.UserInputType ~= Enum.UserInputType.Touch
@@ -181,14 +181,14 @@ functionbindSafeClick(btn, callback)
     end)
 end
 
-functionisKeywordDrawEnabled(kw)
+function  isKeywordDrawEnabled(kw)
     if not kw then return true end
     local v = state.keywordDrawEnabled[kw]
     if v == nil then return true end
     return v
 end
 
-functionisProtected(target)
+function  isProtected(target)
     if not target then return false end
     if state.protectedTargets[target] then return true end
     local cur = target
@@ -201,7 +201,7 @@ functionisProtected(target)
     return false
 end
 
-functionisProtectedTree(target)
+function  isProtectedTree(target)
     if not target then return false end
     if isProtected(target) then return true end
     if target:IsA("Model") then
@@ -215,7 +215,7 @@ functionisProtectedTree(target)
     return false
 end
 
-functiongetTargetCamp(target)
+function  getTargetCamp(target)
     if not target then return nil end
     if state.targetCamps[target] then return state.targetCamps[target] end
     local cur = target
@@ -234,7 +234,7 @@ functiongetTargetCamp(target)
     return nil
 end
 
-functionupdateBlockedCamps()
+function  updateBlockedCamps()
     state.blockedCamps = {}
     for _, camp in pairs(state.targetCamps) do
         if camp == "friendly" then state.blockedCamps["friendly"] = true end
@@ -242,7 +242,7 @@ functionupdateBlockedCamps()
     end
 end
 
-functionshouldSkipByProtection(target)
+function  shouldSkipByProtection(target)
     if not target then return false end
     local cur = target
     while cur and cur ~= workspace do
@@ -256,7 +256,7 @@ functionshouldSkipByProtection(target)
     return false
 end
 
-functionextractKeyword(name)
+function  extractKeyword(name)
     if not name or name == "" then return "" end
     local s = name
     s = s:gsub("%s*%(%d+%)%s*$", "")
@@ -282,20 +282,20 @@ local GENERIC_WORDS = {
     floor = true, floors = true, roof = true, roofs = true,
 }
 
-functionisGenericKeyword(kw)
+function  isGenericKeyword(kw)
     if not kw or kw == "" then return true end
     if #kw < 3 then return true end
     return GENERIC_WORDS[kw] == true
 end
 
-functiontryExtractKeyword(name)
+function  tryExtractKeyword(name)
     local k = extractKeyword(name)
     if k == "" then return nil end
     if isGenericKeyword(k) then return nil end
     return k
 end
 
-functionfindBestKeyword(root)
+function  findBestKeyword(root)
     if not root then return nil end
     local kw = tryExtractKeyword(root.Name)
     if kw then return kw end
@@ -313,7 +313,7 @@ functionfindBestKeyword(root)
     return fallback
 end
 
-functionsanitizeNote(val)
+function  sanitizeNote(val)
     if val == nil then return "" end
     val = tostring(val)
     val = val:gsub("[\r\n]+", " ")
@@ -321,7 +321,7 @@ functionsanitizeNote(val)
     return val
 end
 
-functionisVisibleForRaycast(part)
+function  isVisibleForRaycast(part)
     if not part or not part:IsA("BasePart") then return false end
     if part:IsA("Terrain") then return false end
     if part.Transparency >= 0.95 then return false end
@@ -335,7 +335,7 @@ functionisVisibleForRaycast(part)
     return true
 end
 
-functionresolveHitPart(part, hitPos)
+function  resolveHitPart(part, hitPos)
     if not part or not part:IsA("BasePart") then return nil end
     if part:IsA("Terrain") then return nil end
     if isVisibleForRaycast(part) then return part end
@@ -365,7 +365,7 @@ functionresolveHitPart(part, hitPos)
     return nil
 end
 
-functionfindModelRoot(part)
+function  findModelRoot(part)
     if not part then return nil end
     if part:IsA("Model") then return part end
     local cur = part
@@ -376,7 +376,7 @@ functionfindModelRoot(part)
     return part
 end
 
-functionisVisiblePart(part)
+function  isVisiblePart(part)
     if not part:IsA("BasePart") then return false end
     if part.Transparency >= 0.95 then return false end
     if part.LocalTransparencyModifier >= 0.95 then return false end
@@ -388,7 +388,7 @@ functionisVisiblePart(part)
     return true
 end
 
-functiongetModelCenter(target)
+function  getModelCenter(target)
     if target:IsA("BasePart") then return target.Position end
     if target:IsA("Model") then
         local hrp = target:FindFirstChild("HumanoidRootPart")
@@ -410,7 +410,7 @@ functiongetModelCenter(target)
     return nil
 end
 
-functiongetBBox2D(target)
+function  getBBox2D(target)
     local parts = {}
     if target:IsA("BasePart") then parts = { target }
     elseif target:IsA("Model") then
@@ -502,7 +502,7 @@ overlayGui.DisplayOrder = 50
 overlayGui:SetAttribute("TracerInstanceId", INSTANCE_ID)
 overlayGui.Parent = _guiParent
 
-functioncreateNameLabel(kw)
+function  createNameLabel(kw)
     local lbl = Instance.new("TextLabel")
     lbl.BackgroundTransparency = 1
     lbl.Text = ""
@@ -549,9 +549,9 @@ ms.Color = Color3.fromRGB(100, 120, 180); ms.Thickness = 1; ms.Transparency = 0.
 ms.Parent = mainFrame
 
 local frameX, frameY = 0, 100
-functionsetFramePos(x, y) frameX, frameY = x, y; mainFrame.Position = UDim2.fromOffset(x, y) end
-functiongetCurrentWidth() return state.expanded and WIDTH or COLLAPSED_W end
-functionclampFramePos(x, y, w, h)
+function  setFramePos(x, y) frameX, frameY = x, y; mainFrame.Position = UDim2.fromOffset(x, y) end
+function  getCurrentWidth() return state.expanded and WIDTH or COLLAPSED_W end
+function  clampFramePos(x, y, w, h)
     local vp = camera.ViewportSize
     if not w or w <= 0 then w = getCurrentWidth() end
     if not h or h <= 0 then h = TITLE_H end
@@ -610,7 +610,7 @@ content.Position = UDim2.new(0, 0, 0, TITLE_H)
 content.BackgroundTransparency = 1
 content.Parent = mainFrame
 
-functionmakeBtn(y, text, color)
+function  makeBtn(y, text, color)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(1, -16, 0, 30)
     b.Position = UDim2.new(0, 8, 0, y)
@@ -638,7 +638,7 @@ local dragging, dragInput, dragLastPos, dragStartScreen
 local dragStartFrameX, dragStartFrameY = 0, 0
 local TOUCH_MATCH_THRESHOLD = 150
 
-functionisStartInput(i)
+function  isStartInput(i)
     return i.UserInputType == Enum.UserInputType.MouseButton1
         or i.UserInputType == Enum.UserInputType.Touch
 end
@@ -684,7 +684,7 @@ addConn(UserInputService.InputEnded:Connect(function(input)
     end
 end))
 
-functionsetExpanded(expanded)
+function  setExpanded(expanded)
     local curW = state.expanded and WIDTH or COLLAPSED_W
     local rightTopX = frameX + curW
     local topY = frameY
@@ -709,7 +709,7 @@ bindSafeClick(toggleBtn, function() setExpanded(not state.expanded) end)
 
 local inputDialogSingleton = nil
 
-functionshowInputDialog(title, default, callback)
+function  showInputDialog(title, default, callback)
     if inputDialogSingleton and inputDialogSingleton.Parent then
         inputDialogSingleton:Destroy()
     end
@@ -722,7 +722,7 @@ functionshowInputDialog(title, default, callback)
     dlg.Parent = _guiParent
     inputDialogSingleton = dlg
 
-    functioncloseSelf()
+    function  closeSelf()
         if inputDialogSingleton == dlg then inputDialogSingleton = nil end
         dlg:Destroy()
     end
@@ -783,7 +783,7 @@ functionshowInputDialog(title, default, callback)
     end)
 end
 
-functioncolorToHex(c)
+function  colorToHex(c)
     return string.format("#%02X%02X%02X",
         math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
 end
@@ -801,7 +801,7 @@ local NAMED_COLORS = {
     crimson = {220,20,60}, coral = {255,127,80}, khaki = {240,230,140},
 }
 
-functionparseColorInput(str)
+function  parseColorInput(str)
     if type(str) ~= "string" then return nil end
     str = str:gsub("^%s+", ""):gsub("%s+$", "")
     if str == "" then return nil end
@@ -852,7 +852,7 @@ local PRESET_COLORS = {
     Color3.fromRGB(180, 140, 80), Color3.fromRGB(255, 215, 0),
 }
 
-functionmakeColorPicker(initialColor, onConfirm)
+function  makeColorPicker(initialColor, onConfirm)
     local dlg = Instance.new("ScreenGui")
     dlg.Name = "ColorPicker"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
     dlg.DisplayOrder = 240
@@ -919,7 +919,7 @@ functionmakeColorPicker(initialColor, onConfirm)
     previewLabel.TextSize = 14
     previewLabel.Parent = preview
 
-    functionmakeSlider(y, labelText, getValue, setValue, rainbow, formatFn)
+    function  makeSlider(y, labelText, getValue, setValue, rainbow, formatFn)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, -20, 0, 36)
         row.Position = UDim2.new(0, 10, 0, y)
@@ -993,7 +993,7 @@ functionmakeColorPicker(initialColor, onConfirm)
         valLbl.TextXAlignment = Enum.TextXAlignment.Right
         valLbl.Parent = row
         local dragging = false
-        functionupdateFromX(screenX)
+        function  updateFromX(screenX)
             local absPos = track.AbsolutePosition.X
             local absSize = track.AbsoluteSize.X
             if absSize <= 0 then return end
@@ -1044,7 +1044,7 @@ functionmakeColorPicker(initialColor, onConfirm)
     rgbRow.BackgroundTransparency = 1
     rgbRow.Parent = scroll
 
-    functionmakeRGBBox(parent, x, labelText, initialVal)
+    function  makeRGBBox(parent, x, labelText, initialVal)
         local lbl = Instance.new("TextLabel")
         lbl.Size = UDim2.new(0, 18, 1, 0)
         lbl.Position = UDim2.new(x, 0, 0, 0)
@@ -1157,7 +1157,7 @@ functionmakeColorPicker(initialColor, onConfirm)
     okBtn.Parent = bg
     local obc = Instance.new("UICorner"); obc.CornerRadius = UDim.new(0, 5); obc.Parent = okBtn
 
-    functioncleanup()
+    function  cleanup()
         for _, c in ipairs(inputConns) do pcall(function() c:Disconnect() end) end
     end
     bindSafeClick(closeBtn, function() cleanup(); dlg:Destroy() end)
@@ -1196,7 +1196,7 @@ functionmakeColorPicker(initialColor, onConfirm)
     end)
 end
 
-functionupdateLogBtn()
+function  updateLogBtn()
     if state.logCountHidden then
         logBtn.Text = "📋 日志"
     else
@@ -1213,7 +1213,7 @@ addLog = function(text, keyword, target)
     updateLogBtn()
 end
 
-functionensureDrawObjects()
+function  ensureDrawObjects()
     if topCountText then return end
     topCountText = Drawing.new("Text")
     topCountText.Size = 22
@@ -1224,7 +1224,7 @@ functionensureDrawObjects()
     topCountText.Visible = false
 end
 
-functioncreateGroup(kw)
+function  createGroup(kw)
     local g = {
         line = Drawing.new("Line"),
         boxT = Drawing.new("Line"), boxB = Drawing.new("Line"),
@@ -1249,12 +1249,12 @@ functioncreateGroup(kw)
     return g
 end
 
-functiondestroyGroup(g)
+function  destroyGroup(g)
     for _, obj in pairs(g) do pcall(function() obj:Remove() end) end
 end
 
 -- 收集目标所有 BasePart（在 registerDrawEntry 之前定义）
-functioncollectParts(target)
+function  collectParts(target)
     local parts = {}
     if target:IsA("Model") then
         local ok, desc = pcall(function() return target:GetDescendants() end)
@@ -1275,7 +1275,7 @@ local freezeAnchoredSaved = {}
 local collisionRefCount = {}
 local collisionOriginal = {}
 
-functionrestoreCollisionsFrom(entry)
+function  restoreCollisionsFrom(entry)
     if not entry or not entry.affectedParts then return end
     local affected = entry.affectedParts
     entry.affectedParts = nil
@@ -1297,10 +1297,10 @@ functionrestoreCollisionsFrom(entry)
     end
 end
 
-functionapplyCollisionRemovalFor(root, entry)
+function  applyCollisionRemovalFor(root, entry)
     if not root or not entry then return end
     entry.affectedParts = entry.affectedParts or {}
-    functionprocessPart(d)
+    function  processPart(d)
         if not d:IsA("BasePart") then return end
         if d:IsA("Terrain") then return end
         if entry.affectedParts[d] then return end
@@ -1324,7 +1324,7 @@ functionapplyCollisionRemovalFor(root, entry)
     end
 end
 
-functiondestroyEntry(entry)
+function  destroyEntry(entry)
     if not entry then return end
     -- 先恢复冻结：清掉该 entry 涉及的所有 part 的冻结记录
     if entry.frozenParts then
@@ -1344,7 +1344,7 @@ functiondestroyEntry(entry)
     if entry.label then pcall(function() entry.label:Destroy() end) end
 end
 
-functionregisterDrawEntry(root, entry)
+function  registerDrawEntry(root, entry)
     drawGroups[root] = entry
     if state.collisionRemovalOn then
         applyCollisionRemovalFor(root, entry)
@@ -1363,7 +1363,7 @@ functionregisterDrawEntry(root, entry)
     end
 end
 
-functionrefreshAllDrawingStyles()
+function  refreshAllDrawingStyles()
     for _, entry in pairs(drawGroups) do
         local kw = entry.keyword
         if entry.g then
@@ -1392,7 +1392,7 @@ functionrefreshAllDrawingStyles()
     end
 end
 
-functionpauseScanAndResume(delay)
+function  pauseScanAndResume(delay)
     delay = delay or 1.5
     scanResumeToken = scanResumeToken + 1
     local myToken = scanResumeToken
@@ -1410,7 +1410,7 @@ functionpauseScanAndResume(delay)
     end)
 end
 
-functiondeleteKeywordGroup(kw, delay)
+function  deleteKeywordGroup(kw, delay)
     if not kw or kw == "" then return end
     pauseScanAndResume(delay or 1.5)
     if isSingleKeyword(kw) then
@@ -1453,7 +1453,7 @@ functiondeleteKeywordGroup(kw, delay)
     updateLogBtn()
 end
 
-functionupdateProtectBtn()
+function  updateProtectBtn()
     if state.protectCountHidden then
         protectListBtn.Text = "🛡 保护列表"
     else
@@ -1466,7 +1466,7 @@ functionupdateProtectBtn()
 end
 
 local lastProtectClean = 0
-functioncleanInvalidProtected()
+function  cleanInvalidProtected()
     local now = tick()
     if now - lastProtectClean < 1 then return end
     lastProtectClean = now
@@ -1483,7 +1483,7 @@ end
 
 local anchoredSaved = {}
 
-functionunfreezeAll()
+function  unfreezeAll()
     for part, orig in pairs(anchoredSaved) do
         if part and part.Parent then pcall(function() part.Anchored = orig end) end
     end
@@ -1491,7 +1491,7 @@ functionunfreezeAll()
 end
 
 -- 冻结开启：记录所有追踪目标的 Anchored 原值，全部设为 true
-functionapplyFreeze()
+function  applyFreeze()
     state.freezeOn = true
     for target, entry in pairs(drawGroups) do
         local ok, parent = pcall(function() return target.Parent end)
@@ -1510,7 +1510,7 @@ functionapplyFreeze()
 end
 
 -- 冻结关闭：恢复所有记录的原始 Anchored
-functionremoveFreeze()
+function  removeFreeze()
     state.freezeOn = false
     for part, orig in pairs(freezeAnchoredSaved) do
         if part and part.Parent then
@@ -1520,7 +1520,7 @@ functionremoveFreeze()
     freezeAnchoredSaved = {}
 end
 
-functiongetBlackholeTargetCF()
+function  getBlackholeTargetCF()
     local vp = camera.ViewportSize
     local gs = state.globalStyle
     local screenX = vp.X / 2 + gs.blackholeOffsetX
@@ -1556,7 +1556,7 @@ functiongetBlackholeTargetCF()
 end
 
 -- 一次性吸附：移到准心 + Anchored=true + 0.1s 后恢复
-functionblackholeSnapOnce()
+function  blackholeSnapOnce()
     if not state.drawOn then return 0 end
     if next(drawGroups) == nil then return 0 end
     local targetCF = getBlackholeTargetCF()
@@ -1607,7 +1607,7 @@ functionblackholeSnapOnce()
 end
 
 -- 持续吸附：每帧 PivotTo 准心；如果冻结开启，同时保证 Anchored=true
-functionblackholeSnapContinuous()
+function  blackholeSnapContinuous()
     if not state.drawOn then return 0 end
     if next(drawGroups) == nil then return 0 end
     local targetCF = getBlackholeTargetCF()
@@ -1647,7 +1647,7 @@ functionblackholeSnapContinuous()
     return movedCount
 end
 
-functioncloseBlackholeMenu()
+function  closeBlackholeMenu()
     if blackholeMenu and blackholeMenu.Parent then blackholeMenu:Destroy() end
     blackholeMenu = nil
 end
@@ -1691,7 +1691,7 @@ function showBlackholeMenu()
     hint.TextSize = 10
     hint.TextWrapped = true
     hint.Parent = bg
-    functionmakeBtn(y, text, color)
+    function  makeBtn(y, text, color)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, -20, 0, 34)
         b.Position = UDim2.new(0, 10, 0, y)
@@ -1712,7 +1712,7 @@ function showBlackholeMenu()
         end)
     end)
     local contBtn = makeBtn(116, "", Color3.fromRGB(90, 90, 130))
-    functionrefreshContBtn()
+    function  refreshContBtn()
         if state.blackholeOn then
             contBtn.Text = "🌀 持续吸附: 开启（点击关闭）"
             contBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
@@ -1728,7 +1728,7 @@ function showBlackholeMenu()
         closeBlackholeMenu()
     end)
     local freezeBtn = makeBtn(156, "", Color3.fromRGB(90, 60, 120))
-    functionrefreshFreezeBtn()
+    function  refreshFreezeBtn()
         if state.freezeOn then
             freezeBtn.Text = "❄️ 冻结: 开启（点击关闭）"
             freezeBtn.BackgroundColor3 = Color3.fromRGB(80, 130, 200)
@@ -2000,7 +2000,7 @@ logBtn.InputEnded:Connect(function(input)
     end
 end)
 
-functioncountKeywordOverrides(kw)
+function  countKeywordOverrides(kw)
     local n = 0
     local ks = state.keywordStyle[kw]
     if ks then
@@ -2011,7 +2011,7 @@ functioncountKeywordOverrides(kw)
     return n
 end
 
-functionopenCampSelectionDialog(kw)
+function  openCampSelectionDialog(kw)
     if not kw then return end
     local sg = Instance.new("ScreenGui")
     sg.Name = "CampSelectionDialog"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
@@ -2111,7 +2111,7 @@ functionopenCampSelectionDialog(kw)
             enemyBtn.Parent = btnContainer
             local ebc = Instance.new("UICorner"); ebc.CornerRadius = UDim.new(0, 3); ebc.Parent = enemyBtn
 
-            functionrefreshRow()
+            function  refreshRow()
                 local camp = state.targetCamps[target]
                 if camp == "friendly" then
                     friendlyBtn.Text = "🟢 友军"
@@ -2164,7 +2164,7 @@ functionopenCampSelectionDialog(kw)
     end
 end
 
-functionopenKeywordColorDialog(kw)
+function  openKeywordColorDialog(kw)
     if not kw then return end
     local displayName = kw
     if isSingleKeyword(kw) then
@@ -2237,7 +2237,7 @@ functionopenKeywordColorDialog(kw)
         { key = "nameColor", label = "名字颜色" },
     }
     local refs = {}
-    functionmakeColorEditRow(fieldKey, labelText)
+    function  makeColorEditRow(fieldKey, labelText)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, -4, 0, 36)
         row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
@@ -2280,7 +2280,7 @@ functionopenKeywordColorDialog(kw)
         resetBtn.AutoButtonColor = false
         resetBtn.Parent = row
         local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(0, 3); rbc.Parent = resetBtn
-        functionrefreshRow()
+        function  refreshRow()
             if temp[fieldKey] ~= nil then
                 swatch.BackgroundColor3 = temp[fieldKey]
                 ss.Color = Color3.fromRGB(120, 200, 255)
@@ -2529,7 +2529,7 @@ function openTargetWindow()
         drawToggleRowBtn.AutoButtonColor = false
         drawToggleRowBtn.Parent = row
         local dtrc = Instance.new("UICorner"); dtrc.CornerRadius = UDim.new(0, 3); dtrc.Parent = drawToggleRowBtn
-        functionrefreshDrawToggleRowBtn()
+        function  refreshDrawToggleRowBtn()
             local en = isKeywordDrawEnabled(kw)
             if en then
                 drawToggleRowBtn.Text = "👁 绘制: 开启（点击关闭）"
@@ -2619,18 +2619,18 @@ local HAS_FS = (type(writefile) == "function"
     and type(makefolder) == "function" and type(isfolder) == "function"
     and type(isfile) == "function" and type(delfile) == "function")
 
-functioncolorToTable(c)
+function  colorToTable(c)
     if typeof(c) == "Color3" then return { r = c.R, g = c.G, b = c.B } end
     return nil
 end
-functiontableToColor(t)
+function  tableToColor(t)
     if type(t) == "table" and type(t.r) == "number"
         and type(t.g) == "number" and type(t.b) == "number" then
         return Color3.new(math.clamp(t.r, 0, 1), math.clamp(t.g, 0, 1), math.clamp(t.b, 0, 1))
     end
     return nil
 end
-functionsanitizeFileName(name)
+function  sanitizeFileName(name)
     if not name or name == "" then return nil end
     name = tostring(name):gsub("[/\\:*?\"<>|]", "_")
     name = name:gsub("%.json$", "")
@@ -2639,19 +2639,19 @@ functionsanitizeFileName(name)
     if #name > 40 then name = string.sub(name, 1, 40) end
     return name
 end
-functiongetFilePath(name) return EXPORT_FOLDER .. "/" .. name .. ".json" end
-functionensureExportFolder()
+function  getFilePath(name) return EXPORT_FOLDER .. "/" .. name .. ".json" end
+function  ensureExportFolder()
     if not HAS_FS then return false end
     return pcall(function()
         if not isfolder(EXPORT_FOLDER) then makefolder(EXPORT_FOLDER) end
     end)
 end
-functioncountKeywords()
+function  countKeywords()
     local n = 0
     for _ in pairs(state.keywords) do n = n + 1 end
     return n
 end
-functionbuildExportData()
+function  buildExportData()
     local data = { version = 1, exportedAt = os.date("%Y-%m-%d %H:%M:%S"), keywords = {} }
     for kw, _ in pairs(state.keywords) do
         local entry = {
@@ -2675,7 +2675,7 @@ functionbuildExportData()
     end
     return data
 end
-functionwriteExportFile(name, data)
+function  writeExportFile(name, data)
     if not HAS_FS then return false, "执行器不支持文件操作" end
     if not ensureExportFolder() then return false, "无法创建文件夹" end
     local path = getFilePath(name)
@@ -2686,7 +2686,7 @@ functionwriteExportFile(name, data)
     if not ok2 then return false, "写入失败: " .. tostring(err2) end
     return true
 end
-functionreadExportFile(name)
+function  readExportFile(name)
     if not HAS_FS then return nil, "执行器不支持文件操作" end
     local path = getFilePath(name)
     local ok1, content = pcall(function() return readfile(path) end)
@@ -2695,7 +2695,7 @@ functionreadExportFile(name)
     if not ok2 or type(decoded) ~= "table" then return nil, "解析失败" end
     return decoded
 end
-functionlistExportFiles()
+function  listExportFiles()
     local files = {}
     if not HAS_FS then return files end
     pcall(function()
@@ -2708,19 +2708,19 @@ functionlistExportFiles()
     table.sort(files, function(a, b) return a.name < b.name end)
     return files
 end
-functiondeleteExportFile(name)
+function  deleteExportFile(name)
     if not HAS_FS then return false end
     return pcall(function()
         local path = getFilePath(name)
         if isfile(path) then delfile(path) end
     end)
 end
-functionfileExists(name)
+function  fileExists(name)
     if not HAS_FS then return false end
     local ok, result = pcall(function() return isfile(getFilePath(name)) end)
     return ok and result
 end
-functionapplyImportData(data)
+function  applyImportData(data)
     pauseScanAndResume(1)
     for t, entry in pairs(drawGroups) do destroyEntry(entry) end
     state.keywords = {}
@@ -2762,7 +2762,7 @@ functionapplyImportData(data)
     end
     return added, skipped
 end
-functionshowExportConflictDialog(name, onResolve)
+function  showExportConflictDialog(name, onResolve)
     local dlg = Instance.new("ScreenGui")
     dlg.Name = "ExportConflictDialog"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
     dlg.DisplayOrder = 250
@@ -2789,7 +2789,7 @@ functionshowExportConflictDialog(name, onResolve)
     title.TextSize = 13
     title.TextWrapped = true
     title.Parent = bg
-    functionmakeBtn(y, text, color, cb)
+    function  makeBtn(y, text, color, cb)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, -20, 0, 32)
         b.Position = UDim2.new(0, 10, 0, y)
@@ -2805,7 +2805,7 @@ functionshowExportConflictDialog(name, onResolve)
     makeBtn(116, "💾 覆盖", Color3.fromRGB(180, 100, 60), function() dlg:Destroy(); onResolve("overwrite") end)
     makeBtn(154, "❌ 取消", Color3.fromRGB(100, 80, 100), function() dlg:Destroy(); onResolve("cancel") end)
 end
-functionshowDeleteConfirmDialog(name, onConfirm)
+function  showDeleteConfirmDialog(name, onConfirm)
     local dlg = Instance.new("ScreenGui")
     dlg.Name = "DeleteConfirmDialog"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
     dlg.DisplayOrder = 250
@@ -2854,7 +2854,7 @@ functionshowDeleteConfirmDialog(name, onConfirm)
     bindSafeClick(okBtn, function() dlg:Destroy(); onConfirm() end)
 end
 
-functionshowKeywordDeleteConfirmDialog(kw, count, onConfirm)
+function  showKeywordDeleteConfirmDialog(kw, count, onConfirm)
     if keywordDeleteDialog and keywordDeleteDialog.Parent then
         keywordDeleteDialog:Destroy()
     end
@@ -2907,7 +2907,7 @@ functionshowKeywordDeleteConfirmDialog(kw, count, onConfirm)
     okBtn.AutoButtonColor = false
     okBtn.Parent = bg
     local cc2 = Instance.new("UICorner"); cc2.CornerRadius = UDim.new(0, 5); cc2.Parent = okBtn
-        functioncloseSelf()
+        function  closeSelf()
         if keywordDeleteDialog == dlg then
             keywordDeleteDialog = nil
             keywordDeleteDialogKw = nil
@@ -2918,7 +2918,7 @@ functionshowKeywordDeleteConfirmDialog(kw, count, onConfirm)
     bindSafeClick(okBtn, function() closeSelf(); onConfirm() end)
 end
 
-functionshowInfoDialog(titleText, textContent, onConfirm)
+function  showInfoDialog(titleText, textContent, onConfirm)
     local dlg = Instance.new("ScreenGui")
     dlg.Name = "InfoDialog"; dlg.ResetOnSpawn = false; dlg.IgnoreGuiInset = true
     dlg.DisplayOrder = 270
@@ -2978,7 +2978,7 @@ end
 
 local collisionWarningDialog = nil
 
-functionshowCollisionWarningDialog(onConfirm)
+function  showCollisionWarningDialog(onConfirm)
     if collisionWarningDialog and collisionWarningDialog.Parent then
         return
     end
@@ -3021,7 +3021,7 @@ functionshowCollisionWarningDialog(onConfirm)
     text.TextYAlignment = Enum.TextYAlignment.Top
     text.TextXAlignment = Enum.TextXAlignment.Left
     text.Parent = bg
-    functioncloseSelf()
+    function  closeSelf()
         if collisionWarningDialog == dlg then collisionWarningDialog = nil end
         dlg:Destroy()
     end
@@ -3064,7 +3064,7 @@ functionshowCollisionWarningDialog(onConfirm)
     end)
 end
 
-functionsetCollisionRemoval(on)
+function  setCollisionRemoval(on)
     state.collisionRemovalOn = on
     if on then
         collisionBtn.Text = "🚫 碰撞移除: 开启"
@@ -3083,7 +3083,7 @@ functionsetCollisionRemoval(on)
     end
 end
 
-functionshowFileActionMenu(fileName, onRename, onDelete)
+function  showFileActionMenu(fileName, onRename, onDelete)
     if importActionMenu and importActionMenu.Parent then
         importActionMenu:Destroy()
         importActionMenu = nil
@@ -3115,11 +3115,11 @@ functionshowFileActionMenu(fileName, onRename, onDelete)
     title.TextSize = 13
     title.TextWrapped = true
     title.Parent = bg
-    functioncloseMenu()
+    function  closeMenu()
         if importActionMenu == dlg then importActionMenu = nil end
         dlg:Destroy()
     end
-    functionmakeBtn(y, text, color, cb)
+    function  makeBtn(y, text, color, cb)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, -20, 0, 34)
         b.Position = UDim2.new(0, 10, 0, y)
@@ -3148,7 +3148,7 @@ functionshowFileActionMenu(fileName, onRename, onDelete)
     end)
 end
 
-functionrenameExportFile(oldName, onDone)
+function  renameExportFile(oldName, onDone)
     showInputDialog("输入新文件名（不含扩展名）", oldName, function(raw)
         local newName = sanitizeFileName(raw)
         if not newName then
@@ -3218,7 +3218,7 @@ functionrenameExportFile(oldName, onDone)
     end)
 end
 
-functionopenImportWindow()
+function  openImportWindow()
     if importWindow and importWindow.Parent then importWindow:Destroy() end
     local sg = Instance.new("ScreenGui")
     sg.Name = "ImportWindow"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true
@@ -3315,7 +3315,7 @@ functionopenImportWindow()
 
     local rowEntries = {}
 
-    functionapplyFilter()
+    function  applyFilter()
         local q = searchBox.Text or ""
         state.importSearchQuery = q
         if #rowEntries == 0 then
@@ -3353,7 +3353,7 @@ functionopenImportWindow()
         return
     end
 
-    functionrefreshList()
+    function  refreshList()
         sg:Destroy(); importWindow = nil
         openImportWindow()
     end
@@ -3494,7 +3494,7 @@ function openSettingsWindow()
     local SECTION_TITLE_H = 28
     local SECTION_GAP = 6
 
-    functionrebuildLayout()
+    function  rebuildLayout()
         local y = 6
         for _, sec in ipairs(sections) do
             local hh
@@ -3512,7 +3512,7 @@ function openSettingsWindow()
         list.CanvasSize = UDim2.new(0, 0, 0, y + 6)
     end
 
-    functionapplyExpandedState()
+    function  applyExpandedState()
         for _, sec in ipairs(sections) do
             if sec.isStatic then
                 sec.expanded = true
@@ -3528,7 +3528,7 @@ function openSettingsWindow()
         rebuildLayout()
     end
 
-    functiontoggleSection(key)
+    function  toggleSection(key)
         local target
         for _, sec in ipairs(sections) do
             if sec.key == key then target = sec; break end
@@ -3546,7 +3546,7 @@ function openSettingsWindow()
         applyExpandedState()
     end
 
-    functionregisterSection(cfg)
+    function  registerSection(cfg)
         local frame = Instance.new("Frame")
         frame.BackgroundColor3 = Color3.fromRGB(35, 38, 55)
         frame.BorderSizePixel = 0
@@ -3610,12 +3610,12 @@ function openSettingsWindow()
         return sec
     end
 
-    functioncleanupSliderConns()
+    function  cleanupSliderConns()
         for _, c in ipairs(settingsSliderConns) do pcall(function() c:Disconnect() end) end
         settingsSliderConns = {}
     end
 
-    functionmakeToggleBtn(parent, label, getter, setter)
+    function  makeToggleBtn(parent, label, getter, setter)
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(1, 0, 0, 30)
         b.TextColor3 = Color3.new(1, 1, 1)
@@ -3624,7 +3624,7 @@ function openSettingsWindow()
         b.AutoButtonColor = false
         b.Parent = parent
         local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 4); c.Parent = b
-        functionrefresh()
+        function  refresh()
             local v = getter()
             b.Text = label .. ": " .. (v and "开启" or "关闭")
             b.BackgroundColor3 = v and Color3.fromRGB(60, 160, 90) or Color3.fromRGB(120, 60, 60)
@@ -3633,7 +3633,7 @@ function openSettingsWindow()
         bindSafeClick(b, function() setter(not getter()); refresh() end)
     end
 
-    functionmakeNumRow(parent, label, getter, setter, isCount)
+    function  makeNumRow(parent, label, getter, setter, isCount)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 34)
         row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
@@ -3660,7 +3660,7 @@ function openSettingsWindow()
         btn.AutoButtonColor = false
         btn.Parent = row
         local bc2 = Instance.new("UICorner"); bc2.CornerRadius = UDim.new(0, 3); bc2.Parent = btn
-        functionrefresh()
+        function  refresh()
             local v = getter()
             if v == nil then btn.Text = "无上限" else btn.Text = tostring(v) end
         end
@@ -3689,7 +3689,7 @@ function openSettingsWindow()
         end)
     end
 
-    functionmakeColorRow(parent, label, getter, setter)
+    function  makeColorRow(parent, label, getter, setter)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 34)
         row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
@@ -3736,7 +3736,7 @@ function openSettingsWindow()
         end)
     end
 
-    functionmakeFloatRow(parent, label, getter, setter, sliderMin, sliderMax, inputMin, inputMax)
+    function  makeFloatRow(parent, label, getter, setter, sliderMin, sliderMax, inputMin, inputMax)
         inputMin = inputMin or sliderMin
         inputMax = inputMax or sliderMax
         local row = Instance.new("Frame")
@@ -3788,12 +3788,12 @@ function openSettingsWindow()
         handle.Parent = track
         local hs = Instance.new("UIStroke"); hs.Color = Color3.fromRGB(0, 0, 0); hs.Thickness = 1.5; hs.Parent = handle
         local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(1, 0); hc.Parent = handle
-        functionratioToValue(r) return sliderMin + r * (sliderMax - sliderMin) end
-        functionvalueToRatio(v)
+        function  ratioToValue(r) return sliderMin + r * (sliderMax - sliderMin) end
+        function  valueToRatio(v)
             if sliderMax == sliderMin then return 0 end
             return math.clamp((v - sliderMin) / (sliderMax - sliderMin), 0, 1)
         end
-        functionrefresh()
+        function  refresh()
             local v = getter()
             if v == nil then btn.Text = "—" else btn.Text = tostring(v) end
             local r = valueToRatio(v or 0)
@@ -3820,7 +3820,7 @@ function openSettingsWindow()
                 end)
         end)
         local dragging = false
-        functionupdateFromX(screenX)
+        function  updateFromX(screenX)
             local absPos = track.AbsolutePosition.X
             local absSize = track.AbsoluteSize.X
             if absSize <= 0 then return end
@@ -3857,7 +3857,7 @@ function openSettingsWindow()
     end
 
     -- 多选按钮行
-    functionmakeMultiChoiceRow(parent, label, options, getter, setter, onChange)
+    function  makeMultiChoiceRow(parent, label, options, getter, setter, onChange)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 34)
         row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
@@ -3892,7 +3892,7 @@ function openSettingsWindow()
             local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 3); bc.Parent = b
             btns[opt.key] = b
         end
-        functionrefresh()
+        function  refresh()
             local cur = getter()
             for k, b in pairs(btns) do
                 b.BackgroundColor3 = (k == cur)
@@ -3990,7 +3990,7 @@ function openSettingsWindow()
                 local bc2 = Instance.new("UICorner"); bc2.CornerRadius = UDim.new(0, 3); bc2.Parent = b
                 distBtns[opt.key] = b
             end
-            functionrefresh()
+            function  refresh()
                 for k, b in pairs(distBtns) do
                     b.BackgroundColor3 = (state.globalStyle.distPosition == k)
                         and Color3.fromRGB(60, 160, 90) or Color3.fromRGB(70, 90, 120)
@@ -4089,7 +4089,7 @@ function openSettingsWindow()
             ebtn.AutoButtonColor = false
             ebtn.Parent = emptyRow
             local ebc = Instance.new("UICorner"); ebc.CornerRadius = UDim.new(0, 3); ebc.Parent = ebtn
-            functionerefresh()
+            function  erefresh()
                 ebtn.Text = tostring(state.globalStyle.blackholeEmptyDistance)
             end
             erefresh()
@@ -4125,7 +4125,7 @@ function openSettingsWindow()
     registerSection({
         key = "io", title = "关键词导入导出", contentHeight = 2*34 + 4,
         build = function(content)
-            functiondefaultExportName()
+            function  defaultExportName()
                 local gameName = "RobloxGame"
                 local ok1, nameVal = pcall(function() return game.Name end)
                 if ok1 and type(nameVal) == "string" and nameVal ~= "" then
@@ -4156,13 +4156,13 @@ function openSettingsWindow()
                 return gameName .. "_" .. timeStr
             end
 
-            functiondoWrite(name)
+            function  doWrite(name)
                 local ok, err = writeExportFile(name, buildExportData())
                 if ok then addLog("已导出 " .. countKeywords() .. " 个关键词到 " .. name .. ".json")
                 else addLog("导出失败: " .. tostring(err)) end
             end
 
-            functionrunExportFlow(name)
+            function  runExportFlow(name)
                 if not fileExists(name) then
                     doWrite(name)
                     return
@@ -4573,13 +4573,13 @@ collisionBtn.InputEnded:Connect(function(input)
     end
 end)
 
-functionbuildKws()
+function  buildKws()
     local kws, hasAny = {}, false
     for kw, _ in pairs(state.keywords) do kws[kw] = true; hasAny = true end
     return hasAny and kws or nil
 end
 
-functionmatchKeywordByName(name, kws)
+function  matchKeywordByName(name, kws)
     if not name or name == "" then return nil end
     if keywordMatchCache[name] ~= nil then
         local cachedResult = keywordMatchCache[name]
@@ -4612,7 +4612,7 @@ functionmatchKeywordByName(name, kws)
     return nil
 end
 
-functionmatchRoot(root, inst, kws)
+function  matchRoot(root, inst, kws)
     local cur = inst
     local depth = 0
     while cur and cur ~= workspace and depth < 6 do
@@ -4624,7 +4624,7 @@ functionmatchRoot(root, inst, kws)
     return nil
 end
 
-functionquickNearbyScan()
+function  quickNearbyScan()
     local kws = buildKws()
     if not kws then return 0 end
     keywordMatchCache = {}
@@ -4669,7 +4669,7 @@ functionquickNearbyScan()
     return added
 end
 
-functiontryAddRoot(root)
+function  tryAddRoot(root)
     if isScanPaused then return false end
     if not root then return false end
     local ok, parent = pcall(function() return root.Parent end)
@@ -4748,7 +4748,7 @@ startScanByKeywords = function()
     }
 end
 
-functionprocessScanQueue()
+function  processScanQueue()
     if not scanQueue then return end
     local parts = scanQueue.parts
     local kws = scanQueue.kws
@@ -4796,7 +4796,7 @@ functionprocessScanQueue()
     end
 end
 
-functiononNewInstance(inst)
+function  onNewInstance(inst)
     if isScanPaused then return end
     if not inst:IsA("BasePart") then return end
     if inst:IsA("Terrain") then return end
@@ -4856,7 +4856,7 @@ function addTarget(target, autoScan)
     return true
 end
 
-functionaddSingleTarget(target)
+function  addSingleTarget(target)
     if not target then return false end
     local root = findModelRoot(target)
     if not root then return false end
@@ -5022,7 +5022,7 @@ addTargetBtn.InputEnded:Connect(function(input)
     end
 end)
 
-functionsetDrawing(on)
+function  setDrawing(on)
     state.drawOn = on
     drawToggleBtn.Text = "绘制: " .. (on and "开启" or "关闭")
     drawToggleBtn.BackgroundColor3 = on
@@ -5042,7 +5042,7 @@ bindSafeClick(drawToggleBtn, function() setDrawing(not state.drawOn) end)
 
 -- 刷新目标管理按钮文字
 local lastTargetBtnText = nil
-functionrefreshTargetBtnText()
+function  refreshTargetBtnText()
     local txt
     if state.targetCountMode == "hidden" then
         txt = "🎯 目标管理"
@@ -5352,7 +5352,7 @@ addConn(RunService.RenderStepped:Connect(function()
     if not ok then warn("[RenderStepped 错误] " .. tostring(err)) end
 end))
 
-functionshutdown()
+function  shutdown()
     state.blackholeOn = false
     state.collisionRemovalOn = false
     state.freezeOn = false
