@@ -329,10 +329,7 @@ end
 function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate, onEnd)
     local dragging = false
     local dragInput = nil
-    local dragInputType = nil
-    local lastPos = nil
     local lastCp = 0
-    local TOUCH_MATCH_THRESHOLD = 150
 
     local function updateFromInput(input)
         local ap = sliderBg.AbsolutePosition
@@ -345,56 +342,30 @@ function makeSliderDraggable(knob, sliderBg, knobOffsetX, knobOffsetY, onUpdate,
         if onUpdate then onUpdate(cp) end
     end
 
-    local function isSameTouch(input)
-        if not lastPos then return false end
-        local d = input.Position - lastPos
-        return d.Magnitude < TOUCH_MATCH_THRESHOLD
-    end
-
     local connKnobBegan = knob.InputBegan:Connect(function(input)
         if input.UserInputType ~= Enum.UserInputType.Touch
             and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if dragging then return end
         dragging = true
         dragInput = input
-        dragInputType = input.UserInputType
-        lastPos = input.Position
         updateFromInput(input)
     end)
 
     local connChanged = UserInputService.InputChanged:Connect(function(input)
         if not dragging then return end
-        local matched = false
-        if input == dragInput then
-            matched = true
-        elseif dragInputType == Enum.UserInputType.MouseButton1
-            and input.UserInputType == Enum.UserInputType.MouseMovement then
-            matched = true
-        elseif dragInputType == Enum.UserInputType.Touch
-            and input.UserInputType == Enum.UserInputType.Touch then
-            if isSameTouch(input) then matched = true end
-        end
+        local matched = (input == dragInput)
+            or (dragInput ~= nil
+                and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseMovement)
         if not matched then return end
-        lastPos = input.Position
         updateFromInput(input)
     end)
 
     local connEnded = UserInputService.InputEnded:Connect(function(input)
         if not dragging then return end
-        local ended = false
-        if input == dragInput then
-            ended = true
-        elseif dragInputType == Enum.UserInputType.MouseButton1
-            and input.UserInputType == Enum.UserInputType.MouseButton1 then
-            ended = true
-        elseif dragInputType == Enum.UserInputType.Touch
-            and input.UserInputType == Enum.UserInputType.Touch then
-            if isSameTouch(input) then ended = true end
-        end
-        if not ended then return end
+        if input ~= dragInput then return end
         dragging = false
         dragInput = nil
-        dragInputType = nil
-        lastPos = nil
         if onEnd then onEnd(lastCp) end
     end)
 
@@ -766,6 +737,7 @@ local SmartBuilding = (function()
         handle.InputBegan:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.MouseButton1
             and input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if dragging then return end
             dragging = true; dragInput = input
             dragStart = Vector2.new(input.Position.X, input.Position.Y)
             startPos = frame.Position
@@ -785,7 +757,8 @@ local SmartBuilding = (function()
                 startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end)
         UserInputService.InputEnded:Connect(function(input)
-            if input == dragInput then dragging = false; dragInput = nil end
+            if input ~= dragInput then return end
+            dragging = false; dragInput = nil
         end)
     end
 
@@ -1585,21 +1558,18 @@ end
 
 local isDragging = false
 local dragInput = nil
-local handleTouches = {}
 
 local function isDragStartInput(input)
     return input.UserInputType == Enum.UserInputType.Touch
         or input.UserInputType == Enum.UserInputType.MouseButton1
 end
 
-local function beginExpandDrag(input) isDragging = true; dragInput = input end
-
 UserInputService.InputBegan:Connect(function(input, _gpe)
     if not isDragStartInput(input) then return end
-    if not isPointInGui(uiLabel, input.Position.X, input.Position.Y) then return end
-    handleTouches[input] = true
     if isDragging then return end
-    beginExpandDrag(input)
+    if not isPointInGui(uiLabel, input.Position.X, input.Position.Y) then return end
+    isDragging = true
+    dragInput = input
 end)
 
 UserInputService.InputChanged:Connect(function(input)
@@ -1622,13 +1592,10 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if handleTouches[input] then handleTouches[input] = nil end
-    if not isDragging or input ~= dragInput then return end
-    if not isDragStartInput(input) then return end
-    local nextInput = nil
-    for t in pairs(handleTouches) do nextInput = t; break end
-    if nextInput then beginExpandDrag(nextInput)
-    else isDragging = false; dragInput = nil end
+    if not isDragging then return end
+    if input ~= dragInput then return end
+    isDragging = false
+    dragInput = nil
 end)
 
 local function updateButtonText()
@@ -2014,14 +1981,13 @@ local function restoreLighting()
     lightingFrozenConnections = {}
 end
 
--- 👈 防崩溃加固版：防止引擎级报错导致脚本死亡
 local function freezeLightingProperty(instance, propName, targetValue, isFrozen)
-    if not instance then return end -- 防 nil
-    local ok, connKey = pcall(function() return instance:GetFullName() .. "_" .. propName end) -- 防 GetFullName 崩溃
+    if not instance then return end
+    local ok, connKey = pcall(function() return instance:GetFullName() .. "_" .. propName end)
     if not ok or not connKey then return end
 
     if lightingFrozenConnections[connKey] then
-        pcall(function() lightingFrozenConnections[connKey]:Disconnect() end) -- 防 Disconnect 崩溃
+        pcall(function() lightingFrozenConnections[connKey]:Disconnect() end)
         lightingFrozenConnections[connKey] = nil
     end
     pcall(function() instance[propName] = targetValue end)
@@ -2069,9 +2035,6 @@ local function applyHandLight()
     pl.Shadows = false
 end
 
--- ============================================================
--- 天气特效压制模块（解决沙尘暴/雾霾残留）
--- ============================================================
 local WeatherSuppressor = (function()
     local WS = {
         active = false,
@@ -2100,15 +2063,25 @@ local WeatherSuppressor = (function()
         return false
     end
 
-    local function sweepEmitters()
-        local char = player.Character
-        local containers = { workspace, game:GetService("Lighting") }
-        local cam = workspace.CurrentCamera
-        if cam then table.insert(containers, cam) end
+    local function handleObject(obj)
+        if not obj or not obj.Parent then return end
+        if obj:IsA("ParticleEmitter") or obj:IsA("Beam")
+            or obj:IsA("Trail") or obj:IsA("Smoke")
+            or obj:IsA("Fire") or obj:IsA("Sparkles") then
+            local char = player.Character
+            if char and obj:IsDescendantOf(char) then return end
+            if nameMatch(obj.Name) and obj.Enabled then
+                WS.savedEmitters[obj] = true
+                pcall(function() obj.Enabled = false end)
+            end
+        end
+    end
 
-        for _, container in ipairs(containers) do
+    local function initialSweepEmitters()
+        local char = player.Character
+        local function scan(container)
             for _, obj in ipairs(container:GetDescendants()) do
-                if char and obj:IsDescendantOf(char) then continue end -- 跳过玩家自身特效
+                if char and obj:IsDescendantOf(char) then continue end
                 if obj:IsA("ParticleEmitter") or obj:IsA("Beam")
                     or obj:IsA("Trail") or obj:IsA("Smoke")
                     or obj:IsA("Fire") or obj:IsA("Sparkles") then
@@ -2119,6 +2092,10 @@ local WeatherSuppressor = (function()
                 end
             end
         end
+        scan(workspace)
+        scan(game:GetService("Lighting"))
+        local cam = workspace.CurrentCamera
+        if cam then scan(cam) end
     end
 
     local function sweepPostFX()
@@ -2159,22 +2136,44 @@ local WeatherSuppressor = (function()
     function WS.enable()
         if WS.active then return end
         WS.active = true
+        
         local Lighting = game:GetService("Lighting")
         WS.savedFogColor = Lighting.FogColor
         pcall(function() Lighting.FogColor = Color3.fromRGB(255, 255, 255) end)
 
-        sweepEmitters(); sweepPostFX(); sweepAtmospheres()
+        initialSweepEmitters()
+        sweepPostFX()
+        sweepAtmospheres()
 
-        table.insert(WS.conns, RunService.Heartbeat:Connect(function()
-            if not WS.active then return end
-            -- 降低性能消耗，每5帧压制一次
-            if tick() % 0.1 > 0.03 then return end 
-            sweepEmitters(); sweepPostFX(); sweepAtmospheres()
-            local L = game:GetService("Lighting")
-            if L.FogColor ~= Color3.fromRGB(255,255,255) then
-                pcall(function() L.FogColor = Color3.fromRGB(255,255,255) end)
+        table.insert(WS.conns, workspace.DescendantAdded:Connect(function(obj)
+            if WS.active then handleObject(obj) end
+        end))
+        
+        local cam = workspace.CurrentCamera
+        if cam then
+            table.insert(WS.conns, cam.DescendantAdded:Connect(function(obj)
+                if WS.active then handleObject(obj) end
+            end))
+        end
+
+        table.insert(WS.conns, Lighting:GetPropertyChangedSignal("FogColor"):Connect(function()
+            if WS.active and Lighting.FogColor ~= Color3.fromRGB(255, 255, 255) then
+                pcall(function() Lighting.FogColor = Color3.fromRGB(255, 255, 255) end)
             end
         end))
+
+        task.spawn(function()
+            while WS.active do
+                task.wait(2)
+                if not WS.active then break end
+                sweepPostFX()
+                sweepAtmospheres()
+                local L = game:GetService("Lighting")
+                if L.FogColor ~= Color3.fromRGB(255,255,255) then
+                    pcall(function() L.FogColor = Color3.fromRGB(255,255,255) end)
+                end
+            end
+        end)
     end
 
     function WS.disable()
@@ -2182,6 +2181,7 @@ local WeatherSuppressor = (function()
         WS.active = false
         for _, c in ipairs(WS.conns) do pcall(function() c:Disconnect() end) end
         WS.conns = {}
+        
         for obj in pairs(WS.savedEmitters) do
             if obj and obj.Parent then pcall(function() obj.Enabled = true end) end
         end
@@ -2260,7 +2260,7 @@ end
 
 local function disableNightVision()
     if nightVisionEnabled then
-        WeatherSuppressor.disable() -- 👈 改成 disable，并且加上正确缩进
+        WeatherSuppressor.disable()
         if nightVisionWindow then nightVisionWindow:Destroy() nightVisionWindow = nil end
         if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() nightVisionMaintainConnection = nil end
         cleanupHandLight()
@@ -2475,17 +2475,15 @@ end
 local function makeDeltaDraggable(frame, handle)
     handle = handle or frame
     local dragging, dragInput = false, nil
-    local handleTouches = {}
     local function isStartInput(i)
         return i.UserInputType == Enum.UserInputType.Touch
             or i.UserInputType == Enum.UserInputType.MouseButton1
     end
-    local function beginDrag(i) dragging = true; dragInput = i end
     handle.InputBegan:Connect(function(input)
         if not isStartInput(input) then return end
-        handleTouches[input] = true
         if dragging then return end
-        beginDrag(input)
+        dragging = true
+        dragInput = input
     end)
     UserInputService.InputChanged:Connect(function(input)
         if not dragging then return end
@@ -2501,13 +2499,10 @@ local function makeDeltaDraggable(frame, handle)
         frame.Position = frame.Position + UDim2.fromOffset(d.X, d.Y)
     end)
     UserInputService.InputEnded:Connect(function(input)
-        if handleTouches[input] then handleTouches[input] = nil end
+        if not dragging then return end
         if input ~= dragInput then return end
-        if not isStartInput(input) then return end
-        local nextInput = nil
-        for t in pairs(handleTouches) do nextInput = t; break end
-        if nextInput then beginDrag(nextInput)
-        else dragging = false; dragInput = nil end
+        dragging = false
+        dragInput = nil
     end)
 end
 
@@ -2647,7 +2642,7 @@ local function createNightVisionWindow()
     createToggleBtn("大气", "atmosphere", 8, 72)
     createToggleBtn("亮光", "ambient", 68, 72)
     createToggleBtn("补光", "handLight", 8, 96)
-    createToggleBtn("天气", "weather", 68, 96) -- 👈 新增：天气按钮
+    createToggleBtn("天气", "weather", 68, 96)
     local resetBtn = Instance.new("TextButton")
     resetBtn.Parent = bg; resetBtn.Size = UDim2.new(0, 55, 0, 18)
     resetBtn.Position = UDim2.new(0, 128, 0, 72)
@@ -2658,7 +2653,7 @@ local function createNightVisionWindow()
     resetBtn.MouseButton1Click:Connect(function()
         if WeatherSuppressor.active then WeatherSuppressor.disable() end
         restoreLighting()
-        nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true, handLight = false, weather = false } -- 👈 改成了 false
+        nightVisionSettings = { shadows = false, envAo = false, fog = false, atmosphere = false, ambient = true, handLight = false, weather = false }
         for _, item in ipairs(windowButtons) do item.updateUI() end
         if nightVisionEnabled then applyNightVision() end
         tanchuangxiaoxi("已重置所有渲染属性", "透视")
@@ -2716,11 +2711,11 @@ local function enableNightVision()
     saveOriginalLighting()
     WeatherSuppressor.enable()
     
-    pcall(applyNightVision) -- 👈 加上 pcall 防崩，防止脚本卡死
+    pcall(applyNightVision)
     
     if nightVisionMaintainConnection then nightVisionMaintainConnection:Disconnect() end
     nightVisionMaintainConnection = RunService.Heartbeat:Connect(function()
-        if nightVisionEnabled then pcall(applyNightVision) end -- 👈 循环里也要防崩
+        if nightVisionEnabled then pcall(applyNightVision) end
     end)
     nightVisionEnabled = true
     tanchuangxiaoxi("已开启透视", "透视")
@@ -5029,20 +5024,19 @@ do
         miniBtn.Active = true
         local miniX_var, miniY_var = miniX, miniY
         local miniIsDragging = false; local miniDragInput = nil
-        local miniHandleTouches = {}; local miniTotalDelta = 0
+        local miniTotalDelta = 0
         local miniPressStartPos = nil
         local miniConns = {}
         local function isMiniStartInput(input)
             return input.UserInputType == Enum.UserInputType.Touch
                 or input.UserInputType == Enum.UserInputType.MouseButton1
         end
-        local function beginMiniDrag(input) miniIsDragging = true; miniDragInput = input end
         table.insert(miniConns, UserInputService.InputBegan:Connect(function(input, _gpe)
             if not isMiniStartInput(input) then return end
-            if not isPointInGui(miniBtn, input.Position.X, input.Position.Y) then return end
-            miniHandleTouches[input] = true
             if miniIsDragging then return end
-            beginMiniDrag(input)
+            if not isPointInGui(miniBtn, input.Position.X, input.Position.Y) then return end
+            miniIsDragging = true
+            miniDragInput = input
             miniTotalDelta = 0
             miniPressStartPos = Vector2.new(input.Position.X, input.Position.Y)
         end))
@@ -5067,12 +5061,8 @@ do
             mini.Position = UDim2.fromOffset(miniX_var, miniY_var)
         end))
         table.insert(miniConns, UserInputService.InputEnded:Connect(function(input)
-            if miniHandleTouches[input] then miniHandleTouches[input] = nil end
-            if not miniIsDragging or input ~= miniDragInput then return end
-            if not isMiniStartInput(input) then return end
-            local nextInput = nil
-            for t in pairs(miniHandleTouches) do nextInput = t; break end
-            if nextInput then beginMiniDrag(nextInput); return end
+            if not miniIsDragging then return end
+            if input ~= miniDragInput then return end
             local endPos = Vector2.new(input.Position.X, input.Position.Y)
             local straightDist = miniPressStartPos and (endPos - miniPressStartPos).Magnitude or 0
             if straightDist < 10 and miniTotalDelta < 15 then

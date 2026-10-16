@@ -1,7 +1,3 @@
--- =====================================================
--- 准星追踪 v48.7：碰撞移除 + 保护列表长按保护
--- =====================================================
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -85,7 +81,7 @@ local DEFAULT_STYLE = {
     boxColor  = Color3.fromRGB(255, 255, 255),
     nameColor = Color3.fromRGB(255, 255, 180),
     lineTransparency = 0.75, boxTransparency = 0.6, nameTransparency = 0,
-    lineThickness = 1.5, boxThickness = 1, cornerRadius = 1,
+    lineThickness = 1.5, boxThickness = 1,
     offsetX = 0, offsetY = 0,
     distPosition = "right",
     blackholeOffsetX = 0,
@@ -98,6 +94,8 @@ local DEFAULT_STYLE = {
     highlightOn = false,
     highlightAlwaysOnTop = true,
     highlightFillTransparency = 0.7,
+    highlightFillColor = nil,
+    highlightOutlineColor = nil,
 }
 
 function deepCopy(t)
@@ -653,9 +651,8 @@ local blackholeBtn = makeBtn(176, "🌌 黑洞吸附", Color3.fromRGB(90, 60, 14
 local drawToggleBtn = makeBtn(210, "绘制: 关闭", Color3.fromRGB(180, 100, 60))
 local exitBtn = makeBtn(244, "❌ 关闭并退出", Color3.fromRGB(180, 60, 60))
 
-local dragging, dragInput, dragLastPos, dragStartScreen
+local dragging, dragInput, dragStartScreen
 local dragStartFrameX, dragStartFrameY = 0, 0
-local TOUCH_MATCH_THRESHOLD = 150
 
 function isStartInput(i)
     return i.UserInputType == Enum.UserInputType.MouseButton1
@@ -665,26 +662,19 @@ end
 titleBar.InputBegan:Connect(function(input)
     if not isStartInput(input) then return end
     if input.UserInputState ~= Enum.UserInputState.Begin then return end
-    dragging = true; dragInput = input; dragLastPos = input.Position
+    if dragging then return end
+    dragging = true; dragInput = input
     dragStartScreen = Vector2.new(input.Position.X, input.Position.Y)
     dragStartFrameX = frameX; dragStartFrameY = frameY
 end)
 
 addConn(UserInputService.InputChanged:Connect(function(input)
     if not dragging then return end
-    local matched = false
-    if input == dragInput then matched = true
-    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1
-        and input.UserInputType == Enum.UserInputType.MouseMovement then matched = true
-    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.Touch
-        and input.UserInputType == Enum.UserInputType.Touch then
-        if dragLastPos then
-            local d = (input.Position - dragLastPos).Magnitude
-            if d < TOUCH_MATCH_THRESHOLD then matched = true end
-        end
-    end
+    local matched = (input == dragInput)
+        or (dragInput ~= nil
+            and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+            and input.UserInputType == Enum.UserInputType.MouseMovement)
     if not matched then return end
-    dragLastPos = input.Position
     local cur = Vector2.new(input.Position.X, input.Position.Y)
     local d = cur - dragStartScreen
     local newX, newY = clampFramePos(dragStartFrameX + d.X, dragStartFrameY + d.Y)
@@ -693,14 +683,8 @@ end))
 
 addConn(UserInputService.InputEnded:Connect(function(input)
     if not dragging then return end
-    if input == dragInput then
-        dragging = false; dragInput = nil; dragLastPos = nil; dragStartScreen = nil
-    elseif dragInput and dragInput.UserInputType == Enum.UserInputType.Touch
-        and input.UserInputType == Enum.UserInputType.Touch then
-        if dragLastPos and (input.Position - dragLastPos).Magnitude < TOUCH_MATCH_THRESHOLD then
-            dragging = false; dragInput = nil; dragLastPos = nil; dragStartScreen = nil
-        end
-    end
+    if input ~= dragInput then return end
+    dragging = false; dragInput = nil; dragStartScreen = nil
 end))
 
 function setExpanded(expanded)
@@ -1012,6 +996,7 @@ function makeColorPicker(initialColor, onConfirm)
         valLbl.TextXAlignment = Enum.TextXAlignment.Right
         valLbl.Parent = row
         local dragging = false
+        local dragInput = nil
         local function updateFromX(screenX)
             local absPos = track.AbsolutePosition.X
             local absSize = track.AbsoluteSize.X
@@ -1026,21 +1011,25 @@ function makeColorPicker(initialColor, onConfirm)
             if input.UserInputType ~= Enum.UserInputType.Touch
                 and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
             if input.UserInputState ~= Enum.UserInputState.Begin then return end
+            if dragging then return end
             dragging = true
+            dragInput = input
             updateFromX(input.Position.X)
         end)
         local c1 = UserInputService.InputChanged:Connect(function(input)
             if not dragging then return end
-            if input.UserInputType == Enum.UserInputType.MouseMovement
-                or input.UserInputType == Enum.UserInputType.Touch then
-                updateFromX(input.Position.X)
-            end
+            local matched = (input == dragInput)
+                or (dragInput ~= nil
+                    and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+                    and input.UserInputType == Enum.UserInputType.MouseMovement)
+            if not matched then return end
+            updateFromX(input.Position.X)
         end)
         local c2 = UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
+            if not dragging then return end
+            if input ~= dragInput then return end
+            dragging = false
+            dragInput = nil
         end)
         table.insert(inputConns, c1)
         table.insert(inputConns, c2)
@@ -1243,19 +1232,11 @@ function ensureDrawObjects()
     topCountText.Visible = false
 end
 
-local CORNER_SEGMENTS = 4
-
 function createGroup(kw)
     local g = {
         line = Drawing.new("Line"),
-        boxT = Drawing.new("Line"), boxB = Drawing.new("Line"),
-        boxL = Drawing.new("Line"), boxR = Drawing.new("Line"),
-        corners = {}, -- 角线段池
+        box = Drawing.new("Square"),
     }
-    
-    for i = 1, CORNER_SEGMENTS * 4 do
-        table.insert(g.corners, Drawing.new("Line"))
-    end
 
     local lineColor = getStyle(kw, "lineColor")
     local lineThick = getStyle(kw, "lineThickness")
@@ -1264,29 +1245,19 @@ function createGroup(kw)
     local boxThick  = getStyle(kw, "boxThickness")
     local boxTrans  = getStyle(kw, "boxTransparency")
     
-    for _, obj in pairs(g) do
-        if type(obj) == "table" then
-            for _, subObj in ipairs(obj) do
-                subObj.Thickness = boxThick
-                subObj.Transparency = boxTrans
-                subObj.Visible = false
-            end
-        else
-            obj.Thickness = boxThick
-            obj.Transparency = boxTrans
-            obj.Visible = false
-        end
-    end
-    
+    g.box.Filled = false
+    g.box.Thickness = boxThick
+    g.box.Transparency = boxTrans
+    g.box.Visible = false
+    g.box.Color = boxColor
+
+    g.line.Thickness = boxThick
+    g.line.Transparency = boxTrans
+    g.line.Visible = false
     g.line.Color = lineColor
     g.line.Thickness = lineThick
     g.line.Transparency = lineTrans
-    g.boxT.Color = boxColor; g.boxB.Color = boxColor
-    g.boxL.Color = boxColor; g.boxR.Color = boxColor
     
-    for _, c in ipairs(g.corners) do
-        c.Color = boxColor
-    end
     return g
 end
 
@@ -1294,7 +1265,6 @@ function destroyGroup(g)
     for _, obj in pairs(g) do pcall(function() obj:Remove() end) end
 end
 
--- 收集目标所有 BasePart（在 registerDrawEntry 之前定义）
 function collectParts(target)
     local parts = {}
     if target:IsA("Model") then
@@ -1310,7 +1280,6 @@ function collectParts(target)
     return parts
 end
 
--- ═══ 轮廓高亮模块 ═══
 function colorAverageOfModel(target)
     if not target then return Color3.fromRGB(255, 165, 0) end
     local sumR, sumG, sumB, n = 0, 0, 0, 0
@@ -1334,22 +1303,32 @@ function colorAverageOfModel(target)
     return Color3.new(sumR / n, sumG / n, sumB / n)
 end
 
+function resolveHighlightColors(target, kw)
+    local fillColor = getStyle(kw, "highlightFillColor")
+    if fillColor == nil then fillColor = colorAverageOfModel(target) end
+    local outlineColor = getStyle(kw, "highlightOutlineColor")
+    if outlineColor == nil then outlineColor = colorAverageOfModel(target) end
+    return fillColor, outlineColor
+end
+
 function applyHighlightTo(target, entry)
     if not target or not entry then return end
+    local fillColor, outlineColor = resolveHighlightColors(target, entry.keyword)
     if entry.highlight and entry.highlight.Parent then
-        -- 已存在，只更新属性
         entry.highlight.DepthMode = state.globalStyle.highlightAlwaysOnTop
             and Enum.HighlightDepthMode.AlwaysOnTop
             or Enum.HighlightDepthMode.Occluded
         entry.highlight.FillTransparency = state.globalStyle.highlightFillTransparency
+        entry.highlight.FillColor = fillColor
+        entry.highlight.OutlineColor = outlineColor
         return
     end
     local hl = Instance.new("Highlight")
     hl.Name = "TracerHighlight_" .. tostring(os.time())
     hl.Adornee = target
-    hl.FillColor = colorAverageOfModel(target)
+    hl.FillColor = fillColor
     hl.FillTransparency = state.globalStyle.highlightFillTransparency
-    hl.OutlineColor = colorAverageOfModel(target)
+    hl.OutlineColor = outlineColor
     hl.OutlineTransparency = 0
     hl.DepthMode = state.globalStyle.highlightAlwaysOnTop
         and Enum.HighlightDepthMode.AlwaysOnTop
@@ -1366,7 +1345,6 @@ function removeHighlightFrom(entry)
     end
 end
 
--- 冻结：记录 part 原始 Anchored
 local freezeAnchoredSaved = {}
 
 local collisionRefCount = {}
@@ -1423,7 +1401,6 @@ end
 
 function destroyEntry(entry)
     if not entry then return end
-    -- 先恢复冻结：清掉该 entry 涉及的所有 part 的冻结记录
     if entry.frozenParts then
         for part in pairs(entry.frozenParts) do
             local orig = freezeAnchoredSaved[part]
@@ -1471,29 +1448,22 @@ function refreshAllDrawingStyles()
             g.line.Color = getStyle(kw, "lineColor")
             g.line.Thickness = getStyle(kw, "lineThickness")
             g.line.Transparency = getStyle(kw, "lineTransparency")
-            g.boxT.Color = getStyle(kw, "boxColor")
-            g.boxB.Color = getStyle(kw, "boxColor")
-            g.boxL.Color = getStyle(kw, "boxColor")
-            g.boxR.Color = getStyle(kw, "boxColor")
-            g.boxT.Thickness = getStyle(kw, "boxThickness")
-            g.boxB.Thickness = getStyle(kw, "boxThickness")
-            g.boxL.Thickness = getStyle(kw, "boxThickness")
-            g.boxR.Thickness = getStyle(kw, "boxThickness")
-            g.boxT.Transparency = getStyle(kw, "boxTransparency")
-            g.boxB.Transparency = getStyle(kw, "boxTransparency")
-            g.boxL.Transparency = getStyle(kw, "boxTransparency")
-            g.boxR.Transparency = getStyle(kw, "boxTransparency")
-            -- ★ 新增：角线段样式同步
-            for _, c in ipairs(g.corners) do
-                c.Color = getStyle(kw, "boxColor")
-                c.Thickness = getStyle(kw, "boxThickness")
-                c.Transparency = getStyle(kw, "boxTransparency")
-            end
+            g.box.Color = getStyle(kw, "boxColor")
+            g.box.Thickness = getStyle(kw, "boxThickness")
+            g.box.Transparency = getStyle(kw, "boxTransparency")
         end
         if entry.label then
             entry.label.TextColor3 = getStyle(kw, "nameColor")
             entry.label.TextTransparency = getStyle(kw, "nameTransparency")
             entry.label.TextStrokeTransparency = getStyle(kw, "nameTransparency")
+        end
+    end
+    for target, entry in pairs(drawGroups) do
+        if entry.highlight and entry.highlight.Parent then
+            local fillColor, outlineColor = resolveHighlightColors(target, entry.keyword)
+            entry.highlight.FillColor = fillColor
+            entry.highlight.OutlineColor = outlineColor
+            entry.highlight.FillTransparency = state.globalStyle.highlightFillTransparency
         end
     end
 end
@@ -1588,7 +1558,6 @@ function cleanInvalidProtected()
     end
 end
 
--- 冻结开启：记录所有追踪目标的 Anchored 原值，全部设为 true
 function applyFreeze()
     state.freezeOn = true
     for target, entry in pairs(drawGroups) do
@@ -1607,7 +1576,6 @@ function applyFreeze()
     end
 end
 
--- 冻结关闭：恢复所有记录的原始 Anchored
 function removeFreeze()
     state.freezeOn = false
     for part, orig in pairs(freezeAnchoredSaved) do
@@ -1653,7 +1621,6 @@ function getBlackholeTargetCF()
     return CFrame.new(finalPos)
 end
 
--- 一次性吸附：移到准心 + Anchored=true + 0.1s 后恢复
 function blackholeSnapOnce()
     if not state.drawOn then return 0 end
     if next(state.currentVisibleTargets) == nil then return 0 end
@@ -1710,7 +1677,6 @@ function blackholeSnapOnce()
     return movedCount
 end
 
--- 持续吸附：每帧 PivotTo 准心；如果冻结开启，同时保证 Anchored=true
 function blackholeSnapContinuous()
     if not state.drawOn then return 0 end
     if next(state.currentVisibleTargets) == nil then return 0 end
@@ -2290,7 +2256,7 @@ function openKeywordColorDialog(kw)
     keywordColorDialog = sg
     local vp = camera.ViewportSize
     local w = math.min(320, vp.X - 40)
-    local h = math.min(360, vp.Y - 60)
+    local h = math.min(400, vp.Y - 60)
     local bg = Instance.new("Frame")
     bg.Size = UDim2.new(0, w, 0, h)
     bg.Position = UDim2.new(0.5, -w/2, 0.5, -h/2)
@@ -2341,6 +2307,8 @@ function openKeywordColorDialog(kw)
         { key = "lineColor", label = "射线颜色" },
         { key = "boxColor",  label = "方框颜色" },
         { key = "nameColor", label = "名字颜色" },
+        { key = "highlightFillColor", label = "高亮填充" },
+        { key = "highlightOutlineColor", label = "高亮轮廓" },
     }
     local refs = {}
     function makeColorEditRow(fieldKey, labelText)
@@ -2369,6 +2337,13 @@ function openKeywordColorDialog(kw)
         local ss = Instance.new("UIStroke")
         ss.Thickness = 1.5
         ss.Parent = swatch
+        local swatchLbl = Instance.new("TextLabel")
+        swatchLbl.Size = UDim2.new(1, 0, 1, 0)
+        swatchLbl.BackgroundTransparency = 1
+        swatchLbl.Font = Enum.Font.GothamBold
+        swatchLbl.TextSize = 9
+        swatchLbl.TextColor3 = Color3.new(1, 1, 1)
+        swatchLbl.Parent = swatch
         local editBtn = Instance.new("TextButton")
         editBtn.Size = UDim2.new(0, 55, 0, 26)
         editBtn.Position = UDim2.new(0.55, 0, 0.5, -13)
@@ -2389,17 +2364,25 @@ function openKeywordColorDialog(kw)
         local function refreshRow()
             if temp[fieldKey] ~= nil then
                 swatch.BackgroundColor3 = temp[fieldKey]
+                swatchLbl.Text = ""
                 ss.Color = Color3.fromRGB(120, 200, 255)
                 resetBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
             else
-                swatch.BackgroundColor3 = state.globalStyle[fieldKey]
+                local g = state.globalStyle[fieldKey]
+                if g ~= nil then
+                    swatch.BackgroundColor3 = g
+                    swatchLbl.Text = ""
+                else
+                    swatch.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+                    swatchLbl.Text = "平均"
+                end
                 ss.Color = Color3.fromRGB(80, 90, 110)
                 resetBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 120)
             end
         end
         refreshRow()
         bindSafeClick(editBtn, function()
-            local cur = temp[fieldKey] or state.globalStyle[fieldKey]
+            local cur = temp[fieldKey] or state.globalStyle[fieldKey] or Color3.fromRGB(200, 200, 200)
             makeColorPicker(cur, function(newColor)
                 temp[fieldKey] = newColor
                 refreshRow()
@@ -2489,7 +2472,6 @@ function openTargetWindow()
     bg.BorderSizePixel = 0
     bg.Parent = sg
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = bg
-    -- ★★★ 修复位置1：标题总数统计过滤嵌套子 root
     local totalCount = 0
     for target, _ in pairs(drawGroups) do
         local cur = target
@@ -2542,7 +2524,6 @@ function openTargetWindow()
     for kw, _ in pairs(state.keywords) do
         groupMap[kw] = { count = 0, targets = {}, isSingle = false, displayName = kw }
     end
-    -- ★★★ 修复位置2：关键词分组统计过滤嵌套子 root
     for target, entry in pairs(drawGroups) do
         local ok, parent = pcall(function() return target.Parent end)
         if ok and parent then
@@ -3843,6 +3824,91 @@ function openSettingsWindow()
         end)
     end
 
+    function makeColorRowOptional(parent, label, getter, setter)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, 34)
+        row.BackgroundColor3 = Color3.fromRGB(45, 45, 62)
+        row.BorderSizePixel = 0
+        row.Parent = parent
+        local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 4); rc.Parent = row
+        local lb = Instance.new("TextLabel")
+        lb.Size = UDim2.new(0.35, 0, 1, 0)
+        lb.Position = UDim2.new(0, 8, 0, 0)
+        lb.BackgroundTransparency = 1
+        lb.Text = label
+        lb.TextColor3 = Color3.fromRGB(220, 230, 255)
+        lb.Font = Enum.Font.GothamBold
+        lb.TextSize = 12
+        lb.TextXAlignment = Enum.TextXAlignment.Left
+        lb.Parent = row
+        local swatch = Instance.new("Frame")
+        swatch.Size = UDim2.new(0, 40, 0, 22)
+        swatch.Position = UDim2.new(0.38, 0, 0.5, -11)
+        swatch.BorderSizePixel = 0
+        swatch.Parent = row
+        local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0, 3); sc.Parent = swatch
+        local ss = Instance.new("UIStroke")
+        ss.Thickness = 1
+        ss.Parent = swatch
+        local swatchLbl = Instance.new("TextLabel")
+        swatchLbl.Size = UDim2.new(1, 0, 1, 0)
+        swatchLbl.BackgroundTransparency = 1
+        swatchLbl.Font = Enum.Font.GothamBold
+        swatchLbl.TextSize = 9
+        swatchLbl.TextColor3 = Color3.new(1, 1, 1)
+        swatchLbl.Parent = swatch
+        local function refreshSwatch()
+            local v = getter()
+            if v == nil then
+                swatch.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+                swatchLbl.Text = "平均色"
+                ss.Color = Color3.fromRGB(120, 130, 150)
+            else
+                swatch.BackgroundColor3 = v
+                swatchLbl.Text = ""
+                ss.Color = Color3.fromRGB(120, 200, 255)
+            end
+        end
+        refreshSwatch()
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.Size = UDim2.new(0.22, 0, 0, 26)
+        resetBtn.Position = UDim2.new(0.55, 0, 0.5, -13)
+        resetBtn.BackgroundColor3 = Color3.fromRGB(110, 90, 90)
+        resetBtn.Text = "重置"
+        resetBtn.TextColor3 = Color3.new(1, 1, 1)
+        resetBtn.Font = Enum.Font.GothamBold
+        resetBtn.TextSize = 11
+        resetBtn.AutoButtonColor = false
+        resetBtn.Parent = row
+        local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(0, 3); rbc.Parent = resetBtn
+        local editBtn = Instance.new("TextButton")
+        editBtn.Size = UDim2.new(0.22, 0, 0, 26)
+        editBtn.Position = UDim2.new(0.78, 0, 0.5, -13)
+        editBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
+        editBtn.Text = "调色"
+        editBtn.TextColor3 = Color3.new(1, 1, 1)
+        editBtn.Font = Enum.Font.GothamBold
+        editBtn.TextSize = 11
+        editBtn.AutoButtonColor = false
+        editBtn.Parent = row
+        local ec = Instance.new("UICorner"); ec.CornerRadius = UDim.new(0, 3); ec.Parent = editBtn
+        bindSafeClick(editBtn, function()
+            local cur = getter() or Color3.fromRGB(200, 200, 200)
+            makeColorPicker(cur, function(newColor)
+                setter(newColor)
+                refreshSwatch()
+                refreshAllDrawingStyles()
+                addLog(label .. " 已设为自定义色 " .. colorToHex(newColor))
+            end)
+        end)
+        bindSafeClick(resetBtn, function()
+            setter(nil)
+            refreshSwatch()
+            refreshAllDrawingStyles()
+            addLog(label .. " 已恢复目标平均色")
+        end)
+    end
+
     function makeFloatRow(parent, label, getter, setter, sliderMin, sliderMax, inputMin, inputMax)
         inputMin = inputMin or sliderMin
         inputMax = inputMax or sliderMax
@@ -3927,6 +3993,7 @@ function openSettingsWindow()
                 end)
         end)
         local dragging = false
+        local dragInput = nil
         local function updateFromX(screenX)
             local absPos = track.AbsolutePosition.X
             local absSize = track.AbsoluteSize.X
@@ -3943,27 +4010,30 @@ function openSettingsWindow()
             if input.UserInputType ~= Enum.UserInputType.Touch
                 and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
             if input.UserInputState ~= Enum.UserInputState.Begin then return end
+            if dragging then return end
             dragging = true
+            dragInput = input
             updateFromX(input.Position.X)
         end)
         local c1 = UserInputService.InputChanged:Connect(function(input)
             if not dragging then return end
-            if input.UserInputType == Enum.UserInputType.MouseMovement
-                or input.UserInputType == Enum.UserInputType.Touch then
-                updateFromX(input.Position.X)
-            end
+            local matched = (input == dragInput)
+                or (dragInput ~= nil
+                    and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+                    and input.UserInputType == Enum.UserInputType.MouseMovement)
+            if not matched then return end
+            updateFromX(input.Position.X)
         end)
         local c2 = UserInputService.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = false
-            end
+            if not dragging then return end
+            if input ~= dragInput then return end
+            dragging = false
+            dragInput = nil
         end)
         table.insert(settingsSliderConns, c1)
         table.insert(settingsSliderConns, c2)
     end
 
-    -- 多选按钮行
     function makeMultiChoiceRow(parent, label, options, getter, setter, onChange)
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, 34)
@@ -4060,13 +4130,15 @@ function openSettingsWindow()
             state.globalStyle.highlightOn = v
             if not v then
                 for _, entry in pairs(drawGroups) do removeHighlightFrom(entry) end
+            else
+                for target, entry in pairs(drawGroups) do applyHighlightTo(target, entry) end
             end
         end)
     end,
 })
 
 registerSection({
-    key = "highlight", title = "轮廓高亮", contentHeight = 2*30 + 58 + 3*4,
+    key = "highlight", title = "轮廓高亮", contentHeight = 30 + 58 + 34 + 34 + 30 + 4*4,
     build = function(content)
         makeToggleBtn(content, "隔墙可见",
             function() return state.globalStyle.highlightAlwaysOnTop end,
@@ -4090,10 +4162,16 @@ registerSection({
                     end
                 end
             end, 0, 1)
+        makeColorRowOptional(content, "填充颜色",
+            function() return state.globalStyle.highlightFillColor end,
+            function(v) state.globalStyle.highlightFillColor = v end)
+        makeColorRowOptional(content, "轮廓颜色",
+            function() return state.globalStyle.highlightOutlineColor end,
+            function(v) state.globalStyle.highlightOutlineColor = v end)
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, 0, 0, 30)
         hint.BackgroundTransparency = 1
-        hint.Text = "颜色自动取目标平均色，只对屏幕内目标生效"
+        hint.Text = "不设置时使用目标平均色，点【重置】按钮可恢复"
         hint.TextColor3 = Color3.fromRGB(150, 170, 200)
         hint.Font = Enum.Font.Gotham
         hint.TextSize = 10
@@ -4192,17 +4270,13 @@ registerSection({
     })
 
     registerSection({
-    key = "thick", title = "粗细与透明度", contentHeight = 6*58 + 5*4,   -- ★ 5→6
+    key = "thick", title = "粗细与透明度", contentHeight = 5*58 + 4*4,
     build = function(content)
         makeFloatRow(content, "射线粗细", function() return state.globalStyle.lineThickness end, function(v) state.globalStyle.lineThickness = v end, 0.5, 10)
         makeFloatRow(content, "方框粗细", function() return state.globalStyle.boxThickness end, function(v) state.globalStyle.boxThickness = v end, 0.5, 10)
         makeFloatRow(content, "射线透明度", function() return state.globalStyle.lineTransparency end, function(v) state.globalStyle.lineTransparency = v end, 0, 1)
         makeFloatRow(content, "方框透明度", function() return state.globalStyle.boxTransparency end, function(v) state.globalStyle.boxTransparency = v end, 0, 1)
         makeFloatRow(content, "名字透明度", function() return state.globalStyle.nameTransparency end, function(v) state.globalStyle.nameTransparency = v end, 0, 1)
-        makeFloatRow(content, "方框圆角",
-            function() return state.globalStyle.cornerRadius end,
-            function(v) state.globalStyle.cornerRadius = v end,
-            0, 20, 0, 100)
     end,
 })
 
@@ -5028,13 +5102,11 @@ task.spawn(function()
     end
 end)
 
--- 启动后延迟 0.5 秒立即全量扫描一次
 task.spawn(function()
     task.wait(0.5)
     if not isScanPaused and not scanQueue then startScanByKeywords() end
 end)
 
--- 6 秒兜底（玩家静止时场景没变化，无需高频扫描）
 task.spawn(function()
     while true do
         task.wait(FALLBACK_SCAN_INTERVAL)
@@ -5214,7 +5286,6 @@ addTargetBtn.InputEnded:Connect(function(input)
         else
             local kw = entry.keyword
             if not kw then addLog("该目标无有效关键词"); return end
-            -- toggle：当前弹窗已经是这个关键词 → 关闭
             if keywordDeleteDialog and keywordDeleteDialog.Parent
                 and keywordDeleteDialogKw == kw then
                 closeKeywordDeleteDialog()
@@ -5254,14 +5325,12 @@ end
 
 bindSafeClick(drawToggleBtn, function() setDrawing(not state.drawOn) end)
 
--- 刷新目标管理按钮文字
 local lastTargetBtnText = nil
 function refreshTargetBtnText()
     local txt
     if state.targetCountMode == "hidden" then
         txt = "🎯 目标管理"
     elseif state.targetCountMode == "targets" then
-        -- ★★★ 修复位置3：targets 模式统计过滤嵌套子 root
         local n = 0
         for target, _ in pairs(drawGroups) do
             local cur = target
@@ -5278,7 +5347,6 @@ function refreshTargetBtnText()
         end
         txt = "🎯 目标管理 (" .. n .. ")"
     else
-        -- ★★★ 修复位置4：keywords 模式统计过滤嵌套子 root
         local n = 0
         for _ in pairs(state.keywords) do n = n + 1 end
         for target, entry in pairs(drawGroups) do
@@ -5314,7 +5382,6 @@ addConn(RunService.RenderStepped:Connect(function()
         cleanInvalidProtected()
         processScanQueue()
 
-        -- 位置驱动扫描：玩家移动超过阈值就触发一次全量扫描
         do
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -5327,7 +5394,6 @@ addConn(RunService.RenderStepped:Connect(function()
             end
         end
 
-        -- 远距离待观察队列：0.3 秒检查一次，进入射程立即注册
         if tick() - lastFarRootCheck >= FAR_ROOT_CHECK_INTERVAL then
             lastFarRootCheck = tick()
             if next(pendingFarRoots) then
@@ -5567,55 +5633,18 @@ if state.drawOn then
                 if other.label then other.label.Visible = false end
             end
             local x1, y1, x2, y2 = g.x1, g.y1, g.x2, g.y2
-            local cr = math.max(0, gs.cornerRadius or 1)
-            local boxW = x2 - x1
-            local boxH = y2 - y1
-            local maxCr = math.min(boxW, boxH) * 0.4
-            if cr > maxCr then cr = maxCr end
-            if boxW < 2 or boxH < 2 then cr = 0 end
             
-            group.boxT.From = Vector2.new(x1 + cr, y1); group.boxT.To = Vector2.new(x2 - cr, y1)
-            group.boxB.From = Vector2.new(x2 - cr, y2); group.boxB.To = Vector2.new(x1 + cr, y2)
-            group.boxL.From = Vector2.new(x1, y2 - cr); group.boxL.To = Vector2.new(x1, y1 + cr)
-            group.boxR.From = Vector2.new(x2, y1 + cr); group.boxR.To = Vector2.new(x2, y2 - cr)
-            
-            local showCorner = (cr > 0.5)
-            if showCorner then
-                local angleStep = (math.pi / 2) / CORNER_SEGMENTS
-                local cornersDef = {
-                    { cx = x1 + cr, cy = y1 + cr, startAng = math.pi },                 -- 左上角
-                    { cx = x2 - cr, cy = y1 + cr, startAng = math.pi * 1.5 },           -- 右上角
-                    { cx = x2 - cr, cy = y2 - cr, startAng = 0 },                       -- 右下角
-                    { cx = x1 + cr, cy = y2 - cr, startAng = math.pi * 0.5 },           -- 左下角
-                }
-                for i, def in ipairs(cornersDef) do
-                    for j = 1, CORNER_SEGMENTS do
-                        local ang1 = def.startAng + (j - 1) * angleStep
-                        local ang2 = def.startAng + j * angleStep
-                        local idx = (i - 1) * CORNER_SEGMENTS + j
-                        local lineObj = group.corners[idx]
-                        if lineObj then
-                lineObj.From = Vector2.new(def.cx + math.cos(ang1) * cr, def.cy + math.sin(ang1) * cr)
-                lineObj.To   = Vector2.new(def.cx + math.cos(ang2) * cr, def.cy + math.sin(ang2) * cr)
+            group.box.Position = Vector2.new(x1, y1)
+            group.box.Size = Vector2.new(x2 - x1, y2 - y1)
+            group.box.Visible = gs.showBox
+
+            if gs.showLine then
+                group.line.From = Vector2.new(cx + gs.offsetX, countTopY + 24 + gs.offsetY)
+                group.line.To = Vector2.new((x1 + x2) / 2, (y1 + y2) / 2)
+                group.line.Visible = true
+            else
+                group.line.Visible = false
             end
-        end
-    end
-end
-
-local showBox = gs.showBox
-group.boxT.Visible = showBox; group.boxB.Visible = showBox
-group.boxL.Visible = showBox; group.boxR.Visible = showBox
-for _, c in ipairs(group.corners) do
-    c.Visible = showBox and showCorner
-end
-
-if gs.showLine then
-    group.line.From = Vector2.new(cx + gs.offsetX, countTopY + 24 + gs.offsetY)
-    group.line.To = Vector2.new((x1 + x2) / 2, (y1 + y2) / 2)
-    group.line.Visible = true
-else
-    group.line.Visible = false
-end
 
             if entry.label then
                 local keywordMap = {}
@@ -5710,7 +5739,6 @@ function shutdown()
     state.blackholeOn = false
     state.collisionRemovalOn = false
     state.freezeOn = false
-    -- 冻结恢复
     for part, orig in pairs(freezeAnchoredSaved) do
         if part and part.Parent then
             pcall(function() part.Anchored = orig end)
