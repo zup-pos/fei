@@ -133,6 +133,7 @@ local settingsWindow = nil
 local protectWindow = nil
 local logWindow = nil
 local blackholeMenu = nil
+local recordedPositions = setmetatable({}, { __mode = "k" })
 local keywordColorDialog = nil
 local importWindow = nil
 local importActionMenu = nil
@@ -1668,8 +1669,51 @@ function getSnapTargets()
     return finalTargets
 end
 
+function recordCurrentPositions()
+    local targets = getSnapTargets()
+    if #targets == 0 then return 0 end
+    local count = 0
+    for _, target in ipairs(targets) do
+        if target:IsA("Model") then
+            recordedPositions[target] = target:GetPivot()
+            count = count + 1
+        elseif target:IsA("BasePart") then
+            recordedPositions[target] = target.CFrame
+            count = count + 1
+        end
+    end
+    return count
+end
+
+function restorePositions()
+    local count = 0
+    for target, cframe in pairs(recordedPositions) do
+        local ok, parent = pcall(function() return target.Parent end)
+        if ok and parent then
+            if target:IsA("Model") then
+                pcall(function() target:PivotTo(cframe) end)
+                count = count + 1
+            elseif target:IsA("BasePart") then
+                pcall(function() target.CFrame = cframe end)
+                count = count + 1
+            end
+        else
+            recordedPositions[target] = nil
+        end
+    end
+    return count
+end
+
+function autoSaveBeforeSnap()
+    if next(recordedPositions) ~= nil then
+        restorePositions()
+    end
+    recordCurrentPositions()
+end
+
 function blackholeSnapOnce()
     if not state.drawOn then return 0 end
+    autoSaveBeforeSnap()
     local targets = getSnapTargets()
     if #targets == 0 then return 0 end
     local targetCF = getBlackholeTargetCF()
@@ -1784,7 +1828,7 @@ function showBlackholeMenu()
     local bg = Instance.new("Frame")
     local vp = camera.ViewportSize
     local w = math.min(280, vp.X - 40)
-    local h = math.min(250, vp.Y - 60)
+    local h = math.min(330, vp.Y - 60)
     bg.Size = UDim2.new(0, w, 0, h)
     bg.Position = UDim2.new(0.5, -w/2, 0.5, -h/2)
     bg.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
@@ -1844,6 +1888,9 @@ function showBlackholeMenu()
     end
     refreshContBtn()
     bindSafeClick(contBtn, function()
+        if not state.blackholeOn then
+            autoSaveBeforeSnap()
+        end
         state.blackholeOn = not state.blackholeOn
         addLog("持续吸附: " .. (state.blackholeOn and "开启" or "关闭"))
         closeBlackholeMenu()
@@ -1868,7 +1915,22 @@ function showBlackholeMenu()
         addLog("冻结: " .. (state.freezeOn and "开启" or "关闭"))
         closeBlackholeMenu()
     end)
-    local closeBtn = makeBtn(196, "❌ 关闭菜单", Color3.fromRGB(100, 80, 100))
+
+    local recordBtn = makeBtn(196, "📸 记录当前位置", Color3.fromRGB(50, 130, 180))
+    bindSafeClick(recordBtn, function()
+        local n = recordCurrentPositions()
+        addLog("已记录 " .. n .. " 个目标的位置")
+        closeBlackholeMenu()
+    end)
+
+    local restoreBtn = makeBtn(236, "↩️ 还原记录位置", Color3.fromRGB(150, 60, 60))
+    bindSafeClick(restoreBtn, function()
+        local n = restorePositions()
+        addLog("已还原 " .. n .. " 个目标的位置")
+        closeBlackholeMenu()
+    end)
+
+    local closeBtn = makeBtn(276, "❌ 关闭菜单", Color3.fromRGB(100, 80, 100))
     bindSafeClick(closeBtn, function() closeBlackholeMenu() end)
 end
 
