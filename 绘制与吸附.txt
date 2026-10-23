@@ -1621,14 +1621,62 @@ function getBlackholeTargetCF()
     return CFrame.new(finalPos)
 end
 
+function getSnapTargets()
+    local finalTargets = {}
+    local targetSet = {}
+    
+    local allValid = {}
+    local camPos = camera.CFrame.Position
+    for target, entry in pairs(drawGroups) do
+        if isKeywordDrawEnabled(entry.keyword) and not isProtectedTree(target) then
+            local ok, parent = pcall(function() return target.Parent end)
+            if ok and parent then
+                local center = getModelCenter(target)
+                if center then
+                    local dist = (center - camPos).Magnitude
+                    table.insert(allValid, {target = target, dist = dist})
+                end
+            end
+        end
+    end
+    
+    for _, item in ipairs(allValid) do
+        if state.currentVisibleTargets[item.target] then
+            table.insert(finalTargets, item.target)
+            targetSet[item.target] = true
+        end
+    end
+    
+    local limit = state.globalStyle.maxDrawCount
+    if limit and #finalTargets >= limit then
+        local ret = {}
+        for i = 1, limit do
+            table.insert(ret, finalTargets[i])
+        end
+        return ret
+    end
+    
+    table.sort(allValid, function(a, b) return a.dist < b.dist end)
+    for _, item in ipairs(allValid) do
+        if not targetSet[item.target] then
+            table.insert(finalTargets, item.target)
+            targetSet[item.target] = true
+            if limit and #finalTargets >= limit then break end
+        end
+    end
+    
+    return finalTargets
+end
+
 function blackholeSnapOnce()
     if not state.drawOn then return 0 end
-    if next(state.currentVisibleTargets) == nil then return 0 end
+    local targets = getSnapTargets()
+    if #targets == 0 then return 0 end
     local targetCF = getBlackholeTargetCF()
     local savedMap = {}
     local touched = {}
 
-    for target, _ in pairs(state.currentVisibleTargets) do
+    for _, target in ipairs(targets) do
         local entry = drawGroups[target]
         if entry then
             local ok, parent = pcall(function() return target.Parent end)
@@ -1647,7 +1695,7 @@ function blackholeSnapOnce()
     if #touched == 0 then return 0 end
     task.wait(0.05)
     local movedCount = 0
-    for target, _ in pairs(state.currentVisibleTargets) do
+    for _, target in ipairs(targets) do
         local entry = drawGroups[target]
         if entry then
             local ok, parent = pcall(function() return target.Parent end)
@@ -1679,10 +1727,11 @@ end
 
 function blackholeSnapContinuous()
     if not state.drawOn then return 0 end
-    if next(state.currentVisibleTargets) == nil then return 0 end
+    local targets = getSnapTargets()
+    if #targets == 0 then return 0 end
     local targetCF = getBlackholeTargetCF()
     local movedCount = 0
-    for target, _ in pairs(state.currentVisibleTargets) do
+    for _, target in ipairs(targets) do
         local entry = drawGroups[target]
         if entry then
             local ok, parent = pcall(function() return target.Parent end)
