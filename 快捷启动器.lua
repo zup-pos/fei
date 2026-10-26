@@ -39,19 +39,23 @@ local function new(class, props, parent)
     return obj
 end
 
--- 完美像素级拖动，杜绝乱飞
+-- 彻底修复漂移的拖动函数
 local function makeDraggable(targetFrame, dragHandle)
     local dragging = false
     local dragInput = nil
     local dragStart = nil
-    local startPos = nil
+    local startOffsetX = 0
+    local startOffsetY = 0
     
     dragHandle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then return end
             dragging = true
             dragInput = input
             dragStart = Vector2.new(input.Position.X, input.Position.Y)
-            startPos = targetFrame.AbsolutePosition
+            -- 记录拖拽开始时的纯 Offset，绝对不使用 AbsolutePosition
+            startOffsetX = targetFrame.Position.X.Offset
+            startOffsetY = targetFrame.Position.Y.Offset
         end
     end)
     
@@ -61,8 +65,8 @@ local function makeDraggable(targetFrame, dragHandle)
         local vp = workspace.CurrentCamera.ViewportSize
         local fSize = targetFrame.AbsoluteSize
         
-        local newX = startPos.X + delta.X
-        local newY = startPos.Y + delta.Y
+        local newX = startOffsetX + delta.X
+        local newY = startOffsetY + delta.Y
         
         newX = math.clamp(newX, 0, math.max(0, vp.X - fSize.X))
         newY = math.clamp(newY, 0, math.max(0, vp.Y - fSize.Y))
@@ -87,7 +91,6 @@ local gui = new("ScreenGui", {
 
 local vp = workspace.CurrentCamera.ViewportSize
 
--- ================= 1. 主面板 =================
 local panel = new("Frame", { 
     Size = UDim2.new(0, 280, 0, 340), 
     Position = UDim2.fromOffset(vp.X - 290, 10), 
@@ -125,10 +128,9 @@ local logScroll = new("ScrollingFrame", { Size = UDim2.new(1, -10, 1, -10), Posi
 new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, logScroll)
 new("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, logScroll)
 
--- ================= 2. 弹窗（无遮罩，独立悬浮） =================
 local popup = new("Frame", { 
     Size = UDim2.new(0, 240, 0, 220), 
-    Position = UDim2.fromOffset(vp.X / 2 - 120, vp.Y / 2 - 110), -- 绝对居中
+    Position = UDim2.fromOffset(vp.X / 2 - 120, vp.Y / 2 - 110), 
     BackgroundColor3 = Color3.fromRGB(35, 35, 45), 
     BorderSizePixel = 0, 
     Visible = false,
@@ -161,7 +163,6 @@ local function togglePopup(show)
 end
 closePopBtn.MouseButton1Click:Connect(function() togglePopup(false) end)
 
--- ================= 3. 核心逻辑 =================
 local COLORS = {
     info = Color3.fromRGB(180,180,220), success = Color3.fromRGB(100,230,120),
     error = Color3.fromRGB(255,110,110), warn = Color3.fromRGB(255,200,100),
@@ -175,10 +176,19 @@ local function log(msg, level, prefix)
         local oldest = logScroll:FindFirstChildWhichIsA("Frame")
         if oldest then oldest:Destroy() end
     end
+    
+    local wasAtTop = logScroll.CanvasPosition.Y <= 20
+
     local row = new("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, LayoutOrder = -logCount, ZIndex = 12 }, logScroll)
     new("TextLabel", { Size = UDim2.new(0, 50, 0, 16), BackgroundTransparency = 1, Text = os.date("%H:%M:%S"), TextColor3 = Color3.fromRGB(100, 100, 120), Font = Enum.Font.Code, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 13 }, row)
     new("TextLabel", { Size = UDim2.new(1, -55, 0, 0), Position = UDim2.new(0, 55, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = prefix .. msg, TextColor3 = COLORS[level] or COLORS.info, Font = Enum.Font.Gotham, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, ZIndex = 13 }, row)
-    task.defer(function() logScroll.CanvasPosition = Vector2.new(0, logScroll.AbsoluteCanvasSize.Y) end)
+    
+    if wasAtTop then
+        task.defer(function() 
+            logScroll.CanvasPosition = Vector2.new(0, 0) 
+        end)
+    end
+    
     print("[速启动] " .. prefix .. msg)
 end
 
