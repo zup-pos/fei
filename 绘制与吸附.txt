@@ -39,6 +39,7 @@ local FAR_ROOT_CHECK_INTERVAL = 0.3
 
 local keywordMatchCache = {}
 local isScanPaused = false
+local isShuttingDown = false -- 【保命修复1】脚本销毁标志，用于打断所有常驻协程
 local scanResumeToken = 0
 
 
@@ -485,7 +486,8 @@ local function projectBox2D(cf, sz)
     local any = false
     for _, v in ipairs(corners) do
         local sp, on = camera:WorldToScreenPoint(v)
-        if on and sp.Z > 0 then
+        -- 【修复3b】离屏角点也参与 min/max 计算，避免物体边缘缩水抽搐
+        if sp.Z > 0 then
             any = true
             local safeX = math.clamp(sp.X, -10000, 10000)
             local safeY = math.clamp(sp.Y, -10000, 10000)
@@ -524,6 +526,20 @@ function isEnvironmentHit(inst, vp)
     return false
 end
 
+-- 【修复3a】特效部件名黑名单：命中这些词的特效件不参与包围盒，避免框被拉成长条/铺满屏幕
+local EFFECT_PART_KEYWORDS = {
+    "puddle", "trail", "effect", "aura", "glow", "field", "spark", "hitbox",
+}
+
+local function isEffectPartName(name)
+    if type(name) ~= "string" then return false end
+    local n = string.lower(name)
+    for _, kw in ipairs(EFFECT_PART_KEYWORDS) do
+        if string.find(n, kw, 1, true) then return true end
+    end
+    return false
+end
+
 function getBBox2D(target, isSingle)
     -- 【新增】单目标强制用整体包围盒；直接投影 CFrame/Size，不创建临时 Part（避免每帧堆实例）
     if isSingle and target:IsA("Model") then
@@ -541,7 +557,9 @@ function getBBox2D(target, isSingle)
         local ok, descendants = pcall(function() return target:GetDescendants() end)
         if ok and descendants then
             for _, d in ipairs(descendants) do
-                if d:IsA("BasePart") and isVisiblePart(d) then
+                -- 【修复3a】只认 BasePart；排除高透明件、特效件与巨型空气墙，皮肤/正常饰品全部纳入
+                if d:IsA("BasePart") and d.Transparency < 0.9
+                    and d.Size.Magnitude < 100 and not isEffectPartName(d.Name) then
                     table.insert(parts, d)
                 end
             end
@@ -572,6 +590,8 @@ function getBBox2D(target, isSingle)
         end
     end
     if not any then return nil end
+
+    -- 【修复2】已删除 BBOX_MIN_PIXEL 强行放大兜底：包围盒只用真实部件投影结果
     return minX, minY, maxX, maxY
 end
 
@@ -1820,6 +1840,8 @@ function pauseScanAndResume(delay)
     keywordMatchCache = {}
     task.spawn(function()
         task.wait(delay)
+        -- 【保命修复3】脚本已销毁时不再唤醒扫描，避免复活幽灵绘制
+        if isShuttingDown then return end
         if scanResumeToken == myToken then
             isScanPaused = false
             if not scanQueue then startScanByKeywords() end
@@ -5495,16 +5517,9 @@ function processScanQueue()
     for i = scanQueue.index, #parts do
         local inst = parts[i]
         local elapsed = os.clock() - startTime
-        -- SCAN_HARD_BUDGET 是安全阀：近处目标成片时也不会让单帧失控
-        if elapsed > SCAN_HARD_BUDGET then
+        -- 【性能修复B】统一硬预算：不分远近，超过 SCAN_TIME_BUDGET(3ms) 立即 break，算力分摊到后续帧
+        if elapsed > SCAN_TIME_BUDGET then
             break
-        end
-        -- 【优化5】近处优先：150 studs 内的部件无视本帧时间预算，保证眼前目标第一时间出框
-        local instPos = (inst and inst.Parent) and inst.Position or nil
-        if (not instPos) or (instPos - scanOrigin).Magnitude > NEAR_PRIORITY_DIST then
-            if elapsed > SCAN_TIME_BUDGET then
-                break
-            end
         end
         stopIdx = i
         if inst and inst.Parent and inst:IsA("BasePart") and not inst:IsA("Terrain") then
@@ -5560,8 +5575,9 @@ end
 addConn(workspace.DescendantAdded:Connect(onNewInstance))
 addConn(workspace.ChildAdded:Connect(onNewInstance))
 
+local MAX_PENDING_PER_FRAME = 15 -- 【性能修复A】Heartbeat 队列每帧最多消费的目标数
 task.spawn(function()
-    while true do
+    while not isShuttingDown do
         -- 【优化2】用 Heartbeat 代替固定 0.1s 排队，新刷出物件当帧即可处理
         RunService.Heartbeat:Wait()
         if isScanPaused then continue end
@@ -5569,8 +5585,15 @@ task.spawn(function()
             local batch = pendingRoots
             pendingRoots = {}
             local count = 0
+            local processed = 0
             for root in pairs(batch) do
-                if tryAddRoot(root) then count = count + 1 end
+                if processed >= MAX_PENDING_PER_FRAME then
+                    -- 【性能修复A】本帧额度用尽：退回队列留给下一帧，绝不丢目标
+                    pendingRoots[root] = true
+                else
+                    processed = processed + 1
+                    if tryAddRoot(root) then count = count + 1 end
+                end
             end
             if count > 0 then addLog("事件捕获 " .. count .. " 个目标") end
         end
@@ -5583,7 +5606,7 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    while true do
+    while not isShuttingDown do
         task.wait(FALLBACK_SCAN_INTERVAL)
         if not isScanPaused and not scanQueue then startScanByKeywords() end
     end
@@ -5861,7 +5884,8 @@ addConn(RunService.RenderStepped:Connect(function()
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             local curPos = hrp and hrp.Position or camera.CFrame.Position
-            local dynamicTriggerDist = math.clamp((state.globalStyle.maxDrawDistance or MAX_DRAW_DISTANCE) * MOVE_TRIGGER_RATIO, MOVE_TRIGGER_MIN, MOVE_TRIGGER_MAX)
+            -- 【性能修复C】放宽移动触发距离：视野 800 时约 200 studs 才触发一次，降低全图检索频率
+            local dynamicTriggerDist = math.clamp((state.globalStyle.maxDrawDistance or 800) * 0.25, 100, 300)
             if (curPos - lastScanPosition).Magnitude > dynamicTriggerDist then
                 lastScanPosition = curPos
                 if not scanQueue and not isScanPaused then
@@ -5947,7 +5971,7 @@ if state.drawOn then
 
     if not needDraw then
         for _, entry in pairs(drawGroups) do
-            for _, obj in pairs(entry.g) do obj.Visible = false end
+            if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
             if entry.label then entry.label.Visible = false end
         end
     end
@@ -5975,7 +5999,7 @@ if state.drawOn then
                 or shouldSkipByProtection(target)
             if skip then
                 if needDraw then
-                    for _, obj in pairs(entry.g) do obj.Visible = false end
+                    if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
                     if entry.label then entry.label.Visible = false end
                 end
             else
@@ -6002,13 +6026,13 @@ if state.drawOn then
                                     })
                                 else
                                     if needDraw then
-                                        for _, obj in pairs(entry.g) do obj.Visible = false end
+                                        if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
                                         if entry.label then entry.label.Visible = false end
                                     end
                                 end
                             else
                                 if needDraw then
-                                    for _, obj in pairs(entry.g) do obj.Visible = false end
+                                    if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
                                     if entry.label then entry.label.Visible = false end
                                 end
                             end
@@ -6016,7 +6040,7 @@ if state.drawOn then
                     end
                 else
                     if needDraw then
-                        for _, obj in pairs(entry.g) do obj.Visible = false end
+                        if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
                         if entry.label then entry.label.Visible = false end
                     end
                 end
@@ -6029,6 +6053,12 @@ if state.drawOn then
         if entry then
             pcall(function() destroyEntry(entry) end)
             drawGroups[target] = nil
+            -- 【修复1】清掩缓存登记：目标走回视野后能重新被扫描绘制
+            scannedRoots[target] = nil
+            if pendingFarRoots[target] then
+                pendingFarRoots[target] = nil
+                pendingFarRootsCount = pendingFarRootsCount - 1
+            end
         end
     end
 
@@ -6193,7 +6223,7 @@ if state.drawOn then
 
         for _, entry in pairs(drawGroups) do
             if not visibleGroups[entry.g] then
-                for _, obj in pairs(entry.g) do obj.Visible = false end
+                if entry.g then for _, obj in pairs(entry.g) do obj.Visible = false end end
             end
             if entry.label and not visibleLabels[entry.label] then
                 entry.label.Visible = false
@@ -6212,6 +6242,10 @@ end
 end))
 
 function shutdown()
+    -- 【保命修复2】第一行立即打断常驻协程并断开所有连接，防止退出后幽灵空转
+    isShuttingDown = true
+    isScanPaused = true
+    cleanConns()
     state.blackholeOn = false
     state.collisionRemovalOn = false
     state.freezeOn = false
@@ -6225,7 +6259,8 @@ function shutdown()
     pendingRoots = {}
     pendingFarRoots = {}
     pendingFarRootsCount = 0
-    for _, entry in pairs(drawGroups) do destroyEntry(entry) end
+    -- 【保命修复4】单条 entry 抛错不再中断后续清理（含 GUI 与连接清理）
+    for _, entry in pairs(drawGroups) do pcall(destroyEntry, entry) end
     drawGroups = {}
     if overlayGui then
         for _, child in ipairs(overlayGui:GetChildren()) do
@@ -6238,7 +6273,6 @@ function shutdown()
     if topCountText then pcall(function() topCountText:Remove() end); topCountText = nil end
     if crossH then pcall(function() crossH:Remove() end); crossH = nil end
     if crossV then pcall(function() crossV:Remove() end); crossV = nil end
-    cleanConns()
 
     if mainGui then mainGui:Destroy(); mainGui = nil end
     if overlayGui then overlayGui:Destroy(); overlayGui = nil end
