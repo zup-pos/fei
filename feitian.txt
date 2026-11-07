@@ -673,25 +673,32 @@ end
         end
     end
 
-    local function getTargetRoot(part)
-        if not part then return nil end
-        local cur = part
-        while cur and cur ~= workspace do
-            if cur:IsA("Model") then
+local function getTargetRoot(part)
+    if not part then return nil end
+    local cur = part
+    local targetModel = nil
+    while cur and cur ~= workspace do
+        if cur:IsA("Model") then
+            if cur:FindFirstChildOfClass("Humanoid") ~= nil or cur.PrimaryPart ~= nil then
+                return cur
+            end
+            -- 【修复】找到第一个规模合规的 Model 就返回，不再盲目往上找，防止把外围的空气墙父级也带上
+            if not targetModel then
                 local count, tooBig = 0, false
                 for _, d in ipairs(cur:GetDescendants()) do
                     if d:IsA("BasePart") then
                         count = count + 1
-                        if count > CONFIG.maxModelParts then tooBig = true break end
+                        if count > CONFIG.maxModelParts then tooBig = true; break end
                     end
                 end
-                if not tooBig then return cur end
+                if not tooBig then targetModel = cur end
             end
-            cur = cur.Parent
         end
-        return part
+        cur = cur.Parent
     end
-    SB.getTargetRoot = getTargetRoot
+    return targetModel or part
+end
+SB.getTargetRoot = getTargetRoot
 
     local function collectTargetParts(root)
         local list = {}
@@ -700,6 +707,27 @@ end
             if isNameProtected(obj) then return end
             if obj:IsA("BasePart") and not obj:IsA("Terrain") then
                 if not isInvisibleWall(obj) then table.insert(list, obj) end
+            elseif obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
+                table.insert(list, obj)
+            elseif obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
+                table.insert(list, obj)
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail")
+                or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                table.insert(list, obj)
+            end
+        end
+        consider(root)
+        for _, d in ipairs(root:GetDescendants()) do consider(d) end
+        return list
+    end
+
+    -- 【新增】不经过滤的收集器：准心添加/取消透视专用，保证加进去的一定恢复得回来
+    local function collectAllParts(root, includeInvisible)
+        local list = {}
+        if not root then return list end
+        local function consider(obj)
+            if obj:IsA("BasePart") and not obj:IsA("Terrain") then
+                if includeInvisible or obj.Transparency < 0.95 then table.insert(list, obj) end
             elseif obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
                 table.insert(list, obj)
             elseif obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then
@@ -1286,17 +1314,144 @@ end
     end
 
     SB.getTargetInCenter = function()
-        local cam = workspace.CurrentCamera
-        if not cam then return nil end
-        local vp = cam.ViewportSize
-        local ray = cam:ViewportPointToRay(vp.X / 2, vp.Y / 2)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { player.Character }
-        params.IgnoreWater = true
-        local r = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
-        return r and r.Instance or nil
+    local cam = workspace.CurrentCamera
+    if not cam then return nil end
+    local vp = cam.ViewportSize
+    local centerX, centerY = vp.X / 2, vp.Y / 2
+    local ray = cam:ViewportPointToRay(centerX, centerY)
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignoreList = {}
+    if player and player.Character then table.insert(ignoreList, player.Character) end
+    params.FilterDescendantsInstances = ignoreList
+    params.IgnoreWater = true
+
+    local function isAlreadyTracked(part)
+        if not part then return false end
+        if targetList[part] ~= nil or guiStateMap[part] ~= nil or partRootMap[part] ~= nil then return true end
+        return false
     end
+
+-- 判断是否是“应该被穿透的遮挡物”（玻璃、半透明、地板、空气墙、检测区等）
+local function isObstacle(part)
+    if not part or not part:IsA("BasePart") then return true end
+    if part:IsA("Terrain") then return true end
+    
+    -- 1. 半透明及以上（比如玻璃）
+    if part.Transparency >= 0.5 then return true end 
+    
+    -- 2. 极其巨大（比如超过 50 的巨型空气墙）
+    if part.Size.Magnitude >= 50 then return true end 
+    
+    -- 3. 名字带可疑词（包含 detect, trigger 等）
+    local n = string.lower(part.Name)
+    local badWords = {"glass", "window", "floor", "wall", "ground", "baseplate", "platform", "road", "tile", "ceiling", "sky", "terrain", "landscape", "hitbox", "trigger", "detect", "zone", "invisible", "barrier", "area", "block", "bounds"}
+    for _, kw in ipairs(badWords) do
+        if string.find(n, kw, 1, true) then return true end
+    end
+    
+    -- 4. 检查父级模型名字是否带可疑词
+    local parentModel = part:FindFirstAncestorOfClass("Model")
+    if parentModel then
+        local hn = string.lower(parentModel.Name)
+        for _, kw in ipairs({"detect", "zone", "trigger", "area", "barrier"}) do
+            if string.find(hn, kw, 1, true) then return true end
+        end
+    end
+    
+    return false
+end
+
+local function resolveHitPart(part, hitPos)
+    if not part or not part:IsA("BasePart") then return nil end
+    local lowerName = string.lower(part.Name)
+    local needsResolve = part.Transparency >= 0.95
+        or string.find(lowerName, "hitbox", 1, true) ~= nil
+        or string.find(lowerName, "trigger", 1, true) ~= nil
+        or string.find(lowerName, "detect", 1, true) ~= nil
+        
+    if not needsResolve then return part end
+
+    local cur = part
+    local depth = 0
+    while cur and cur ~= workspace and depth < 5 do
+        if cur:IsA("Model") then
+            local bestPart, bestDist = nil, math.huge
+            local okD, desc = pcall(function() return cur:GetDescendants() end)
+            if okD and desc then
+                for _, d in ipairs(desc) do
+                    if d:IsA("BasePart") and not d:IsA("Terrain") and d.Transparency < 0.95 and not isObstacle(d) then
+                        local dist = (d.Position - hitPos).Magnitude
+                        if dist < bestDist then bestDist = dist; bestPart = d end
+                    end
+                end
+            end
+            if bestPart then return bestPart end
+        end
+        cur = cur.Parent
+        depth = depth + 1
+    end
+    return part 
+end
+
+    local origin = ray.Origin
+    local direction = ray.Direction.Unit
+    local remainingDist = 500
+    local attempts = 0
+    local fallbackPart = nil -- 记录第一层碰到的遮挡物
+
+    while attempts < 15 and remainingDist > 0.5 do
+        attempts = attempts + 1
+        local r = workspace:Raycast(origin, direction * remainingDist, params)
+        if not r then break end
+        local part = r.Instance
+        if part and part:IsA("BasePart") then
+            if isAlreadyTracked(part) then return part end
+            local resolved = resolveHitPart(part, r.Position)
+            if resolved then
+                if isObstacle(resolved) then
+                    -- 如果是遮挡物，记下来，继续穿透找后面真正的实体
+                    if not fallbackPart then fallbackPart = resolved end
+                else
+                    -- 打到真正的实体了（比如熊），直接返回！
+                    return resolved 
+                end
+            end
+        end
+        local dist = (r.Position - origin).Magnitude
+        if dist <= 0 then break end
+        origin = r.Position + direction * 0.1
+        remainingDist = remainingDist - dist - 0.1
+    end
+
+    -- 如果穿透完都没找到实体，就返回记录的第一层遮挡物（比如直接瞄地面时）
+    if fallbackPart then return fallbackPart end
+
+    -- 交互物兜底
+    local bestPromptPart = nil
+    local closestScreenDist = 120
+    local okAll, allDesc = pcall(function() return workspace:GetDescendants() end)
+    if okAll and allDesc then
+        for _, obj in ipairs(allDesc) do
+            if obj:IsA("ProximityPrompt") and obj.Enabled then
+                local p = obj.Parent
+                if p and p:IsA("BasePart") then
+                    local sPos, onScreen = cam:WorldToViewportPoint(p.Position)
+                    if onScreen and sPos.Z > 0 then
+                        local screenDist = math.sqrt((sPos.X - centerX) ^ 2 + (sPos.Y - centerY) ^ 2)
+                        if screenDist < closestScreenDist then
+                            closestScreenDist = screenDist
+                            bestPromptPart = p
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if bestPromptPart then return bestPromptPart end
+    return nil
+end
 
     SB.smartScan = function()
         if scanRunning then return end
@@ -1372,63 +1527,73 @@ end
         end)
     end
 
-    SB.addTarget = function(target)
-        if not target then return false end
-        if not (target:IsA("BasePart") or target:IsA("Model")) then
-            showNotification("无效目标"); return false
-        end
-        local root = getTargetRoot(target)
-        if not root then return false end
-
-        if isNameProtected(root) then
-            showNotification("该目标已被保护")
-            tanchuangxiaoxi("已被保护，无法添加: " .. root.Name, "保护")
-            return false
-        end
-
-        local parts = collectTargetParts(root)
-        if #parts == 0 then showNotification("无有效部件"); return false end
-
-        local addedCount = 0
-        for _, p in ipairs(parts) do
-            if targetList[p] ~= nil or guiStateMap[p] ~= nil then
-                addedCount = addedCount + 1
-            end
-        end
-        if addedCount == #parts and addedCount > 0 then
-            SB.removeTarget(root)
-            showNotification("已取消: " .. root.Name)
-            return false
-        end
-
-        local added = 0
-        for _, p in ipairs(parts) do
-            if player.Character and p:IsDescendantOf(player.Character) then continue end
-            local blocked = false
-            if p:IsA("BasePart") then
-                blocked = isIgnored(p)
-            else
-                blocked = isNameProtected(p)
-            end
-            if blocked then continue end
-            if targetList[p] == nil and guiStateMap[p] == nil then
-                setObjTransparency(p, CONFIG.transparency)
-                partRootMap[p] = root
-                added = added + 1
-            end
-        end
-        SB.refreshListUI()
-        if added > 0 then
-            showNotification("已添加 " .. root.Name .. " (" .. added .. ")")
-        else
-            showNotification("全部被拦，未添加")
-        end
-        return added > 0
+SB.addTarget = function(target)
+    if not target then return false end
+    if not (target:IsA("BasePart") or target:IsA("Model")) then
+        showNotification("无效目标"); return false
     end
+    local root = getTargetRoot(target)
+    if not root then root = target end
+
+    -- 【保护拦截判定】
+    if protectedList[root] or isNameProtected(root) then
+        showNotification("该目标已被保护，无法添加")
+        tanchuangxiaoxi("该目标已被保护，无法添加", "保护拦截")
+        return false
+    end
+
+    local parts = collectAllParts(root, true)
+    if #parts == 0 then 
+        if target:IsA("BasePart") then
+            parts = {target}
+            root = target
+        else
+            showNotification("无有效部件"); return false 
+        end
+    end
+
+    -- 已经加过 → 再点一次就是取消透视
+    local trackedCount = 0
+    for _, p in ipairs(parts) do
+        if targetList[p] ~= nil or guiStateMap[p] ~= nil then
+            trackedCount = trackedCount + 1
+        end
+    end
+    if trackedCount == #parts and trackedCount > 0 then
+        SB.removeTarget(root)
+        showNotification("已取消透视: " .. root.Name)
+        return false
+    end
+
+    local added = 0
+    for _, p in ipairs(parts) do
+        local isCharPart = false
+        if player.Character then
+            local okC, r = pcall(function() return p:IsDescendantOf(player.Character) end)
+            isCharPart = okC and r
+        end
+        if not isCharPart and targetList[p] == nil and guiStateMap[p] == nil then
+            -- 【智能判定】如果这个部件是屏障（名字带 detect/trigger 等或透），这里可以选择跳过
+            -- 但如果它是你自己点中的外壳，我们保留它
+            setObjTransparency(p, CONFIG.transparency)
+            partRootMap[p] = root
+            added = added + 1
+        end
+    end
+    SB.refreshListUI()
+    
+    if added > 0 then
+        showNotification("已透视: " .. root.Name)
+    else
+        showNotification("已全部在列表中")
+    end
+    return added > 0
+end
 
     SB.removeTarget = function(root)
         if not root then return end
-        local parts = collectTargetParts(root)
+        -- 【修复】用不经过滤的收集器，含已变透明的部件，保证 100% 恢复、不留半透明脏数据
+        local parts = collectAllParts(root, true)
         for _, p in ipairs(parts) do
             restoreObj(p)
             targetList[p] = nil; guiStateMap[p] = nil; partRootMap[p] = nil

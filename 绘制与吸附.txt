@@ -767,30 +767,58 @@ function getTargetInCenter(includeProtected)
     params.FilterDescendantsInstances = filterList
     params.IgnoreWater = true
 
+    -- 【核心升级】智能判定：根据几何特征、层级、名称综合判断是否为“透明屏障”
+    local function isHardBarrier(part)
+        if not part or not part:IsA("BasePart") then return true end
+        if part:IsA("Terrain") then return true end
+        
+        -- 1. 几乎透明
+        if part.Transparency >= 0.8 then return true end
+        
+        -- 2. 极其巨大（比如超过 50 的巨型空气墙）
+        if part.Size.Magnitude >= 50 then return true end
+        
+        -- 3. 名字带可疑词（包含中英文）
+        local n = string.lower(part.Name)
+        local badWords = {"hitbox", "trigger", "detect", "zone", "invisible", "barrier", "area", "block", "bounds", "wall"}
+        for _, kw in ipairs(badWords) do
+            if string.find(n, kw, 1, true) then return true end
+        end
+        
+        -- 4. 检查它的父级模型：如果父级模型是单件，且尺寸很大，也算屏障
+        local parentModel = part:FindFirstAncestorOfClass("Model")
+        if parentModel then
+            local hn = string.lower(parentModel.Name)
+            for _, kw in ipairs({"detect", "zone", "trigger", "area"}) do
+                if string.find(hn, kw, 1, true) then return true end
+            end
+        end
+        
+        return false
+    end
+
     local origin = ray.Origin
     local direction = ray.Direction.Unit
     local remainingDist = 1000
     local attempts = 0
     local firstEnvironmentHit = nil
-    local environmentDist = math.huge
+    local firstBarrierHit = nil
 
-    -- 1. 物理射线：正常物件直接返回；命中地面/墙体先记账，交给 2D 投影扫描抢一次机会
+    -- 1. 物理射线：智能穿透
     while attempts < 15 and remainingDist > 0.5 do
         attempts = attempts + 1
         local r = workspace:Raycast(origin, direction * remainingDist, params)
         if not r then break end
         local part = r.Instance
         if part and part:IsA("BasePart") then
-            local resolved = resolveHitPart(part, r.Position)
-            if resolved then
-                if isEnvironmentHit(resolved, vp) then
-                    if not firstEnvironmentHit then
-                        firstEnvironmentHit = resolved
-                        environmentDist = (r.Position - ray.Origin).Magnitude
-                    end
-                else
-                    return resolved
-                end
+            if isEnvironmentHit(part, vp) then
+                if not firstEnvironmentHit then firstEnvironmentHit = part end
+            elseif isHardBarrier(part) then
+                if not firstBarrierHit then firstBarrierHit = part end
+            else
+                -- 【附加判定】如果它是真正的实体（比如熊），它应该是个模型，或者父级带 Humanoid
+                -- 如果它只是一个没有任何父级的裸 Part，但它又不透明且不够大，那它就是目标！
+                return part
             end
         end
         local dist = (r.Position - origin).Magnitude
@@ -799,10 +827,10 @@ function getTargetInCenter(includeProtected)
         remainingDist = remainingDist - dist - 0.1
     end
 
-    -- 2. 屏幕空间投影兜底扫描：抓取无碰撞体 / 全透明壳的目标
+    -- 2. 2D 投影扫描兜底（解决完全透明壳）
     local scanRadius = 50
-    if environmentDist ~= math.huge then
-        scanRadius = math.clamp(environmentDist + 20, 30, 300)
+    if firstEnvironmentHit then
+        scanRadius = math.clamp((firstEnvironmentHit.Position - ray.Origin).Magnitude + 20, 30, 300)
     end
     local oParams = OverlapParams.new()
     oParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -819,11 +847,9 @@ function getTargetInCenter(includeProtected)
         for _, p in ipairs(partsInRadius) do
             if checked >= 2000 then break end
             checked = checked + 1
-            if p:IsA("BasePart") and not p:IsA("Terrain")
-                and not isJunkPartName(p.Name) then
+            if p:IsA("BasePart") and not isHardBarrier(p) and not isEnvironmentName(p.Name) then
                 local sPos, onScreen = camera:WorldToViewportPoint(p.Position)
                 if onScreen and sPos.Z > 0 and sPos.Z < scanRadius then
-                    -- 用投影矩形到准星中心的像素距离，比只看部件中心点准（长条/大件也能抓到）
                     local rx1, ry1, rx2, ry2 = projectBox2D(p.CFrame, p.Size)
                     local screenDist
                     if rx1 then
@@ -842,15 +868,14 @@ function getTargetInCenter(includeProtected)
                             if blocked then
                                 local bi = blocked.Instance
                                 local candRoot = findModelRoot(p)
-                                -- 自己或自己的模型挡住自己不算遮挡（透明壳物品很容易踩这个坑）
-                                local selfHit = (bi == p)
-                                    or (candRoot and (bi:IsDescendantOf(candRoot) or candRoot:IsDescendantOf(bi)))
-                                if not selfHit then occluded = true end
+                                local selfHit = (bi == p) or (candRoot and (bi:IsDescendantOf(candRoot) or candRoot:IsDescendantOf(bi)))
+                                -- 挡在前面的是屏障或地板，不算遮挡
+                                if not selfHit and not isHardBarrier(bi) and not isEnvironmentHit(bi, vp) then 
+                                    occluded = true 
+                                end
                             end
                             if not occluded then
                                 local score = screenDist + euclid * 0.5
-                                -- 环境命名的部件降权而不是直接排除：真有叫 Rock / Grass 的可拿物品时仍能选中
-                                if isEnvironmentName(p.Name) then score = score + 200 end
                                 if score < bestScore then
                                     bestScore = score
                                     bestTarget = p
@@ -864,11 +889,12 @@ function getTargetInCenter(includeProtected)
         if bestTarget then return bestTarget end
     end
 
-    -- 【补丁1】准星 120 像素内的 ProximityPrompt 兜底（无视地板）
+    -- 3. 【补丁1】交互物兜底
     local promptTarget = findPromptTarget(centerX, centerY, PROMPT_CROSSHAIR_PIXEL, ray.Origin)
     if promptTarget then return promptTarget end
 
-    -- 3. 兜底：保持原有行为，返回射线打中的环境物件
+    -- 4. 兜底
+    if firstBarrierHit then return firstBarrierHit end
     if firstEnvironmentHit then return firstEnvironmentHit end
     return nil
 end
