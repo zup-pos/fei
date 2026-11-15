@@ -1734,6 +1734,35 @@ function removeHighlightFrom(entry)
 end
 
 local freezeAnchoredSaved = {}
+local freezeCFrameLocks = {}
+local freezeLockConn = nil
+local freezeLockPaused = false
+
+local function recordFreezeCFrame(part)
+    if not part or not part.Parent then return end
+    freezeCFrameLocks[part] = part.CFrame
+end
+
+local function startFreezeCFrameLock()
+    if freezeLockConn then return end
+    freezeLockConn = RunService.Heartbeat:Connect(function()
+        if not state.freezeOn or freezeLockPaused then return end
+        for part, cframe in pairs(freezeCFrameLocks) do
+            if part and part.Parent then
+                if part.CFrame ~= cframe then
+                    pcall(function() part.CFrame = cframe end)
+                end
+            else
+                freezeCFrameLocks[part] = nil
+            end
+        end
+    end)
+end
+
+local function stopFreezeCFrameLock()
+    if freezeLockConn then freezeLockConn:Disconnect() freezeLockConn = nil end
+    freezeCFrameLocks = {}
+end
 
 local collisionRefCount = {}
 local collisionOriginal = {}
@@ -1822,9 +1851,11 @@ function registerDrawEntry(root, entry)
             if freezeAnchoredSaved[d] == nil then
                 freezeAnchoredSaved[d] = d.Anchored
             end
+            recordFreezeCFrame(d)
             entry.frozenParts[d] = true
             pcall(function() d.Anchored = true end)
         end
+        startFreezeCFrameLock()
     end
 end
 
@@ -1959,11 +1990,13 @@ function applyFreeze()
                 if freezeAnchoredSaved[d] == nil then
                     freezeAnchoredSaved[d] = d.Anchored
                 end
+                recordFreezeCFrame(d)
                 entry.frozenParts[d] = true
                 pcall(function() d.Anchored = true end)
             end
         end
     end
+    startFreezeCFrameLock()
 end
 
 function removeFreeze()
@@ -1974,6 +2007,8 @@ function removeFreeze()
         end
     end
     freezeAnchoredSaved = {}
+    stopFreezeCFrameLock()
+    scanQueue = nil
 end
 
 function getBlackholeTargetCF()
@@ -2108,6 +2143,7 @@ function blackholeSnapOnce()
     local targetCF = getBlackholeTargetCF()
     local savedMap = {}
     local touched = {}
+    local touchedSet = {}
 
     for _, target in ipairs(targets) do
         local entry = drawGroups[target]
@@ -2120,12 +2156,19 @@ function blackholeSnapOnce()
                     if savedMap[d] == nil then savedMap[d] = d.Anchored end
                     entry.frozenParts[d] = true
                     pcall(function() d.Anchored = true end)
-                    table.insert(touched, d)
+                    if not touchedSet[d] then
+                        touchedSet[d] = true
+                        table.insert(touched, d)
+                    end
                 end
             end
         end
     end
     if #touched == 0 then return 0 end
+
+    local wasPaused = freezeLockPaused
+    freezeLockPaused = true
+
     task.wait(0.05)
     local movedCount = 0
     for _, target in ipairs(targets) do
@@ -2155,6 +2198,16 @@ function blackholeSnapOnce()
             pcall(function() part.Anchored = orig end)
         end
     end
+
+    if state.freezeOn then
+        for _, d in ipairs(touched) do
+            if d and d.Parent and freezeCFrameLocks[d] then
+                freezeCFrameLocks[d] = d.CFrame
+            end
+        end
+    end
+
+    freezeLockPaused = wasPaused
     return movedCount
 end
 
@@ -2164,6 +2217,7 @@ function blackholeSnapContinuous()
     if #targets == 0 then return 0 end
     local targetCF = getBlackholeTargetCF()
     local movedCount = 0
+    local freezeOnNow = state.freezeOn
     for _, target in ipairs(targets) do
         local entry = drawGroups[target]
         if entry then
@@ -2182,7 +2236,7 @@ function blackholeSnapContinuous()
                 elseif target:IsA("BasePart") then
                     pcall(function() target.CFrame = targetCF end); movedCount = movedCount + 1
                 end
-                if state.freezeOn then
+                if freezeOnNow then
                     entry.frozenParts = entry.frozenParts or {}
                     local parts = collectParts(target)
                     for _, d in ipairs(parts) do
@@ -2192,6 +2246,9 @@ function blackholeSnapContinuous()
                         entry.frozenParts[d] = true
                         if d.Anchored ~= true then
                             pcall(function() d.Anchored = true end)
+                        end
+                        if freezeCFrameLocks[d] ~= nil then
+                            freezeCFrameLocks[d] = d.CFrame
                         end
                     end
                 end
@@ -6281,6 +6338,7 @@ function shutdown()
         end
     end
     freezeAnchoredSaved = {}
+    stopFreezeCFrameLock()
     scanQueue = nil
     pendingRoots = {}
     pendingFarRoots = {}
