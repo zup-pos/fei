@@ -9,6 +9,7 @@ if oldGui then oldGui:Destroy() end
 local SCRIPT_LIST = {
     { name = "多功能脚本", url = "https://raw.githubusercontent.com/zup-pos/fei/refs/heads/main/feitian.txt" },
     { name = "绘制与吸附", url = "https://raw.githubusercontent.com/zup-pos/fei/refs/heads/main/绘制与吸附.txt" },
+    { name = "强制跳跃", url = "https://raw.githubusercontent.com/zup-pos/fei/refs/heads/main/强制跳跃.txt" },
 }
 
 local MIRRORS = {
