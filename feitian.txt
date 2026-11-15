@@ -682,7 +682,6 @@ local function getTargetRoot(part)
             if cur:FindFirstChildOfClass("Humanoid") ~= nil or cur.PrimaryPart ~= nil then
                 return cur
             end
-            -- 【修复】找到第一个规模合规的 Model 就返回，不再盲目往上找，防止把外围的空气墙父级也带上
             if not targetModel then
                 local count, tooBig = 0, false
                 for _, d in ipairs(cur:GetDescendants()) do
@@ -721,7 +720,6 @@ SB.getTargetRoot = getTargetRoot
         return list
     end
 
-    -- 【新增】不经过滤的收集器：准心添加/取消透视专用，保证加进去的一定恢复得回来
     local function collectAllParts(root, includeInvisible)
         local list = {}
         if not root then return list end
@@ -1333,25 +1331,20 @@ end
         return false
     end
 
--- 判断是否是“应该被穿透的遮挡物”（玻璃、半透明、地板、空气墙、检测区等）
 local function isObstacle(part)
     if not part or not part:IsA("BasePart") then return true end
     if part:IsA("Terrain") then return true end
     
-    -- 1. 半透明及以上（比如玻璃）
     if part.Transparency >= 0.5 then return true end 
     
-    -- 2. 极其巨大（比如超过 50 的巨型空气墙）
     if part.Size.Magnitude >= 50 then return true end 
     
-    -- 3. 名字带可疑词（包含 detect, trigger 等）
     local n = string.lower(part.Name)
     local badWords = {"glass", "window", "floor", "wall", "ground", "baseplate", "platform", "road", "tile", "ceiling", "sky", "terrain", "landscape", "hitbox", "trigger", "detect", "zone", "invisible", "barrier", "area", "block", "bounds"}
     for _, kw in ipairs(badWords) do
         if string.find(n, kw, 1, true) then return true end
     end
     
-    -- 4. 检查父级模型名字是否带可疑词
     local parentModel = part:FindFirstAncestorOfClass("Model")
     if parentModel then
         local hn = string.lower(parentModel.Name)
@@ -1399,7 +1392,7 @@ end
     local direction = ray.Direction.Unit
     local remainingDist = 500
     local attempts = 0
-    local fallbackPart = nil -- 记录第一层碰到的遮挡物
+    local fallbackPart = nil
 
     while attempts < 15 and remainingDist > 0.5 do
         attempts = attempts + 1
@@ -1411,10 +1404,8 @@ end
             local resolved = resolveHitPart(part, r.Position)
             if resolved then
                 if isObstacle(resolved) then
-                    -- 如果是遮挡物，记下来，继续穿透找后面真正的实体
                     if not fallbackPart then fallbackPart = resolved end
                 else
-                    -- 打到真正的实体了（比如熊），直接返回！
                     return resolved 
                 end
             end
@@ -1425,10 +1416,8 @@ end
         remainingDist = remainingDist - dist - 0.1
     end
 
-    -- 如果穿透完都没找到实体，就返回记录的第一层遮挡物（比如直接瞄地面时）
     if fallbackPart then return fallbackPart end
 
-    -- 交互物兜底
     local bestPromptPart = nil
     local closestScreenDist = 120
     local okAll, allDesc = pcall(function() return workspace:GetDescendants() end)
@@ -1535,7 +1524,6 @@ SB.addTarget = function(target)
     local root = getTargetRoot(target)
     if not root then root = target end
 
-    -- 【保护拦截判定】
     if protectedList[root] or isNameProtected(root) then
         showNotification("该目标已被保护，无法添加")
         tanchuangxiaoxi("该目标已被保护，无法添加", "保护拦截")
@@ -1552,7 +1540,6 @@ SB.addTarget = function(target)
         end
     end
 
-    -- 已经加过 → 再点一次就是取消透视
     local trackedCount = 0
     for _, p in ipairs(parts) do
         if targetList[p] ~= nil or guiStateMap[p] ~= nil then
@@ -1573,8 +1560,6 @@ SB.addTarget = function(target)
             isCharPart = okC and r
         end
         if not isCharPart and targetList[p] == nil and guiStateMap[p] == nil then
-            -- 【智能判定】如果这个部件是屏障（名字带 detect/trigger 等或透），这里可以选择跳过
-            -- 但如果它是你自己点中的外壳，我们保留它
             setObjTransparency(p, CONFIG.transparency)
             partRootMap[p] = root
             added = added + 1
@@ -1592,7 +1577,6 @@ end
 
     SB.removeTarget = function(root)
         if not root then return end
-        -- 【修复】用不经过滤的收集器，含已变透明的部件，保证 100% 恢复、不留半透明脏数据
         local parts = collectAllParts(root, true)
         for _, p in ipairs(parts) do
             restoreObj(p)

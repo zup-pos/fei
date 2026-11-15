@@ -1,0 +1,244 @@
+-- 自定义 UI 跳跃辅助器 v1.2 (单指隔离防抽搐 + 退出清理)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+
+local _guiParent
+do
+    local ok, r = pcall(function() return gethui() end)
+    if ok and r then _guiParent = r
+    else
+        local ok2, r2 = pcall(function() return game:GetService("CoreGui") end)
+        if ok2 and r2 then _guiParent = r2 else _guiParent = player:WaitForChild("PlayerGui") end
+    end
+end
+
+if _guiParent:FindFirstChild("JumpAssistUI") then
+    _guiParent.JumpAssistUI:Destroy()
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "JumpAssistUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 999
+screenGui.Parent = _guiParent
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 130, 0, 128) 
+mainFrame.Position = UDim2.new(0, 20, 0.5, -64)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(100, 120, 200)
+stroke.Thickness = 1.5
+stroke.Transparency = 0.5
+stroke.Parent = mainFrame
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 24)
+titleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleBar
+
+local titleText = Instance.new("TextLabel")
+titleText.Size = UDim2.new(1, -10, 1, 0)
+titleText.Position = UDim2.new(0, 8, 0, 0)
+titleText.BackgroundTransparency = 1
+titleText.Text = "🚀 跳跃"
+titleText.TextColor3 = Color3.fromRGB(220, 230, 255)
+titleText.Font = Enum.Font.GothamBold
+titleText.TextSize = 11
+titleText.TextXAlignment = Enum.TextXAlignment.Left
+titleText.Parent = titleBar
+
+local jumpBtn = Instance.new("TextButton")
+jumpBtn.Size = UDim2.new(1, -16, 0, 32)
+jumpBtn.Position = UDim2.new(0, 8, 0, 30)
+jumpBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
+jumpBtn.Text = "跳跃"
+jumpBtn.TextColor3 = Color3.new(1, 1, 1)
+jumpBtn.Font = Enum.Font.GothamBold
+jumpBtn.TextSize = 13
+jumpBtn.AutoButtonColor = false
+jumpBtn.Parent = mainFrame
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 5)
+btnCorner.Parent = jumpBtn
+
+local autoJumpBtn = Instance.new("TextButton")
+autoJumpBtn.Size = UDim2.new(1, -16, 0, 22)
+autoJumpBtn.Position = UDim2.new(0, 8, 0, 66)
+autoJumpBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+autoJumpBtn.Text = "连跳: 关"
+autoJumpBtn.TextColor3 = Color3.new(1, 1, 1)
+autoJumpBtn.Font = Enum.Font.GothamBold
+autoJumpBtn.TextSize = 11
+autoJumpBtn.AutoButtonColor = false
+autoJumpBtn.Parent = mainFrame
+local autoCorner = Instance.new("UICorner")
+autoCorner.CornerRadius = UDim.new(0, 5)
+autoCorner.Parent = autoJumpBtn
+
+local exitBtn = Instance.new("TextButton")
+exitBtn.Size = UDim2.new(1, -16, 0, 22)
+exitBtn.Position = UDim2.new(0, 8, 0, 94)
+exitBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+exitBtn.Text = "关闭并退出"
+exitBtn.TextColor3 = Color3.new(1, 1, 1)
+exitBtn.Font = Enum.Font.GothamBold
+exitBtn.TextSize = 11
+exitBtn.AutoButtonColor = false
+exitBtn.Parent = mainFrame
+local exitCorner = Instance.new("UICorner")
+exitCorner.CornerRadius = UDim.new(0, 5)
+exitCorner.Parent = exitBtn
+
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+local handleTouches = {}
+
+local function isDragStartInput(input)
+    return input.UserInputType == Enum.UserInputType.MouseButton1 
+        or input.UserInputType == Enum.UserInputType.Touch
+end
+
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    
+    local matched = (input == dragInput)
+        or (dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1
+            and input.UserInputType == Enum.UserInputType.MouseMovement)
+
+    if not matched then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement 
+        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+    local delta = input.Position - dragStart
+    if delta.Magnitude == 0 then return end
+    
+    mainFrame.Position = UDim2.new(
+        startPos.X.Scale, startPos.X.Offset + delta.X,
+        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+    )
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if handleTouches[input] then 
+        handleTouches[input] = nil 
+    end
+    
+    if not dragging or input ~= dragInput then return end
+    if not isDragStartInput(input) then return end
+
+    local nextInput = nil
+    for t in pairs(handleTouches) do nextInput = t; break end
+
+    if nextInput then 
+        dragging = true
+        dragInput = nextInput
+        dragStart = nextInput.Position
+        startPos = mainFrame.Position
+    else
+        dragging = false
+        dragInput = nil
+        dragStart = nil
+        startPos = nil
+    end
+end)
+
+titleBar.InputBegan:Connect(function(input)
+    if not isDragStartInput(input) then return end
+    handleTouches[input] = true
+    
+    if dragging then return end
+    
+    dragging = true
+    dragInput = input
+    dragStart = input.Position
+    startPos = mainFrame.Position
+end)
+
+local isAutoJumping = false
+local heartbeatConn
+
+local function doJump()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    
+    if hum and hrp then
+        pcall(function()
+            hum.Jump = true
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end)
+        
+        pcall(function()
+            local currentVel = hrp.AssemblyLinearVelocity
+            if currentVel.Y < 10 then
+                hrp.AssemblyLinearVelocity = Vector3.new(currentVel.X, 50, currentVel.Z)
+            end
+        end)
+    end
+end
+
+jumpBtn.MouseButton1Click:Connect(function()
+    doJump()
+    jumpBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 120)
+    task.delay(0.1, function() jumpBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90) end)
+end)
+
+jumpBtn.MouseButton1Down:Connect(function()
+    doJump()
+end)
+
+autoJumpBtn.MouseButton1Click:Connect(function()
+    isAutoJumping = not isAutoJumping
+    if isAutoJumping then
+        autoJumpBtn.Text = "连跳: 开"
+        autoJumpBtn.BackgroundColor3 = Color3.fromRGB(60, 160, 90)
+    else
+        autoJumpBtn.Text = "连跳: 关"
+        autoJumpBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+    end
+end)
+
+heartbeatConn = RunService.Heartbeat:Connect(function()
+    if isAutoJumping then
+        doJump()
+    end
+end)
+
+exitBtn.MouseButton1Click:Connect(function()
+    isAutoJumping = false
+    if heartbeatConn then
+        heartbeatConn:Disconnect()
+        heartbeatConn = nil
+    end
+    screenGui:Destroy()
+end)
+
+player.CharacterAdded:Connect(function()
+    isAutoJumping = false
+    if autoJumpBtn and autoJumpBtn.Parent then
+        autoJumpBtn.Text = "连跳: 关"
+        autoJumpBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+    end
+end)
